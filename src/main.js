@@ -16,7 +16,7 @@ import {
   LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, SAND, LOG, PLANK, SNOW, GRAVEL, WOOL,
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
-import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage } from './items.js';
+import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf } from './items.js';
 import { World } from './world.js';
 import { Player } from './player.js';
 import { Sky } from './sky.js';
@@ -28,6 +28,8 @@ import { Mobs } from './entities.js';
 import { voxelRaycast } from './raycast.js';
 import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
+import { Multiplayer } from './net.js';
+import { Tracers, Plasmas, Portals, makeViewModel } from './guns.js';
 
 const SURVIVAL = 0, CREATIVE = 1;
 const MELEE_REACH = 4;
@@ -44,6 +46,19 @@ const dropFor = (id) => (DROPS[id] !== undefined ? DROPS[id] : id);
 // Per-position chest storage (27 slots each).
 const chestStore = new Map();
 const chestKey = (x, y, z) => `${x},${y},${z}`;
+
+// Player block edits over the base terrain — synced in multiplayer and replayed
+// to late-joining peers.
+const edits = new Map();
+const editsByChunk = new Map();
+const editKey = (x, y, z) => `${x},${y},${z}`;
+function indexEdit(x, y, z, id) {
+  const ck = (x >> 4) + ',' + (z >> 4);
+  let arr = editsByChunk.get(ck); if (!arr) { arr = []; editsByChunk.set(ck, arr); }
+  arr.push([x - (x >> 4) * 16, y, z - (z >> 4) * 16, id]);
+}
+function recordEdit(x, y, z, id) { world.setBlock(x, y, z, id); edits.set(editKey(x, y, z), id); indexEdit(x, y, z, id); }
+function applyEdit(x, y, z, id) { recordEdit(x, y, z, id); mp.sendEdit(x, y, z, id); }
 
 // Footstep material per block, for surface-dependent step sounds.
 const STEP = {
@@ -125,6 +140,19 @@ const sfx = new SFX();
 const hud = new HUD();
 const inventory = new Inventory((name) => hud.showName(name));
 const mobs = new Mobs(scene, world);
+const mp = new Multiplayer(scene);
+const tracers = new Tracers(scene);
+const plasmas = new Plasmas(scene);
+const portals = new Portals(scene);
+scene.add(camera); // so first-person gun viewmodels (camera children) render
+
+// Re-apply player edits to a (re)generated chunk so builds survive unload/reload
+// and reach late-joining peers.
+world.applyEditsToChunk = (c) => {
+  const arr = editsByChunk.get(c.cx + ',' + c.cz);
+  if (!arr) return;
+  for (const [lx, ly, lz, id] of arr) { c.setLocal(lx, ly, lz, id); c.recomputeColumn(lx, lz); }
+};
 
 let mode = SURVIVAL;            // start in survival with an empty inventory
 let difficulty = NORMAL;
@@ -162,6 +190,7 @@ crackMesh.visible = false;
 scene.add(crackMesh);
 
 let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
+let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
 function resetBreak() { breakKey = null; breakProgress = 0; crackMesh.visible = false; }
 
 // ---------- Spawn ----------
@@ -176,28 +205,37 @@ function pickSpawn() {
   return [8.5, 8.5];
 }
 const SPAWN = new THREE.Vector3();
-function placeSpawn() {
+let loaded = false;
+function startWorld() {
   const [sx, sz] = pickSpawn();
-  SPAWN.set(sx, 100, sz);
-  player.pos.copy(SPAWN);
-  world.update(sx, sz);
-  const t0 = performance.now();
-  while (performance.now() - t0 < 500 && !world.isReady(sx, sz)) world.processQueues(40);
-  for (let i = 0; i < 8; i++) world.processQueues(25);
-  player.pos.y = world.surfaceHeight(Math.floor(sx), Math.floor(sz)) + 2;
-  SPAWN.y = player.pos.y;
+  SPAWN.set(sx, 130, sz);
+  player.pos.copy(SPAWN); player.vel.set(0, 0, 0);
+  loaded = false;
+  const ld = document.getElementById('loading'); if (ld) ld.style.display = 'flex';
+  refreshOverlays();
 }
-placeSpawn();
+function updateLoading() {
+  let meshed = 0;
+  for (const c of world.chunks.values()) if (c.mesh || c.waterMesh) meshed++;
+  const bar = document.getElementById('loadingBar');
+  if (bar) bar.style.width = Math.min(100, Math.round((meshed / 55) * 100)) + '%';
+  if (world.isReady(SPAWN.x, SPAWN.z) && meshed >= 45) finishLoading();
+}
+function finishLoading() {
+  loaded = true;
+  player.pos.set(SPAWN.x, world.surfaceHeight(Math.floor(SPAWN.x), Math.floor(SPAWN.z)) + 2, SPAWN.z);
+  SPAWN.y = player.pos.y;
+  const ld = document.getElementById('loading'); if (ld) ld.style.display = 'none';
+  refreshOverlays();
+}
 
-// Regenerate the world from a seed (used by the start-screen "New World" button).
+// Regenerate from a seed (start-screen "New World" / joining a host's world).
 function newWorld(seedStr) {
   currentSeedStr = (seedStr && seedStr.trim()) ? seedStr.trim() : randomSeedStr();
   world.regenerate(hashSeed(currentSeedStr));
-  chestStore.clear();
-  mobs.clearAll();
-  placeSpawn();
+  edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
   if (mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
-  dead = false; resetBreak(); refreshOverlays();
+  dead = false; resetBreak(); startWorld();
 }
 
 // ---------- Overlays (play / death) ----------
@@ -210,7 +248,7 @@ document.getElementById('ui').appendChild(deathEl);
 
 function refreshOverlays() {
   const locked = document.pointerLockElement === renderer.domElement;
-  overlay.classList.toggle('hidden', locked || inventory.open || dead);
+  overlay.classList.toggle('hidden', !loaded || locked || inventory.open || dead);
   deathEl.style.display = dead ? 'flex' : 'none';
 }
 refreshOverlays();
@@ -219,6 +257,40 @@ seedInput.value = currentSeedStr;
 document.getElementById('playBtn').addEventListener('click', () => { if (!dead) { renderer.domElement.requestPointerLock(); sfx.ensure(); } });
 document.getElementById('diceBtn').addEventListener('click', () => { seedInput.value = randomSeedStr(); });
 document.getElementById('newWorldBtn').addEventListener('click', () => { newWorld(seedInput.value); renderer.domElement.requestPointerLock(); sfx.ensure(); });
+
+// ---------- Multiplayer (P2P co-op) ----------
+const mpStatusEl = document.getElementById('mpStatus');
+const setMpStatus = (s) => { if (mpStatusEl) mpStatusEl.textContent = s; };
+const randomRoom = () => Math.random().toString(36).slice(2, 7).toUpperCase();
+const playerName = () => (document.getElementById('nameInput').value.trim() || 'Player' + Math.floor(Math.random() * 1000));
+const mpHandlers = {
+  getInit: () => ({
+    seed: hashSeed(currentSeedStr),
+    edits: [...edits.entries()].map(([k, v]) => { const [x, y, z] = k.split(',').map(Number); return [x, y, z, v]; }),
+  }),
+  onInit: (d) => {
+    currentSeedStr = String(d.seed);
+    seedInput.value = currentSeedStr;
+    world.regenerate(d.seed);
+    edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
+    for (const e of d.edits) recordEdit(e[0], e[1], e[2], e[3]);
+    startWorld();
+    setMpStatus(`Joined ${d.hostName || 'host'}'s world!`);
+  },
+  onEdit: (x, y, z, id) => recordEdit(x, y, z, id),
+  onStatus: setMpStatus,
+};
+document.getElementById('hostBtn').addEventListener('click', () => {
+  const code = randomRoom();
+  mp.host(code, playerName(), mpHandlers);
+  setMpStatus(`Hosting — share room code: ${code}`);
+});
+document.getElementById('joinBtn').addEventListener('click', () => {
+  const code = document.getElementById('joinCode').value.trim().toUpperCase();
+  if (!code) { setMpStatus('Enter a room code to join'); return; }
+  setMpStatus('Connecting…');
+  mp.join(code, playerName(), mpHandlers);
+});
 document.addEventListener('pointerlockchange', refreshOverlays);
 deathEl.querySelector('#respawn').addEventListener('click', () => respawn());
 
@@ -308,14 +380,13 @@ function aabbHitsPlayer(cx, cy, cz) {
 function breakBlock(x, y, z, dropOk = true) {
   const id = world.getBlock(x, y, z);
   if (id === BEDROCK || id === AIR) return;
-  if (world.setBlock(x, y, z, AIR)) {
-    particles.burst(x + 0.5, y + 0.5, z + 0.5, blockTint(id));
-    sfx.break();
-    if (id === CHEST) chestStore.delete(chestKey(x, y, z));
-    if (mode === SURVIVAL && dropOk) {
-      if (id === LEAVES) { if (Math.random() < 0.06) inventory.add(APPLE, 1); }
-      else { const d = dropFor(id); if (d !== AIR) inventory.add(d, 1); }
-    }
+  applyEdit(x, y, z, AIR);
+  particles.burst(x + 0.5, y + 0.5, z + 0.5, blockTint(id));
+  sfx.break();
+  if (id === CHEST) chestStore.delete(chestKey(x, y, z));
+  if (mode === SURVIVAL && dropOk) {
+    if (id === LEAVES) { if (Math.random() < 0.06) inventory.add(APPLE, 1); }
+    else { const d = dropFor(id); if (d !== AIR) inventory.add(d, 1); }
   }
 }
 
@@ -352,16 +423,19 @@ function handleBreak(hit, dt) {
 function explode(cx, cy, cz) {
   const r = 3;
   const fx = Math.floor(cx), fy = Math.floor(cy), fz = Math.floor(cz);
+  const batch = [];
   for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
     if (dx * dx + dy * dy + dz * dz > r * r) continue;
     const x = fx + dx, y = fy + dy, z = fz + dz;
     const b = world.getBlock(x, y, z);
     if (b !== AIR && b !== BEDROCK && b !== WATER) {
       if (b === CHEST) chestStore.delete(chestKey(x, y, z));
-      world.setBlock(x, y, z, AIR);
+      recordEdit(x, y, z, AIR);
+      batch.push([x, y, z, AIR]);
       if (Math.random() < 0.12) particles.burst(x + 0.5, y + 0.5, z + 0.5, blockTint(b), 3);
     }
   }
+  mp.sendEdits(batch);
   particles.burst(cx, cy, cz, [70, 64, 58], 50);
   sfx.break();
   const d = Math.hypot(player.pos.x - cx, player.pos.y + 0.9 - cy, player.pos.z - cz);
@@ -404,9 +478,8 @@ function doPlace() {
   const target = world.getBlock(px, py, pz);
   if (target !== AIR && target !== WATER) return;
   if (aabbHitsPlayer(px, py, pz)) return;
-  if (world.setBlock(px, py, pz, inventory.selectedBlock())) {
-    inventory.consumeSelected(); sfx.place();
-  }
+  applyEdit(px, py, pz, inventory.selectedBlock());
+  inventory.consumeSelected(); sfx.place();
 }
 
 function attackOrBreak(dt) {
@@ -424,6 +497,58 @@ function attackOrBreak(dt) {
     return;
   }
   if (block.hit) handleBreak(block, dt); else resetBreak();
+}
+
+// ---------- Guns ----------
+function updateViewModel() {
+  const gid = gunOf(inventory.selectedId()) ? inventory.selectedId() : -1;
+  if (gid === viewGunId) return;
+  viewGunId = gid;
+  if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); viewModel = null; }
+  if (gid !== -1) { viewModel = makeViewModel(gid); camera.add(viewModel); }
+}
+
+function fireGun(gun, secondary) {
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
+  if (gun.kind === 'hitscan') fireHitscan(gun, muzzle);
+  else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); }
+  else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
+}
+
+function fireHitscan(gun, muzzle) {
+  const mobHit = mobs.raycast(_eye, _dir, gun.range);
+  const blockHit = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - _eye.x, blockHit.y + 0.5 - _eye.y, blockHit.z + 0.5 - _eye.z) : Infinity;
+  let end;
+  if (mobHit && mobHit.dist < blockDist) {
+    mobHit.mob.hurt(gun.damage, player.pos.x, player.pos.z);
+    end = _eye.clone().addScaledVector(_dir, mobHit.dist);
+    particles.burst(end.x, end.y, end.z, [220, 80, 80], 8);
+  } else if (blockHit.hit) {
+    end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
+    particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
+  } else {
+    end = _eye.clone().addScaledVector(_dir, gun.range);
+  }
+  tracers.add(muzzle, end, gun.zoom ? 0xaad4ff : 0xffe08a);
+  sfx.gun(gun.zoom ? 'sniper' : 'handgun');
+}
+
+function firePortal(slot, gun) {
+  const hit = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  if (!hit.hit) return;
+  portals.set(slot,
+    new THREE.Vector3(hit.x + 0.5 + hit.nx * 0.5, hit.y + 0.5 + hit.ny * 0.5, hit.z + 0.5 + hit.nz * 0.5),
+    new THREE.Vector3(hit.nx, hit.ny, hit.nz));
+  sfx.portal();
+}
+
+function plasmaImpact(pos, dmg) {
+  particles.burst(pos.x, pos.y, pos.z, [140, 255, 235], 26);
+  for (const m of mobs.list) {
+    if (Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z) < 2.3) m.hurt(dmg, pos.x, pos.z);
+  }
 }
 
 function onKill(mob) {
@@ -463,6 +588,20 @@ function frame() {
   requestAnimationFrame(frame);
   stats.begin();
   const dt = Math.min(clock.getDelta(), 0.1);
+
+  world.update(player.pos.x, player.pos.z);
+  world.processQueues(loaded ? 6 : 16);
+
+  // Still loading: animate the loading screen, render the world behind it.
+  if (!loaded) {
+    updateLoading();
+    sky.update(dt);
+    waterTime.value += dt;
+    composer.render();
+    stats.end();
+    return;
+  }
+
   const active = player.locked && !inventory.open && !dead;
 
   if (active) {
@@ -475,9 +614,6 @@ function frame() {
   } else {
     player.update(0);
   }
-
-  world.update(player.pos.x, player.pos.z);
-  world.processQueues(6);
 
   sky.update(dt);
   hud.setClock(sky.clockString());
@@ -493,25 +629,53 @@ function frame() {
   });
 
   // Interaction
-  invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt;
-  if (active) {
+  invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt; fireCD -= dt; fire2CD -= dt;
+  const gun = gunOf(inventory.selectedId());
+  if (active && gun) {
+    resetBreak();
+    if (mouseLeft && fireCD <= 0) { fireGun(gun, false); fireCD = gun.rate; }
+    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); fire2CD = gun.rate; }
+    if (gun.zoom && mouseRight) { if (!zoomed) { camera.fov = 26; camera.updateProjectionMatrix(); zoomed = true; } }
+    else if (zoomed) { camera.fov = player.fov; camera.updateProjectionMatrix(); zoomed = false; }
+  } else if (active) {
+    if (zoomed) { camera.fov = player.fov; camera.updateProjectionMatrix(); zoomed = false; }
     if (mouseLeft) attackOrBreak(dt); else resetBreak();
     if (mouseRight && placeCD <= 0) { handleUse(); placeCD = 0.25; }
-    survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
   }
+  if (active) survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
 
+  // Block highlight (hidden while aiming a gun)
   const hit = castFromEye();
-  highlight.visible = active && hit.hit;
+  highlight.visible = active && !gun && hit.hit;
   if (hit.hit) highlight.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+
+  // Guns / projectiles / portals / co-op
+  updateViewModel();
+  tracers.update(dt);
+  plasmas.update(dt, world, mobs, plasmaImpact);
+  portals.update(dt, player);
+  mp.update(dt);
+  if (active) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw });
 
   particles.update(dt);
   composer.render();
   stats.end();
 }
+const TIPS = [
+  'Press G for Creative to grab the guns', 'Right-click a stack to split it in half',
+  'Build a Crafting Table for tools', 'Creepers explode — keep your distance',
+  'Host a co-op game from the menu and share the code', 'Portal Gun: left-click + right-click two portals',
+  'Snipers zoom with right-click', 'Different ground makes different footstep sounds',
+];
+setInterval(() => { const el = document.getElementById('loadingTip'); if (el && !loaded) el.textContent = TIPS[Math.floor(Math.random() * TIPS.length)]; }, 2200);
+
+startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, mobs, inventory, crackMesh, crackMat, CRACK_TEXTURES,
-  toggleMode, applyDifficulty, openInventory,
+  world, player, sky, scene, renderer, mobs, inventory, mp, tracers, plasmas, portals,
+  crackMesh, crackMat, CRACK_TEXTURES, edits,
+  toggleMode, applyDifficulty, openInventory, newWorld,
+  get loaded() { return loaded; },
   get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead }; },
 };

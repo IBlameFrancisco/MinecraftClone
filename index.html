@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>Voxelcraft — a Minecraft clone</title>
+    <title>GunCraft</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { width: 100%; height: 100%; overflow: hidden; background: #87b9ff; }
@@ -80,6 +80,34 @@
       #overlay button:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.45); }
       #overlay #diceBtn { padding: 8px 11px; }
       #overlay .play { font-size: 17px; color: #ffe27a; font-weight: 700; }
+      #overlay .mptitle { margin-top: 18px; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.6; }
+      #overlay .mprow { margin-top: 8px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+      #overlay .mprow input { width: 120px; padding: 8px 10px; font-size: 13px; border-radius: 8px;
+        border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.35); color: #fff; outline: none; }
+      #overlay .mprow input:focus { border-color: #7ad0ff; }
+      #mpStatus { margin-top: 9px; font-size: 13px; min-height: 16px; color: #7ad0ff; }
+
+      /* ---- Loading screen ---- */
+      #loading {
+        position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+        background: radial-gradient(circle at 50% 35%, #1b2a3f, #0a1018 70%); color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center;
+      }
+      #loading .scene { width: 80px; height: 80px; margin: 0 auto 26px; perspective: 240px; }
+      #loading .cube { width: 52px; height: 52px; margin: 14px auto; position: relative;
+        transform-style: preserve-3d; animation: gc-spin 2.6s linear infinite; }
+      #loading .cube span { position: absolute; width: 52px; height: 52px; border: 2px solid rgba(0,0,0,0.35);
+        image-rendering: pixelated; }
+      #loading .cube span:nth-child(1) { transform: rotateY(0deg) translateZ(26px); background: linear-gradient(135deg, #7ec850, #4f9a32); }
+      #loading .cube span:nth-child(2) { transform: rotateY(90deg) translateZ(26px); background: linear-gradient(135deg, #9a6a3a, #6f4a26); }
+      #loading .cube span:nth-child(3) { transform: rotateX(90deg) translateZ(26px); background: linear-gradient(135deg, #9bd96a, #6db33f); }
+      @keyframes gc-spin { from { transform: rotateX(-22deg) rotateY(0deg); } to { transform: rotateX(-22deg) rotateY(360deg); } }
+      #loading h2 { font-size: 30px; letter-spacing: 3px; margin-bottom: 16px; }
+      #loading .bar { width: 260px; height: 10px; margin: 0 auto; background: rgba(255,255,255,0.12);
+        border-radius: 6px; overflow: hidden; }
+      #loading #loadingBar { height: 100%; width: 0%; border-radius: 6px;
+        background: linear-gradient(90deg, #ffe27a, #ff8c42); transition: width 0.2s; }
+      #loading #loadingTip { margin-top: 14px; font-size: 13px; opacity: 0.75; }
 
       #stats-wrap { position: absolute; right: 8px; bottom: 8px; transform: scale(1.1); transform-origin: bottom right; }
       #stats-wrap .stats-js-panel { opacity: 0.9; }
@@ -91,7 +119,7 @@
       <div id="crosshair"></div>
       <div id="clock">☀ —</div>
       <div id="hint">
-        <b>Voxelcraft</b><br />
+        <b>GunCraft</b><br />
         <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> move &nbsp; <span class="key">Space</span> jump<br />
         <span class="key">Shift</span> / dbl-<span class="key">W</span> sprint &nbsp; <span class="key">Ctrl</span> sneak<br />
         dbl-<span class="key">Space</span> fly <span style="opacity:.6">(creative)</span><br />
@@ -102,10 +130,18 @@
       </div>
       <div id="hotbar"></div>
     </div>
-    <div id="overlay">
+    <div id="loading">
+      <div class="loader">
+        <div class="scene"><div class="cube"><span></span><span></span><span></span></div></div>
+        <h2>GUNCRAFT</h2>
+        <div class="bar"><div id="loadingBar"></div></div>
+        <p id="loadingTip">Generating world…</p>
+      </div>
+    </div>
+    <div id="overlay" class="hidden">
       <div class="card">
-        <h1>VOXELCRAFT</h1>
-        <p>A procedural voxel world — built with three.js</p>
+        <h1>GUNCRAFT</h1>
+        <p>A voxel sandbox with guns &amp; co-op — built with three.js</p>
         <div class="seedrow">
           <label for="seedInput">Seed</label>
           <input id="seedInput" type="text" autocomplete="off" spellcheck="false" />
@@ -115,6 +151,14 @@
           <button id="playBtn" class="play">▶ Play</button>
           <button id="newWorldBtn" class="newworld">↻ New World</button>
         </div>
+        <div class="mptitle">Co-op (peer-to-peer)</div>
+        <div class="mprow">
+          <input id="nameInput" placeholder="Your name" autocomplete="off" spellcheck="false" />
+          <button id="hostBtn">Host</button>
+          <input id="joinCode" placeholder="Room code" autocomplete="off" spellcheck="false" />
+          <button id="joinBtn">Join</button>
+        </div>
+        <div id="mpStatus"></div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

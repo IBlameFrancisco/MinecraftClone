@@ -5,7 +5,7 @@
 
 import { HOTBAR, PLACEABLE, BLOCKS, AIR } from './blocks.js';
 import { drawBlockIcon } from './textures.js';
-import { isItem, isBlockId, itemName, drawItemIcon } from './items.js';
+import { isItem, isBlockId, itemName, drawItemIcon, GUNS } from './items.js';
 import { matchRecipe } from './crafting.js';
 
 const STACK = 64;
@@ -207,7 +207,7 @@ export class Inventory {
       this.chestSlots.forEach((s, i) => this.chestGridEl.appendChild(this._makeSlot('chest', i, s)));
       this.sMain.forEach((s, i) => this.gridEl.appendChild(this._makeSlot('main', i, s)));
     } else if (this.creative) {
-      PLACEABLE.forEach((id) => this.gridEl.appendChild(this._makeSlot('palette', id, { id, count: 1 })));
+      [...PLACEABLE, ...GUNS].forEach((id) => this.gridEl.appendChild(this._makeSlot('palette', id, { id, count: 1 })));
     } else {
       this.main.forEach((s, i) => this.gridEl.appendChild(this._makeSlot('main', i, s)));
       this._renderCraft();
