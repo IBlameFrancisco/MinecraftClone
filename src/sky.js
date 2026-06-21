@@ -27,6 +27,12 @@ const HORROR_FOG = sc(0.05, 0.015, 0.02);
 const HORROR_TINT = new THREE.Color(0.30, 0.20, 0.22);
 const _MOON_DIR = new THREE.Vector3(0.35, 0.78, 0.3).normalize();
 
+// ---- War mode (D-Day beach): a bleak, overcast, smoke-hazed grey morning. ----
+const WAR_TOP = sc(0.40, 0.43, 0.48);
+const WAR_HORIZON = sc(0.58, 0.58, 0.60);
+const WAR_FOG = sc(0.60, 0.60, 0.62);
+const WAR_TINT = new THREE.Color(0.74, 0.74, 0.76);
+
 function radialSprite(inner, outer) {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -122,25 +128,35 @@ export class Sky {
     this.dirIntensity = 1;
     this.ambIntensity = 0.6;
     this.horror = false;
+    this.war = false;
     this._flick = 1;
     this._flickT = 0;
     this._normalFog = [this.fog.near, this.fog.far];
+  }
+
+  _restoreSky() {
+    this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1];
+    this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(40);
+    this.sun.material.color.setRGB(1, 1, 1); this.clouds.material.opacity = 0.8;
   }
 
   // Toggle the creepy battle-arena atmosphere.
   setHorror(on) {
     if (this.horror === on) return;
     this.horror = on;
-    if (!on) {
-      // restore the sun/moon/cloud look the day/night cycle expects
-      this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1];
-      this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(40);
-      this.sun.material.color.setRGB(1, 1, 1); this.clouds.material.opacity = 0.8;
-    }
+    if (!on) this._restoreSky();   // restore the sun/moon/cloud look the day/night cycle expects
+  }
+
+  // Toggle the bleak overcast D-Day atmosphere.
+  setWar(on) {
+    if (this.war === on) return;
+    this.war = on;
+    if (!on) this._restoreSky();
   }
 
   update(dt) {
     this.time = (this.time + dt / DAY_LENGTH) % 1;
+    if (this.war) return this._updateWar(dt);
     if (this.horror) return this._updateHorror(dt);
 
     // Sun angle: noon at t=0.25, midnight at t=0.75.
@@ -232,7 +248,37 @@ export class Sky {
     return this.time;
   }
 
+  // A bleak overcast grey morning over the channel — flat diffuse light, smoke haze.
+  _updateWar(dt) {
+    this.uniforms.topColor.value.copy(WAR_TOP);
+    this.uniforms.horizonColor.value.copy(WAR_HORIZON);
+    this.fog.color.copy(WAR_FOG);
+    this.fog.near = 16; this.fog.far = 150;
+    setWorldTint(WAR_TINT.r, WAR_TINT.g, WAR_TINT.b);
+
+    // Flat overcast daylight — soft directional, no harsh sun.
+    this.isNight = false;
+    this.sunDir.set(0.25, 0.85, 0.35).normalize();
+    this.dirColor.setRGB(0.78, 0.78, 0.80);
+    this.dirIntensity = 0.7;
+    this.ambIntensity = 0.62;
+    setWaterEnv(this.sunDir, WAR_HORIZON, 0.6);
+
+    const cam = this.camera.position;
+    this.dome.position.copy(cam);
+    this.sun.material.opacity = 0;
+    this.moon.material.opacity = 0;
+    // Heavy low overcast.
+    this.clouds.position.x = cam.x; this.clouds.position.z = cam.z;
+    this.clouds.material.map.offset.x += dt * 0.003;
+    this.clouds.material.map.offset.y += dt * 0.0015;
+    this.clouds.material.color.setRGB(0.55, 0.55, 0.57);
+    this.clouds.material.opacity = 0.85;
+    return this.time;
+  }
+
   clockString() {
+    if (this.war) return '⛅ Operation Overlord';
     if (this.horror) return '🩸 the witching hour';
     // Map t=0.25 -> 12:00, t=0 -> 06:00, t=0.5 -> 18:00.
     const hours = (this.time * 24 + 6) % 24;

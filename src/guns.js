@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows.
@@ -544,6 +544,12 @@ export function makeViewModel(id) {
     const warhead = box(0.16, 0.16, 0.18, 0xd23a2a, 0, 0, -0.86);
     warhead.material = new THREE.MeshBasicMaterial({ color: 0xe04a36, fog: false });
     box(0.1, 0.2, 0.14, 0x3f5022, 0, -0.16, 0.06);
+  } else if (id === HEAVY_MG) {
+    box(0.14, 0.14, 0.95, 0x2b2b2f, 0, 0, -0.4);           // long receiver
+    box(0.17, 0.17, 0.3, 0x46484e, 0, 0, -0.82);           // barrel shroud
+    box(0.1, 0.22, 0.14, 0x23252b, 0, -0.16, 0.04);        // grip
+    box(0.16, 0.1, 0.18, 0x6a4a2a, 0, -0.04, 0.18);        // wooden stock
+    box(0.05, 0.05, 0.5, 0x1c1c20, 0.12, 0.06, -0.4); box(0.05, 0.05, 0.5, 0x1c1c20, -0.12, 0.06, -0.4);  // bipod-ish rails
   } else if (id === BLACK_HOLE_BOMB) {
     box(0.22, 0.22, 0.62, 0x241a33, 0, 0, -0.26);          // dark body
     box(0.27, 0.27, 0.16, 0x140d1f, 0, 0, -0.54);          // muzzle housing

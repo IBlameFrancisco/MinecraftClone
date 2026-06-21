@@ -65,6 +65,10 @@ class Bot {
     this.jumpCD = 0;
     this.coverGoal = null;
     this.coverTimer = 0;
+    this.defend = false;         // war: hold a position (MG nest) instead of advancing
+    this.anchor = null;          // the point to hold
+    this.advance = false;        // war: push toward an objective even while engaging
+    this.advanceGoal = null;     // the point to push toward
     this.kills = 0; this.deaths = 0;
     this.skinId = randomBotSkin();
     this.mesh = null;            // avatar group, created by the manager
@@ -109,7 +113,8 @@ export class BotManager {
   }
 
   // Spawn `count` bots, assigned the given teams (array, cycled) at `difficulty`.
-  spawn(count, teams, difficulty, spawnFor, colorFor) {
+  // `skinFor(team)` optionally overrides the avatar skin (e.g. faction uniforms).
+  spawn(count, teams, difficulty, spawnFor, colorFor, skinFor) {
     const used = new Set(this.bots.map((b) => b.name));
     for (let i = 0; i < count; i++) {
       let nm = pick(NAMES); let guard = 0;
@@ -119,7 +124,8 @@ export class BotManager {
       const b = new Bot(nm, team, difficulty);
       const sp = spawnFor(team);
       b.pos.set(sp.x, sp.y, sp.z);
-      b.mesh = makeAvatar(b.name, getSkin(b.skinId), colorFor(team));
+      if (sp.yaw !== undefined) b.yaw = sp.yaw;
+      b.mesh = makeAvatar(b.name, skinFor ? skinFor(team) : getSkin(b.skinId), colorFor(team));
       b.mesh.position.copy(b.pos);
       this.group.add(b.mesh);
       this.bots.push(b);
@@ -199,13 +205,23 @@ export class BotManager {
       b.pitch += (wantPitch - b.pitch) * Math.min(1, b.D.turn * dt);
 
       // Movement: keep preferred range, strafe, seek cover when reloading / low.
-      const seekCover = (b.reloadTimer > 0 || b.health < 7) && Math.random() < b.D.cover;
+      const seekCover = (b.reloadTimer > 0 || b.health < 7) && Math.random() < b.D.cover && !b.defend;
+      const toX = (tx - b.pos.x) / dist, toZ = (tz - b.pos.z) / dist;
       if (seekCover && ctx.coverPoints && ctx.coverPoints.length) {
         if (!b.coverGoal || b.coverTimer <= 0) { b.coverGoal = nearestCover(ctx.coverPoints, b.pos); b.coverTimer = 2.5; }
         desiredX = b.coverGoal.x - b.pos.x; desiredZ = b.coverGoal.z - b.pos.z;
+      } else if (b.defend && b.anchor) {
+        // Defender: hold the nest. Return to it if pushed off; otherwise shuffle and fire.
+        const ax = b.anchor.x - b.pos.x, az = b.anchor.z - b.pos.z, ad = Math.hypot(ax, az);
+        if (ad > 4.5) { desiredX = ax; desiredZ = az; }
+        else { if (b.strafeTimer <= 0) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeTimer = 1.2 + Math.random(); }
+          desiredX = -toZ * b.strafe * 0.35; desiredZ = toX * b.strafe * 0.35; }
+      } else if (b.advance && b.advanceGoal && Math.hypot(b.advanceGoal.x - b.pos.x, b.advanceGoal.z - b.pos.z) > 7) {
+        // Attacker: charge the objective, weaving a little, firing on the move.
+        if (b.strafeTimer <= 0) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeTimer = 0.6 + Math.random() * 0.6; }
+        desiredX = (b.advanceGoal.x - b.pos.x) - toZ * b.strafe * 3; desiredZ = b.advanceGoal.z - b.pos.z;
       } else {
         b.coverGoal = null;
-        const toX = (tx - b.pos.x) / dist, toZ = (tz - b.pos.z) / dist;
         const pref = b.D.range;
         if (dist > pref * 1.15) { desiredX = toX; desiredZ = toZ; }
         else if (dist < pref * 0.55) { desiredX = -toX; desiredZ = -toZ; }
@@ -225,6 +241,17 @@ export class BotManager {
       } else if (!hasLoS || dist >= b.gun.range) {
         b.reactTimer = b.D.react;          // reset reaction when target breaks
       }
+    } else if (b.defend && b.anchor) {
+      // Defender with no target: stay on the nest, keep facing the beach.
+      b.reactTimer = b.D.react;
+      const ax = b.anchor.x - b.pos.x, az = b.anchor.z - b.pos.z, ad = Math.hypot(ax, az);
+      if (ad > 1.5) { desiredX = ax; desiredZ = az; speed = b.D.speed * 0.5; }
+      else { b.yaw = turnToward(b.yaw, Math.PI, b.D.turn * dt); }   // face +Z (the incoming Allies)
+    } else if (b.advance && b.advanceGoal && Math.hypot(b.advanceGoal.x - b.pos.x, b.advanceGoal.z - b.pos.z) > 5) {
+      // Attacker with no target: push toward the objective at speed.
+      b.reactTimer = b.D.react;
+      desiredX = b.advanceGoal.x - b.pos.x; desiredZ = b.advanceGoal.z - b.pos.z; speed = b.D.speed;
+      b.yaw = turnToward(b.yaw, Math.atan2(desiredX, desiredZ), b.D.turn * dt);
     } else {
       // No target: drift toward arena centre / wander. Keep the reaction delay primed so
       // the next time we spot an enemy we don't fire on the very first frame (difficulty react).

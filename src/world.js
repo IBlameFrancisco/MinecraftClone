@@ -25,8 +25,9 @@ export class World {
   key(cx, cz) { return cx + ',' + cz; }
   getChunk(cx, cz) { return this.chunks.get(this.key(cx, cz)); }
 
-  // Wipe all chunks and reseed (used by the seed / "new world" / battle UI).
-  regenerate(seed, arena = false) {
+  // Wipe all chunks and reseed (used by the seed / "new world" / battle UI). `map`
+  // selects the battle map: 'arena' (or true), 'beach', or false for normal terrain.
+  regenerate(seed, map = false) {
     for (const c of this.chunks.values()) {
       if (c.mesh) this.group.remove(c.mesh);
       if (c.waterMesh) this.group.remove(c.waterMesh);
@@ -35,7 +36,8 @@ export class World {
     this.chunks.clear();
     this.genQueue.length = 0;
     this.gen = new WorldGen(seed);
-    this.gen.arena = arena;
+    this.gen.arena = (map === 'arena' || map === true);
+    this.gen.beach = (map === 'beach');
   }
 
   getBlock(wx, wy, wz) {
