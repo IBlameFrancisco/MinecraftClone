@@ -13,7 +13,7 @@ the repository name. (Rename the repo to `GunCraft` and it moves to
 ## Highlights
 
 - **Cinematic rendering:** ACES tone-mapping, bloom, vignette/grade, FXAA, drifting clouds, shader water.
-- **Nine guns:** handgun, SMG, assault rifle, shotgun, sniper (real scope), railgun (piercing), plasma gun, rocket launcher (AoE), portal gun. Bloom-lit tracers, per-gun recoil, headshots + floating damage numbers, full/semi-auto fire, ammo/reload.
+- **Ten weapons:** handgun, SMG, assault rifle, shotgun, sniper (real scope), railgun (piercing), plasma gun, rocket launcher (AoE), **black hole bomb** (an animated singularity that drags enemies into its core then implodes), portal gun. Bloom-lit tracers, per-gun recoil, headshots + floating damage numbers, full/semi-auto fire, ammo/reload.
 - **Battle mode (PvP + bots):** a fixed, symmetric **arena**. **Free-for-all or Teams**, with **AI bots** (Easy→Insane) filling empty slots so you can play solo or 2v2. Hold-**Tab** scoreboard, score-limit rounds, kill feed, radar, and health/ammo pickups. Bots are host-authoritative so co-op stays in sync.
 - **Co-op (P2P / WebRTC):** host a room, share the code; world seed + block edits + player avatars sync — and players can damage each other. No server needed.
 - **Seeds:** enter a seed (or 🎲) and generate a fresh world; `?seed=` URL param.

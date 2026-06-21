@@ -151,6 +151,12 @@ export class SFX {
     if (!this.ctx) return;
     this._tone(380, 920, 0.18, 0.15, 'sine');
   }
+  blackhole() {
+    if (!this.ctx) return;
+    this._tone(230, 38, 0.75, 0.22, 'sawtooth');   // deep descending swell (collapsing inward)
+    this._tone(120, 26, 0.95, 0.18, 'sine');        // sub rumble
+    this._noise(0.6, 320, 0.6, 0.12, 'lowpass');    // airy suck
+  }
 
   // Surface-dependent footstep. `mat` is a material category.
   step(mat = 'grass') {
