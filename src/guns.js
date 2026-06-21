@@ -182,6 +182,38 @@ export class Rockets {
   }
 }
 
+// ---------------- Grenades ----------------
+// A thrown, bouncing frag that detonates on a fuse.
+export class Grenades {
+  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; }
+  spawn(pos, vel, fuse, onExplode) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshLambertMaterial({ color: 0x39402c }));
+    m.position.copy(pos);
+    this.group.add(m);
+    this.list.push({ m, pos: pos.clone(), vel: vel.clone(), fuse, onExplode, spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8) });
+  }
+  update(dt, world) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const g = this.list[i];
+      g.fuse -= dt;
+      g.vel.y -= 24 * dt;
+      for (const axis of ['x', 'y', 'z']) {
+        const test = g.pos.clone(); test[axis] += g.vel[axis] * dt;
+        if (isSolid(world.getBlock(Math.floor(test.x), Math.floor(test.y), Math.floor(test.z)))) {
+          g.vel[axis] *= -0.4;
+          if (axis === 'y' && Math.abs(g.vel.y) < 1.5) { g.vel.x *= 0.7; g.vel.z *= 0.7; }   // settle
+        } else g.pos[axis] = test[axis];
+      }
+      g.m.position.copy(g.pos);
+      g.m.rotation.x += g.spin.x * dt; g.m.rotation.y += g.spin.y * dt;
+      if (g.fuse <= 0) {
+        g.onExplode(g.pos.clone());
+        this.group.remove(g.m); g.m.geometry.dispose(); g.m.material.dispose(); this.list.splice(i, 1);
+      }
+    }
+  }
+}
+
 // ---------------- Portals ----------------
 export class Portals {
   constructor(scene) {

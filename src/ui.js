@@ -101,6 +101,11 @@ export class HUD {
   }
   hideRoundOver() { this.roEl.style.display = 'none'; }
   setModeInfo(text) { this.modeInfoEl.style.display = text ? 'block' : 'none'; if (text) this.modeInfoEl.textContent = text; }
+  setGrenades(n) {
+    if (!this.nadeEl) { this.nadeEl = document.createElement('div'); this.nadeEl.id = 'nades'; document.getElementById('ui').appendChild(this.nadeEl); }
+    this.nadeEl.style.display = n > 0 ? 'block' : 'none';
+    this.nadeEl.innerHTML = `💣 <b>${n}</b> <span>(G)</span>`;
+  }
 
   _buildChat() {
     const ui = document.getElementById('ui');
@@ -335,6 +340,9 @@ export class HUD {
         font-family:monospace; text-shadow:0 2px 4px #000; }
       #ammo .rl { font-size:13px; color:#ffcf6a; }
       #ammo .inf { color:#9fe0ff; }
+      #nades { display:none; position:absolute; right:18px; bottom:118px; font-size:16px; font-weight:700;
+        text-shadow:0 2px 4px #000; }
+      #nades span { opacity:0.5; font-size:12px; }
       #killfeed { position:absolute; right:14px; top:150px; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
       .kfline { background:rgba(0,0,0,0.45); padding:3px 9px; border-radius:5px; font-size:13px;
         text-shadow:0 1px 2px #000; transition:opacity 0.9s; border-left:3px solid #ff5b6e; }
