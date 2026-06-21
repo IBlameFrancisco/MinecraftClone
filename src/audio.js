@@ -64,6 +64,21 @@ export class SFX {
     this._tone(140, 200, 0.08, 0.16, 'triangle');
   }
 
+  gun(kind) {
+    if (!this.ctx) return;
+    if (kind === 'sniper') { this._noise(0.20, 1100, 0.8, 0.5, 'lowpass'); this._tone(240, 55, 0.2, 0.26, 'square'); }
+    else { this._noise(0.07, 1900, 0.7, 0.34, 'highpass'); this._tone(330, 120, 0.06, 0.16, 'square'); }
+  }
+  plasma() {
+    if (!this.ctx) return;
+    this._tone(720, 170, 0.18, 0.16, 'sawtooth');
+    this._noise(0.10, 2200, 1.5, 0.1, 'bandpass');
+  }
+  portal() {
+    if (!this.ctx) return;
+    this._tone(380, 920, 0.18, 0.15, 'sine');
+  }
+
   // Surface-dependent footstep. `mat` is a material category.
   step(mat = 'grass') {
     if (!this.ctx) return;

@@ -148,6 +148,7 @@ export class World {
         const c = this.genQueue.pop();
         if (!c.generated) {
           this.gen.generate(c);
+          if (this.applyEditsToChunk) this.applyEditsToChunk(c);
           c.dirty = true;
         }
       }

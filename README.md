@@ -1,10 +1,20 @@
-# Voxelcraft
+# GunCraft
 
-A genuinely playable Minecraft-style voxel engine built from scratch with
-[Vite](https://vitejs.dev/) and [three.js](https://threejs.org/) — procedural
-world, chunked per-face meshing with per-vertex ambient occlusion, runtime
-texture atlas, biomes, caves, day/night, and full build/place interaction. No
+A voxel sandbox built from scratch with [Vite](https://vitejs.dev/) and
+[three.js](https://threejs.org/) — procedural world, chunked per-face meshing
+with per-vertex ambient occlusion, a runtime texture atlas, biomes, caves,
+day/night, cinematic post-processing, **guns**, and **peer-to-peer co-op**. No
 art or audio assets: every texture and sound is generated at runtime.
+
+**Live:** https://iblamefrancisco.github.io/MinecraftClone/
+
+## Highlights
+
+- **Cinematic rendering:** ACES tone-mapping, bloom, vignette/grade, FXAA, drifting clouds, shader water.
+- **Guns:** handgun + sniper (hitscan, sniper zooms), plasma gun (AoE bolts), portal gun (two portals, teleport). First-person viewmodels.
+- **Co-op (P2P / WebRTC):** host a room, share the code; world seed + block edits + player avatars sync. No server needed.
+- **Seeds:** enter a seed (or 🎲) and generate a fresh world; `?seed=` URL param.
+- **Survival/Creative + difficulties** (Peaceful→Hardcore), tools, crafting (2×2 + crafting table), chests, mobs (pig/cow/sheep, zombie/skeleton/creeper), surface-aware footsteps, and a dynamic loading screen.
 
 ## Quick start
 

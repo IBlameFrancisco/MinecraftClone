@@ -22,6 +22,12 @@ export const STONE_AXE = 269;
 export const STONE_SHOVEL = 270;
 export const STONE_SWORD = 271;
 export const ARROW = 272;
+export const HANDGUN = 273;
+export const SNIPER = 274;
+export const PLASMA_GUN = 275;
+export const PORTAL_GUN = 276;
+
+export const GUNS = [HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -48,7 +54,12 @@ export const ITEMS = {
   [STONE_AXE]:    { name: 'Stone Axe', ...tool('axe', 2) },
   [STONE_SHOVEL]: { name: 'Stone Shovel', ...tool('shovel', 2) },
   [STONE_SWORD]:  { name: 'Stone Sword', ...tool('sword', 2) },
+  [HANDGUN]:    { name: 'Handgun',    gun: { kind: 'hitscan', rate: 0.16, damage: 6,  range: 64,  color: 0x3a3f47 } },
+  [SNIPER]:     { name: 'Sniper',     gun: { kind: 'hitscan', rate: 1.1,  damage: 34, range: 240, zoom: true, color: 0x23262b } },
+  [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.30, damage: 12, range: 90,  speed: 40, color: 0x2bd6c0 } },
+  [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, color: 0xdadada } },
 };
+export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
 export const isItem = (id) => id >= ITEM_BASE;
 export const isBlockId = (id) => id > AIR && id < ITEM_BASE && BLOCKS[id] !== undefined;
@@ -60,7 +71,7 @@ export function foodValue(id) { return isItem(id) && ITEMS[id].food ? ITEMS[id].
 export function isFood(id) { return foodValue(id) > 0; }
 export function toolOf(id) { return isItem(id) && ITEMS[id].tool ? ITEMS[id] : null; }
 export function meleeDamage(id) { const t = toolOf(id); return t ? t.damage : 2; }
-export const maxStack = (id) => (toolOf(id) ? 1 : 64);
+export const maxStack = (id) => (toolOf(id) || gunOf(id) ? 1 : 64);
 
 // ---- 2D item icons ----
 const HANDLE = '#8a5a2b';
@@ -71,6 +82,7 @@ export function drawItemIcon(ctx, id, S) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const t = toolOf(id);
   if (t) { drawTool(ctx, t.tool, t.tier === 1 ? '#a9742f' : '#9aa0a6'); ctx.restore(); return; }
+  if (gunOf(id)) { drawGun(ctx, id); ctx.restore(); return; }
   switch (id) {
     case STICK: stick(ctx); break;
     case APPLE: apple(ctx); break;
@@ -116,6 +128,30 @@ function arrow(ctx) {
   ctx.fillStyle = '#cfd3d6'; ctx.beginPath(); ctx.moveTo(12, 2); ctx.lineTo(14, 5); ctx.lineTo(10, 5); ctx.closePath(); ctx.fill();
   ctx.strokeStyle = '#e8e8e8'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(3, 13); ctx.lineTo(5, 11); ctx.moveTo(3, 13); ctx.lineTo(5, 14); ctx.stroke();
 }
+function drawGun(ctx, id) {
+  if (id === HANDGUN) {
+    ctx.fillStyle = '#3a3f47';
+    ctx.fillRect(2, 5, 9, 3.2);            // barrel
+    ctx.fillRect(3, 7, 3.5, 6);            // grip
+    ctx.fillStyle = '#6b7079'; ctx.fillRect(2, 5, 3, 1.2);
+  } else if (id === SNIPER) {
+    ctx.fillStyle = '#23262b';
+    ctx.fillRect(1, 7, 14, 2.4);           // long barrel
+    ctx.fillRect(3, 8.5, 3, 4);            // grip
+    ctx.fillStyle = '#111'; ctx.fillRect(6, 4.5, 5, 2);  // scope
+    ctx.fillStyle = '#4aa3ff'; ctx.fillRect(10, 5, 1.4, 1.4);
+  } else if (id === PLASMA_GUN) {
+    ctx.fillStyle = '#2a6f68'; ctx.fillRect(2, 6, 10, 4); ctx.fillRect(3, 9, 3, 4);
+    const grad = ctx.createRadialGradient(12, 8, 0, 12, 8, 4);
+    grad.addColorStop(0, '#bafff5'); grad.addColorStop(1, 'rgba(43,214,192,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(12, 8, 4, 0, Math.PI * 2); ctx.fill();
+  } else { // PORTAL_GUN
+    ctx.fillStyle = '#d6d6d6'; ctx.fillRect(2, 6, 9, 3.6); ctx.fillRect(3, 9, 3, 4);
+    ctx.fillStyle = '#ff8c2b'; ctx.fillRect(10, 6, 2, 1.8);
+    ctx.fillStyle = '#2b8cff'; ctx.fillRect(10, 7.8, 2, 1.8);
+  }
+}
+
 function drawTool(ctx, type, headColor) {
   // common wooden handle
   ctx.strokeStyle = HANDLE; ctx.lineWidth = 2.2;
