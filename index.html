@@ -191,6 +191,36 @@
       #settings input[type=range] { width: 100%; accent-color: #ff9d3c; cursor: pointer; }
       #settings #settingsDone { margin-top: 18px; }
 
+      /* ---- Pause menu (in-game, on Esc) ---- */
+      #pause { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center;
+        background: radial-gradient(ellipse at center, rgba(6,10,18,0.30) 0%, rgba(4,7,12,0.72) 100%);
+        backdrop-filter: blur(7px) saturate(0.9); pointer-events: auto;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #fff; }
+      #pause.hidden { display: none; }
+      #pause .pcard {
+        position: relative; overflow: hidden; min-width: 300px; padding: 30px 40px 26px;
+        border-radius: 18px; border: 1px solid rgba(255,255,255,0.12); text-align: center;
+        background: linear-gradient(165deg, rgba(24,30,44,0.9), rgba(12,16,26,0.94));
+        box-shadow: 0 30px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08); }
+      #pause .pcard::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+        background: linear-gradient(90deg, #ff7b3a, #ffd86b, #6db33f); }
+      #pause .plogo { font-size: 30px; margin-bottom: 4px; filter: drop-shadow(0 3px 8px rgba(0,0,0,0.55)); }
+      #pause .ptitle { font-size: 15px; letter-spacing: 4px; text-transform: uppercase; opacity: 0.62; margin-bottom: 22px; font-weight: 700; }
+      #pause .pbtns { display: flex; flex-direction: column; gap: 10px; align-items: stretch; min-width: 220px; }
+      #pause button {
+        font: inherit; cursor: pointer; padding: 11px 18px; border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.08); color: #fff;
+        transition: transform 0.12s, background 0.15s, border-color 0.15s, box-shadow 0.15s; }
+      #pause button:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.45); transform: translateY(-1px); }
+      #pause button:active { transform: translateY(0); }
+      #pause button.play {
+        font-size: 16px; font-weight: 800; color: #2a1c06; border: none;
+        background: linear-gradient(180deg, #ffe08a, #ff9d3c); box-shadow: 0 6px 18px rgba(255,150,60,0.35); }
+      #pause button.play:hover { background: linear-gradient(180deg, #ffe8a0, #ffab4f); box-shadow: 0 9px 24px rgba(255,150,60,0.5); }
+      #pause .phint { margin-top: 18px; font-size: 12px; opacity: 0.5; letter-spacing: 0.3px; }
+      #pause .phint b { color: #ffe27a; opacity: 0.9; }
+
       /* ---- Loading screen ---- */
       #loading {
         position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
@@ -234,7 +264,7 @@
         <span class="key">L-click</span> shoot/break &nbsp; <span class="key">R-click</span> aim / place / portal<br />
         <span class="key">V</span> melee &nbsp; <span class="key">G</span> grenade <span style="opacity:.6">(battle)</span> &nbsp; <span class="key">R</span> reload<br />
         <span class="key">E</span> inventory+craft &nbsp; <span class="key">1</span>–<span class="key">9</span> / wheel select<br />
-        <span class="key">T</span> chat &nbsp; <span class="key">Tab</span> scores &nbsp; <span class="key">Esc</span> release
+        <span class="key">T</span> chat &nbsp; <span class="key">Tab</span> scores &nbsp; <span class="key">Esc</span> pause
       </div>
       <div id="hotbar"></div>
       <div id="scope"><div class="lens"></div><div class="reticle"></div><div class="dot"></div></div>
@@ -333,6 +363,18 @@
         <div class="srow"><label>Mouse Sensitivity</label><input type="range" id="sensRange" min="40" max="220" /><span id="sensVal">1.00</span></div>
         <div class="srow"><label>Render Distance</label><input type="range" id="rdRange" min="3" max="9" /><span id="rdVal">7</span></div>
         <button id="settingsDone" class="play">Done</button>
+      </div>
+    </div>
+    <div id="pause" class="hidden">
+      <div class="pcard">
+        <div class="gclogo plogo"><span class="g1">GUN</span><span class="g2">CRAFT</span></div>
+        <div class="ptitle">Paused</div>
+        <div class="pbtns">
+          <button id="resumeBtn" class="play">▶ Resume</button>
+          <button id="pauseSettingsBtn">⚙ Settings</button>
+          <button id="pauseMenuBtn">⏏ Main Menu</button>
+        </div>
+        <div class="phint">Click <b>Resume</b> or the backdrop to keep playing</div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>
