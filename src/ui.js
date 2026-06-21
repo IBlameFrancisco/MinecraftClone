@@ -7,9 +7,53 @@ export class HUD {
     this._buildNameLabel();
     this._buildStatus();
     this._buildChat();
+    this._buildBattle();
     this._scheduleHintFade();
     this.onChatSend = () => {};
   }
+
+  _buildBattle() {
+    const ui = document.getElementById('ui');
+    this.sbEl = document.createElement('div'); this.sbEl.id = 'scoreboard';
+    this.roEl = document.createElement('div'); this.roEl.id = 'roundover';
+    ui.appendChild(this.sbEl); ui.appendChild(this.roEl);
+  }
+
+  setScoreboard(board, teamMode, scoreLimit, myTeam) {
+    this._board = board; this._teamMode = teamMode; this._scoreLimit = scoreLimit; this._myTeam = myTeam;
+    if (this.sbEl.style.display === 'block') this._renderScoreboard();
+  }
+  showScoreboard() { this.sbEl.style.display = 'block'; this._renderScoreboard(); }
+  hideScoreboard() { this.sbEl.style.display = 'none'; }
+  _renderScoreboard() {
+    const b = this._board || [];
+    let html = '';
+    if (this._teamMode) {
+      const red = b.filter((e) => e.team === 0), blue = b.filter((e) => e.team === 1);
+      const sum = (a) => a.reduce((s, e) => s + e.kills, 0);
+      html += `<div class="sbtitle">Teams · ${this._scoreLimit} to win</div>`;
+      html += this._teamBlock('Red Team', red, sum(red), '#ff6b6b');
+      html += this._teamBlock('Blue Team', blue, sum(blue), '#6b9cff');
+    } else {
+      const sorted = [...b].sort((a, c) => c.kills - a.kills);
+      html += `<div class="sbtitle">Free-for-all · ${this._scoreLimit} kills to win</div>`;
+      html += `<table class="sbtable"><tr><th>Player</th><th>K</th><th>D</th></tr>${sorted.map((e) => this._sbRow(e)).join('')}</table>`;
+    }
+    this.sbEl.innerHTML = html;
+  }
+  _teamBlock(name, arr, score, color) {
+    const sorted = [...arr].sort((a, c) => c.kills - a.kills);
+    return `<div class="sbteamhdr" style="color:${color}">${name} — ${score}</div>` +
+      `<table class="sbtable">${sorted.map((e) => this._sbRow(e)).join('')}</table>`;
+  }
+  _sbRow(e) {
+    return `<tr class="${e.you ? 'sbyou' : ''}"><td>${e.bot ? '🤖 ' : ''}${escapeHtml(e.name)}${e.you ? ' (you)' : ''}</td><td>${e.kills}</td><td>${e.deaths}</td></tr>`;
+  }
+  showRoundOver(winner) {
+    this.roEl.style.display = 'flex';
+    this.roEl.innerHTML = `<div class="rocard"><div class="rowin">${escapeHtml(winner || 'Nobody')} wins!</div><div class="rosub">Next round starting…</div></div>`;
+  }
+  hideRoundOver() { this.roEl.style.display = 'none'; }
 
   _buildChat() {
     const ui = document.getElementById('ui');
@@ -257,6 +301,22 @@ export class HUD {
       #hitmarker::before { transform:translate(-50%,-50%) rotate(45deg); }
       #hitmarker::after  { transform:translate(-50%,-50%) rotate(-45deg); }
       #hitmarker.head::before, #hitmarker.head::after { background:#ffd23a; box-shadow:0 0 6px #ffb02a; }
+      #scoreboard { display:none; position:absolute; left:50%; top:80px; transform:translateX(-50%); min-width:340px; max-width:460px;
+        background:rgba(8,12,22,0.82); border:1px solid rgba(255,255,255,0.14); border-radius:12px; padding:14px 18px;
+        text-shadow:0 1px 2px #000; box-shadow:0 18px 50px rgba(0,0,0,0.6); }
+      #scoreboard .sbtitle { text-align:center; font-size:13px; opacity:0.7; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+      #scoreboard .sbteamhdr { font-weight:800; font-size:15px; margin:8px 0 4px; }
+      #scoreboard .sbtable { width:100%; border-collapse:collapse; font-size:14px; }
+      #scoreboard .sbtable th { text-align:left; font-size:11px; opacity:0.55; font-weight:600; padding:2px 6px; }
+      #scoreboard .sbtable th:not(:first-child), #scoreboard .sbtable td:not(:first-child) { text-align:center; width:38px; }
+      #scoreboard .sbtable td { padding:3px 6px; border-top:1px solid rgba(255,255,255,0.07); }
+      #scoreboard .sbyou td { color:#ffe27a; font-weight:700; }
+      #roundover { display:none; position:absolute; inset:0; align-items:center; justify-content:center; pointer-events:none; z-index:22; }
+      #roundover .rocard { text-align:center; background:rgba(8,12,22,0.7); padding:30px 50px; border-radius:18px;
+        border:1px solid rgba(255,255,255,0.14); box-shadow:0 24px 70px rgba(0,0,0,0.6); }
+      #roundover .rowin { font-size:40px; font-weight:900; letter-spacing:1px; background:linear-gradient(180deg,#ffe08a,#ff8f3a);
+        -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+      #roundover .rosub { margin-top:8px; font-size:15px; opacity:0.8; }
     `;
     document.head.appendChild(s);
   }

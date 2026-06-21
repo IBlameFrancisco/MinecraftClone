@@ -87,7 +87,7 @@ export class Plasmas {
     s.scale.setScalar(0.5); s.position.copy(pos);
     this.group.add(s); this.trail.push({ s, life: 0.25, max: 0.25 });
   }
-  update(dt, world, mobs, mp, onImpact) {
+  update(dt, world, mobs, mp, portals, onImpact) {
     for (let i = this.trail.length - 1; i >= 0; i--) {
       const tr = this.trail[i]; tr.life -= dt;
       if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
@@ -99,6 +99,7 @@ export class Plasmas {
       p.halo.scale.setScalar(1.1 + Math.sin(p.t * 34) * 0.2);
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
+      if (portals) portals.redirect(p);          // fly through portals
       p.m.position.copy(p.pos);
       this._spawnTrail(p.pos);
       let hit = p.travelled > p.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
@@ -147,7 +148,7 @@ export class Rockets {
     s.scale.setScalar(0.4); s.position.copy(pos);
     this.group.add(s); this.trail.push({ s, life: 0.3, max: 0.3 });
   }
-  update(dt, world, mobs, mp, onImpact) {
+  update(dt, world, mobs, mp, portals, onImpact) {
     for (let i = this.trail.length - 1; i >= 0; i--) {
       const tr = this.trail[i]; tr.life -= dt;
       if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
@@ -157,6 +158,7 @@ export class Rockets {
       const p = this.list[i];
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
+      if (portals) portals.redirect(p);          // fly through portals
       p.m.position.copy(p.pos);
       this._puff(p.pos);
       let hit = p.travelled > p.gun.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
@@ -205,19 +207,42 @@ export class Portals {
     this.meshes[slot] = m;
     this.slots[slot] = { pos: pos.clone(), normal: normal.clone() };
   }
-  update(dt, player) {
-    this.cooldown -= dt;
+  // Teleport any body (player / mob / bot) whose midsection enters a portal.
+  update(dt, bodies) {
     for (const m of this.meshes) if (m) m.rotation.z += dt * 1.5;
-    if (this.cooldown > 0 || !this.slots[0] || !this.slots[1]) return;
-    const feet = new THREE.Vector3(player.pos.x, player.pos.y + 0.9, player.pos.z);
-    for (let s = 0; s < 2; s++) {
-      if (feet.distanceTo(this.slots[s].pos) < 1.1) {
-        const dest = this.slots[1 - s];
-        player.pos.set(dest.pos.x + dest.normal.x * 1.2, dest.pos.y - 0.6, dest.pos.z + dest.normal.z * 1.2);
-        this.cooldown = 0.7;
-        return;
+    if (!this.slots[0] || !this.slots[1]) return;
+    for (const body of bodies) {
+      if (!body) continue;
+      if (body._portalCD > 0) { body._portalCD -= dt; continue; }
+      const fx = body.pos.x, fy = body.pos.y + 0.9, fz = body.pos.z;
+      for (let s = 0; s < 2; s++) {
+        const p = this.slots[s].pos;
+        if ((fx - p.x) ** 2 + (fy - p.y) ** 2 + (fz - p.z) ** 2 < 1.21) {
+          const dest = this.slots[1 - s];
+          body.pos.set(dest.pos.x + dest.normal.x * 1.2, dest.pos.y - 0.6, dest.pos.z + dest.normal.z * 1.2);
+          body._portalCD = 0.7;
+          break;
+        }
       }
     }
+  }
+
+  // Redirect a projectile that flies into a portal out of the paired one (keeps
+  // speed, reorients along the exit normal). Returns true if teleported.
+  redirect(proj) {
+    if (!this.slots[0] || !this.slots[1]) return false;
+    if (proj._portalCD > 0) { proj._portalCD -= 0.016; return false; }
+    for (let s = 0; s < 2; s++) {
+      if (proj.pos.distanceToSquared(this.slots[s].pos) < 0.64) {
+        const dest = this.slots[1 - s];
+        const speed = proj.vel.length();
+        proj.pos.copy(dest.pos).addScaledVector(dest.normal, 0.6);
+        proj.vel.copy(dest.normal).multiplyScalar(speed);
+        proj._portalCD = 0.4;
+        return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -256,6 +281,38 @@ export class MuzzleFlash {
       const k = Math.max(0, this.life / this.max);
       this.spr.material.opacity = k;
       this.spr.scale.setScalar((this._base || 1) * (0.7 + 0.5 * k));
+    }
+  }
+}
+
+// ---------------- Floating damage numbers ----------------
+export class DamageNumbers {
+  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.cache = new Map(); }
+  _tex(text, color) {
+    const key = color + text;
+    if (this.cache.has(key)) return this.cache.get(key);
+    const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+    const g = c.getContext('2d');
+    g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 6; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.strokeText(text, 64, 32);
+    g.fillStyle = color; g.fillText(text, 64, 32);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    this.cache.set(key, t); return t;
+  }
+  spawn(pos, amount, head) {
+    const tex = this._tex(head ? `${amount}!` : `${amount}`, head ? '#ffd23a' : '#ffffff');
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, fog: false }));
+    spr.scale.set(head ? 0.9 : 0.7, head ? 0.45 : 0.35, 1);
+    spr.position.copy(pos); spr.position.y += 0.4 + Math.random() * 0.3;
+    spr.renderOrder = 1001;
+    this.group.add(spr);
+    this.list.push({ spr, life: 0.9, max: 0.9, vx: (Math.random() - 0.5) * 0.5 });
+  }
+  update(dt) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const d = this.list[i]; d.life -= dt;
+      if (d.life <= 0) { this.group.remove(d.spr); d.spr.material.dispose(); this.list.splice(i, 1); }
+      else { d.spr.position.y += dt * 1.1; d.spr.position.x += d.vx * dt; d.spr.material.opacity = Math.min(1, d.life / d.max * 1.5); }
     }
   }
 }
