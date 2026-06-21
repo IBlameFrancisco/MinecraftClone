@@ -20,6 +20,13 @@ const LIGHT_DAY = new THREE.Color(1.0, 0.99, 0.96);
 const LIGHT_NIGHT = new THREE.Color(0.17, 0.21, 0.34);
 const LIGHT_DUSK = new THREE.Color(1.0, 0.66, 0.45);
 
+// ---- Horror mode (battle arena): a perpetual blood-dark, fog-choked night. ----
+const HORROR_TOP = sc(0.018, 0.006, 0.012);
+const HORROR_HORIZON = sc(0.11, 0.018, 0.024);
+const HORROR_FOG = sc(0.05, 0.015, 0.02);
+const HORROR_TINT = new THREE.Color(0.30, 0.20, 0.22);
+const _MOON_DIR = new THREE.Vector3(0.35, 0.78, 0.3).normalize();
+
 function radialSprite(inner, outer) {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -114,10 +121,27 @@ export class Sky {
     this.dirColor = new THREE.Color(1, 1, 1);
     this.dirIntensity = 1;
     this.ambIntensity = 0.6;
+    this.horror = false;
+    this._flick = 1;
+    this._flickT = 0;
+    this._normalFog = [this.fog.near, this.fog.far];
+  }
+
+  // Toggle the creepy battle-arena atmosphere.
+  setHorror(on) {
+    if (this.horror === on) return;
+    this.horror = on;
+    if (!on) {
+      // restore the sun/moon/cloud look the day/night cycle expects
+      this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1];
+      this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(40);
+      this.sun.material.color.setRGB(1, 1, 1); this.clouds.material.opacity = 0.8;
+    }
   }
 
   update(dt) {
     this.time = (this.time + dt / DAY_LENGTH) % 1;
+    if (this.horror) return this._updateHorror(dt);
 
     // Sun angle: noon at t=0.25, midnight at t=0.75.
     const ang = this.time * Math.PI * 2 - Math.PI / 2;
@@ -167,7 +191,48 @@ export class Sky {
     return this.time;
   }
 
+  // Perpetual blood-dark night with heavy, close fog and a flickering dim tint
+  // (like failing torches) — the battle arena's horror atmosphere.
+  _updateHorror(dt) {
+    this._flickT += dt;
+    // mostly steady, with a slow breathe + occasional sharp dips (a guttering flame)
+    const breathe = 0.92 + 0.08 * Math.sin(this._flickT * 2.7);
+    const dip = (Math.random() < 0.035) ? 0.55 + Math.random() * 0.25 : 1.0;
+    this._flick += (breathe * dip - this._flick) * Math.min(1, 11 * dt);
+    const f = this._flick;
+
+    this.uniforms.topColor.value.copy(HORROR_TOP).multiplyScalar(f);
+    this.uniforms.horizonColor.value.copy(HORROR_HORIZON).multiplyScalar(f);
+    this.fog.color.copy(HORROR_FOG).multiplyScalar(f);
+    this.fog.near = 9; this.fog.far = 58;
+    setWorldTint(HORROR_TINT.r * f, HORROR_TINT.g * f, HORROR_TINT.b * f);
+
+    // Entity (bot/mob) lighting — dim and grim so figures read as shadows.
+    this.isNight = true;
+    this.sunDir.set(0.3, 0.55, 0.25).normalize();
+    this.dirColor.copy(HORROR_TINT);
+    this.dirIntensity = 0.4 * f;
+    this.ambIntensity = 0.34 * f;
+    setWaterEnv(this.sunDir, HORROR_HORIZON, 0.85);
+
+    // Blood moon hangs overhead; no sun, only faint roiling clouds.
+    const cam = this.camera.position;
+    this.dome.position.copy(cam);
+    this.sun.material.opacity = 0;
+    this.moon.material.color.setRGB(0.75, 0.11, 0.09);
+    this.moon.scale.setScalar(78);
+    this.moon.material.opacity = 0.9 * f;
+    this.moon.position.copy(cam).addScaledVector(_MOON_DIR, 470);
+    this.clouds.position.x = cam.x; this.clouds.position.z = cam.z;
+    this.clouds.material.map.offset.x += dt * 0.0026;
+    this.clouds.material.map.offset.y += dt * 0.0012;
+    this.clouds.material.color.setRGB(0.18 * f, 0.045 * f, 0.05 * f);
+    this.clouds.material.opacity = 0.3;
+    return this.time;
+  }
+
   clockString() {
+    if (this.horror) return '🩸 the witching hour';
     // Map t=0.25 -> 12:00, t=0 -> 06:00, t=0.5 -> 18:00.
     const hours = (this.time * 24 + 6) % 24;
     const h = Math.floor(hours);

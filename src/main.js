@@ -570,6 +570,7 @@ function setGameMode(m) {
   mode = m;
   player.setMode(m === CREATIVE ? 1 : 0);          // creative flies; survival/battle walk
   inventory.setMode(m === CREATIVE || m === BATTLE); // battle uses the infinite (creative) set
+  sky.setHorror(m === BATTLE);                       // creepy arena atmosphere
   if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }
   else {
     hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear(); hud.setGrenades(0);
