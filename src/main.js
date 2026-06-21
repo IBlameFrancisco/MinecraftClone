@@ -1482,34 +1482,46 @@ function rocketImpact(pos, gun) {
 }
 
 // ---- Black hole bomb ----
-// The singularity's gravity well: drags bots/mobs in kinematically (their AABB
-// collision resolves it) and shoves the local player's velocity (so it can be
-// fought); the core shreds anything inside ~3 blocks. Remotes take the DOT only.
+// The singularity's gravity well. Stability matters: the pull ramps to zero inside
+// a capture radius (so nothing oscillates back and forth through the centre) and is
+// speed-capped (so it can never fling an entity), and the local player is only ever
+// lifted, never slammed down into the floor when the hole sits at ground level.
+const BH_CAPTURE = 2.4, BH_MAXSPD = 13;
 function blackHoleField(pos, dt, gun) {
   const R = gun.radius, R2 = R * R;
-  const well = (cx, cy, cz, scale) => {
+  const well = (cx, cy, cz) => {
     const dx = pos.x - cx, dy = pos.y - cy, dz = pos.z - cz, d2 = dx * dx + dy * dy + dz * dz;
     if (d2 > R2) return null;
     const d = Math.sqrt(d2) || 0.001, fall = 1 - d / R;
-    return { d, ux: dx / d, uy: dy / d, uz: dz / d, spd: gun.pull * (0.3 + fall * fall) * scale };  // inward blocks/sec
+    const grip = Math.min(1, d / BH_CAPTURE);          // fade the pull to 0 at the centre (no oscillation)
+    const spd = Math.min(BH_MAXSPD, gun.pull * (0.25 + fall * fall)) * grip;  // inward blocks/sec, capped
+    return { d, ux: dx / d, uy: dy / d, uz: dz / d, spd };
   };
   if (isAuthority()) for (const b of botMgr.bots) {
     if (!b.alive || friendly(b.id)) continue;
-    const w = well(b.pos.x, b.pos.y + 1, b.pos.z, 1); if (!w) continue;
-    b.pos.x += w.ux * w.spd * dt; b.pos.z += w.uz * w.spd * dt; b.pos.y += w.uy * w.spd * dt * 0.6;
-    if (w.d < 3.2) botHurt(b.id, Math.max(1, Math.round(gun.damage * dt * 4)), myName(), false);
+    const w = well(b.pos.x, b.pos.y + 1, b.pos.z); if (!w) continue;
+    b.pos.x += w.ux * w.spd * dt; b.pos.z += w.uz * w.spd * dt;
+    if (w.uy > 0) b.pos.y += w.uy * w.spd * dt * 0.5;          // only lift, don't shove into the floor
+    if (w.d < BH_CAPTURE) botHurt(b.id, Math.max(1, Math.round(gun.damage * dt * 4)), myName(), false);
   }
   for (const m of mobs.list) {
-    const w = well(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, 1); if (!w) continue;
-    m.pos.x += w.ux * w.spd * dt; m.pos.z += w.uz * w.spd * dt; m.pos.y += w.uy * w.spd * dt * 0.6;
-    if (w.d < 3.2) m.hurt(Math.max(1, Math.round(gun.damage * dt * 4)), pos.x, pos.z);
+    const w = well(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z); if (!w) continue;
+    m.pos.x += w.ux * w.spd * dt; m.pos.z += w.uz * w.spd * dt;
+    if (w.uy > 0) m.pos.y += w.uy * w.spd * dt * 0.5;
+    if (w.d < BH_CAPTURE) m.hurt(Math.max(1, Math.round(gun.damage * dt * 4)), pos.x, pos.z);
   }
+  // Local player: nudge velocity toward the (capped) inward pull, then hard-clamp the
+  // resulting speed so the suck can never fling them. Vertical only ever lifts.
   if ((mode === BATTLE || mode === SURVIVAL) && !dead && !eliminated) {
-    const w = well(player.pos.x, player.pos.y + 0.9, player.pos.z, 0.5);
+    const w = well(player.pos.x, player.pos.y + 0.9, player.pos.z);
     if (w) {
-      const a = w.spd * 2.6;
-      player.vel.x += w.ux * a * dt; player.vel.z += w.uz * a * dt; player.vel.y += w.uy * a * dt * 0.6;
-      if (w.d < 3.2 && invuln <= 0) damagePlayer(Math.max(1, Math.round(gun.damage * dt * 2)), pos.x, pos.z);
+      const a = w.spd * 6 * dt;                                 // inward acceleration the player can fight
+      player.vel.x += w.ux * a; player.vel.z += w.uz * a;
+      if (w.uy > 0.2) player.vel.y += w.uy * a * 0.5;           // gentle lift when the hole is overhead
+      const hs = Math.hypot(player.vel.x, player.vel.z);        // safety clamp so it can never fling them
+      if (hs > BH_MAXSPD) { const s = BH_MAXSPD / hs; player.vel.x *= s; player.vel.z *= s; }
+      if (player.vel.y > 7) player.vel.y = 7;
+      if (w.d < BH_CAPTURE && invuln <= 0) damagePlayer(Math.max(1, Math.round(gun.damage * dt * 2)), pos.x, pos.z);
     }
   }
   if (mp.online) for (const { id } of mp.playersNear(pos, R)) { if (friendly(id)) continue; mp.sendHit(id, Math.max(1, Math.round(gun.damage * dt * 2.5))); }
