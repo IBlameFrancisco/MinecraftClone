@@ -13,8 +13,8 @@ works regardless of the repository name.
 ## Highlights
 
 - **Cinematic rendering:** ACES tone-mapping, bloom, vignette/grade, FXAA, drifting clouds, shader water.
-- **Guns:** handgun + sniper (hitscan; the sniper has a real scope overlay), plasma gun (glowing AoE bolts), portal gun (two portals, teleport). Bright bloom-lit tracers, muzzle flash and recoil, first-person viewmodels.
-- **Battle mode (PvP):** a fixed, symmetric **arena** — checkered floor, lit perimeter wall, central beacon, pillars + cover. Spawn with the full gun loadout, fight other players, respawn on death, and watch the **kill feed**.
+- **Nine guns:** handgun, SMG, assault rifle, shotgun, sniper (real scope), railgun (piercing), plasma gun, rocket launcher (AoE), portal gun. Bloom-lit tracers, per-gun recoil, headshots + floating damage numbers, full/semi-auto fire, ammo/reload.
+- **Battle mode (PvP + bots):** a fixed, symmetric **arena**. **Free-for-all or Teams**, with **AI bots** (Easy→Insane) filling empty slots so you can play solo or 2v2. Hold-**Tab** scoreboard, score-limit rounds, kill feed, radar, and health/ammo pickups. Bots are host-authoritative so co-op stays in sync.
 - **Co-op (P2P / WebRTC):** host a room, share the code; world seed + block edits + player avatars sync — and players can damage each other. No server needed.
 - **Seeds:** enter a seed (or 🎲) and generate a fresh world; `?seed=` URL param.
 - **Survival/Creative + difficulties** (Peaceful→Hardcore), tools, crafting (2×2 + crafting table), chests, mobs (pig/cow/sheep, zombie/skeleton/creeper), surface-aware footsteps, and a dynamic loading screen.

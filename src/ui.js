@@ -16,7 +16,26 @@ export class HUD {
     const ui = document.getElementById('ui');
     this.sbEl = document.createElement('div'); this.sbEl.id = 'scoreboard';
     this.roEl = document.createElement('div'); this.roEl.id = 'roundover';
-    ui.appendChild(this.sbEl); ui.appendChild(this.roEl);
+    this.radarEl = document.createElement('canvas'); this.radarEl.id = 'radar'; this.radarEl.width = 144; this.radarEl.height = 144;
+    this.radarCtx = this.radarEl.getContext('2d');
+    ui.appendChild(this.sbEl); ui.appendChild(this.roEl); ui.appendChild(this.radarEl);
+  }
+
+  showRadar(on) { this.radarEl.style.display = on ? 'block' : 'none'; }
+  drawRadar(blips) {
+    const ctx = this.radarCtx, S = 144, R = S / 2, rad = R - 4;
+    ctx.clearRect(0, 0, S, S);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.arc(R, R, rad, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(R, R, rad, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(R, R, rad / 2, 0, 7); ctx.stroke();
+    for (const b of blips) {
+      const x = R + b.rx * rad, y = R - b.ry * rad;
+      ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(x, y, 3, 0, 7); ctx.fill();
+    }
+    // the player (an arrow pointing up = facing)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.moveTo(R, R - 6); ctx.lineTo(R - 4, R + 4); ctx.lineTo(R + 4, R + 4); ctx.closePath(); ctx.fill();
   }
 
   setScoreboard(board, teamMode, scoreLimit, myTeam) {
@@ -317,6 +336,8 @@ export class HUD {
       #roundover .rowin { font-size:40px; font-weight:900; letter-spacing:1px; background:linear-gradient(180deg,#ffe08a,#ff8f3a);
         -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
       #roundover .rosub { margin-top:8px; font-size:15px; opacity:0.8; }
+      #radar { display:none; position:absolute; left:14px; bottom:14px; width:144px; height:144px;
+        filter:drop-shadow(0 3px 8px rgba(0,0,0,0.6)); }
     `;
     document.head.appendChild(s);
   }

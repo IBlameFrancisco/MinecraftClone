@@ -33,7 +33,8 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
 import { Tracers, Plasmas, Rockets, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
-import { BotManager, tintAvatar } from './bots.js';
+import { BotManager } from './bots.js';
+import { Pickups } from './pickups.js';
 
 const SURVIVAL = 0, CREATIVE = 1, BATTLE = 2;
 const MELEE_REACH = 4;
@@ -155,6 +156,7 @@ const rockets = new Rockets(scene);
 const portals = new Portals(scene);
 const botMgr = new BotManager(scene);
 const damageNumbers = new DamageNumbers(scene);
+const pickups = new Pickups(scene);
 scene.add(camera); // so first-person gun viewmodels (camera children) render
 const muzzle = new MuzzleFlash(camera);
 const isTyping = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
@@ -438,7 +440,7 @@ const mpHandlers = {
   onStatus: setMpStatus,
   onChat: (name, text) => hud.addChat(name, text, false),
   onSystem: (msg) => { hud.addChat(null, msg, true); hud.setPlayers(mp.playerList()); },
-  onRoster: () => hud.setPlayers(mp.playerList()),
+  onRoster: () => { hud.setPlayers(mp.playerList()); if (mode === BATTLE && isAuthority()) { rebuildBoard(); broadcastBoard(); } },
   // PvP: someone hit me — apply the damage locally and remember who, for the kill feed.
   onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg); },
   onKillFeed: (victim, killer) => hud.addKill(victim, killer),
@@ -485,8 +487,11 @@ function setGameMode(m) {
   mode = m;
   player.setMode(m === CREATIVE ? 1 : 0);          // creative flies; survival/battle walk
   inventory.setMode(m === CREATIVE || m === BATTLE); // battle uses the infinite (creative) set
-  if (m === BATTLE) hud.setBattle(true);
-  else { hud.setBattle(false); hud.setMode(m === SURVIVAL); if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); } }
+  if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }
+  else {
+    hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear();
+    if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
+  }
   resetBreak();
 }
 function toggleMode() {
@@ -676,6 +681,29 @@ function manageBots(dt) {
     if (!b.alive && !b.deathProcessed) { b.deathProcessed = true; onBotKilled(b); }
     else if (!b.alive && b.respawnIn > 0) { b.respawnIn -= dt; if (b.respawnIn <= 0) respawnBot(b); }
   }
+}
+
+// Arena pickups (health + ammo) — purely local; each player grabs their own.
+function setupArenaPickups() {
+  const F = ARENA.FLOOR + 1.4, spots = [];
+  for (const [x, z] of [[16, 0], [-16, 0], [0, 16], [0, -16]]) spots.push({ x, y: F, z, kind: 'health' });
+  for (const [x, z] of [[16, 16], [-16, 16], [16, -16], [-16, -16]]) spots.push({ x, y: F, z, kind: 'ammo' });
+  pickups.setup(spots);
+}
+function applyPickup(kind) {
+  if (kind === 'health') {
+    if (health >= 20) return false;
+    health = Math.min(20, health + 8); hud.setHealth(health);
+    sfx.place(); particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [80, 230, 120], 16);
+    return true;
+  }
+  let refilled = false;
+  for (const id of BATTLE_LOADOUT) { const g = gunOf(id); if (g && g.mag && (ammo[id] === undefined || ammo[id] < g.mag)) { ammo[id] = g.mag; refilled = true; } }
+  if (refilled) {
+    if (reloadingGun >= 0) reloadingGun = -1;
+    sfx.place(); particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [240, 200, 80], 16);
+  }
+  return refilled;
 }
 
 // Build the combatant target list bots reason about (players + bots).
@@ -1240,6 +1268,20 @@ function frame() {
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
     }
     if (matchOverTimer > 0) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
+    pickups.update(dt, player.pos, active ? applyPickup : () => false);
+
+    // Radar: teammates green, enemies red, rotated so you face up.
+    const RANGE = 64, blips = [], sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+    const addBlip = (pos, team, alive) => {
+      if (!alive) return;
+      const dx = pos.x - player.pos.x, dz = pos.z - player.pos.z;
+      if (dx * dx + dz * dz > RANGE * RANGE) return;
+      blips.push({ rx: (dx * cosY - dz * sinY) / RANGE, ry: -(dx * sinY + dz * cosY) / RANGE,
+        color: (teamMode && team === myTeam) ? '#57d977' : '#ff5b5b' });
+    };
+    for (const [id, r] of mp.remotes) addBlip(r.group.position, teamOf(id), r.group.visible);
+    if (isAuthority()) for (const b of botMgr.bots) addBlip(b.pos, b.team, b.alive);
+    hud.drawRadar(blips);
   }
 
   // Interaction
