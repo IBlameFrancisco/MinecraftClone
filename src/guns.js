@@ -227,6 +227,27 @@ export class Portals {
     }
   }
 
+  // Ray vs the portal discs → { dist, exitPos, exitDir } for the nearest one a
+  // hitscan shot would pass through, or null. Lets bullets travel through portals.
+  rayPortal(origin, dir, maxDist) {
+    if (!this.slots[0] || !this.slots[1]) return null;
+    let best = null;
+    for (let s = 0; s < 2; s++) {
+      const P = this.slots[s].pos, N = this.slots[s].normal;
+      const denom = dir.dot(N);
+      if (Math.abs(denom) < 1e-4) continue;
+      const t = (P.x - origin.x) * N.x + (P.y - origin.y) * N.y + (P.z - origin.z) * N.z;
+      const tt = t / denom;
+      if (tt <= 0.06 || tt >= maxDist) continue;
+      const hx = origin.x + dir.x * tt, hy = origin.y + dir.y * tt, hz = origin.z + dir.z * tt;
+      if ((hx - P.x) ** 2 + (hy - P.y) ** 2 + (hz - P.z) ** 2 > 0.36) continue;   // within ~0.6 radius
+      if (!best || tt < best.dist) best = { dist: tt, s };
+    }
+    if (!best) return null;
+    const dest = this.slots[1 - best.s];
+    return { dist: best.dist, exitPos: dest.pos.clone().addScaledVector(dest.normal, 0.35), exitDir: dest.normal.clone() };
+  }
+
   // Redirect a projectile that flies into a portal out of the paired one (keeps
   // speed, reorients along the exit normal). Returns true if teleported.
   redirect(proj) {

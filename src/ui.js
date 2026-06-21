@@ -18,6 +18,8 @@ export class HUD {
     this.roEl = document.createElement('div'); this.roEl.id = 'roundover';
     this.radarEl = document.createElement('canvas'); this.radarEl.id = 'radar'; this.radarEl.width = 144; this.radarEl.height = 144;
     this.radarCtx = this.radarEl.getContext('2d');
+    this.modeInfoEl = document.createElement('div'); this.modeInfoEl.id = 'modeinfo';
+    ui.appendChild(this.modeInfoEl);
     this.announceEl = document.createElement('div'); this.announceEl.id = 'announce';
     this.dmgDirEl = document.createElement('div'); this.dmgDirEl.id = 'dmgdir'; this.dmgDirEl.innerHTML = '<div class="wedge"></div>';
     ui.appendChild(this.sbEl); ui.appendChild(this.roEl); ui.appendChild(this.radarEl);
@@ -98,6 +100,7 @@ export class HUD {
     this.roEl.innerHTML = `<div class="rocard"><div class="rowin">${escapeHtml(winner || 'Nobody')} wins!</div><div class="rosub">Next round starting…</div></div>`;
   }
   hideRoundOver() { this.roEl.style.display = 'none'; }
+  setModeInfo(text) { this.modeInfoEl.style.display = text ? 'block' : 'none'; if (text) this.modeInfoEl.textContent = text; }
 
   _buildChat() {
     const ui = document.getElementById('ui');
@@ -364,6 +367,8 @@ export class HUD {
       #roundover .rosub { margin-top:8px; font-size:15px; opacity:0.8; }
       #radar { display:none; position:absolute; left:14px; bottom:14px; width:144px; height:144px;
         filter:drop-shadow(0 3px 8px rgba(0,0,0,0.6)); }
+      #modeinfo { display:none; position:absolute; left:50%; top:48px; transform:translateX(-50%); font-size:14px; font-weight:700;
+        background:rgba(0,0,0,0.4); padding:5px 14px; border-radius:9px; text-shadow:0 1px 2px #000; letter-spacing:0.4px; }
       #announce { position:absolute; left:50%; top:24%; transform:translateX(-50%); opacity:0; pointer-events:none;
         font-size:38px; font-weight:900; letter-spacing:2px; text-transform:uppercase; white-space:nowrap;
         text-shadow:0 2px 10px rgba(0,0,0,0.9), 0 0 18px rgba(0,0,0,0.5); }

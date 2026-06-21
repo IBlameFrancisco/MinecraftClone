@@ -225,11 +225,13 @@ let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
 let triggerConsumed = false;   // for semi-auto guns: one shot per click
 const ammo = {};
-let reloadingGun = -1, reloadTimer = 0, recoilPitch = 0, recoilYaw = 0, recoilKick = 0;
+let reloadingGun = -1, reloadTimer = 0, reloadDur = 1, recoilPitch = 0, recoilYaw = 0, vmRecoil = 0;
+// Viewmodel animation + aim-down-sights state.
+let adsAmount = 0, vmEquip = 0, vmSwayX = 0, vmSwayY = 0, lastYaw = 0, lastPitch = 0;
 function ammoFor(gun, id) { if (!gun.mag) return Infinity; if (ammo[id] === undefined) ammo[id] = gun.mag; return ammo[id]; }
 function startReload(gun, id) {
   if (!gun.mag || reloadingGun === id || (ammo[id] ?? gun.mag) >= gun.mag) return;
-  reloadingGun = id; reloadTimer = gun.reload;
+  reloadingGun = id; reloadTimer = gun.reload; reloadDur = gun.reload;
 }
 function resetBreak() { breakKey = null; breakProgress = 0; crackMesh.visible = false; }
 
@@ -303,6 +305,7 @@ function loadWorld(seedStr, asArena) {
   arena = asArena;
   world.regenerate(hashSeed(currentSeedStr), asArena);
   edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll(); botMgr.clear();
+  setupHill(false); setupZone(false);
   if (!asArena && mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
   dead = false; resetBreak(); startWorld();
 }
@@ -371,27 +374,38 @@ modeCreaBtn.addEventListener('click', () => { menuMode = CREATIVE; refreshModePi
 modeBattleBtn.addEventListener('click', () => { menuMode = BATTLE; refreshModePicker(); });
 document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
 
-// ---------- Battle setup (FFA/Teams, size, bot difficulty, score limit) ----------
-const battleCfg = { team: false, size: 6, botDiff: 'normal', scoreLimit: 20 };
+// ---------- Battle setup (game mode, FFA/Teams, size, bot difficulty, score) ----------
+const battleCfg = { mode: 'dm', team: false, size: 6, botDiff: 'normal', scoreLimit: 20 };
+const bsGameMode = document.getElementById('bsGameMode');
+const bsTeamRow = document.getElementById('bsTeamRow');
 const bsFFA = document.getElementById('bsModeFFA');
 const bsTeam = document.getElementById('bsModeTeam');
 const bsSize = document.getElementById('bsSize');
 const bsSizeLabel = document.getElementById('bsSizeLabel');
 const bsBotDiff = document.getElementById('bsBotDiff');
 const bsScore = document.getElementById('bsScore');
+const bsScoreRow = bsScore.closest('.bsrow');
+// Modes that force free-for-all / co-op rather than letting you pick teams.
+const FORCES_FFA = { gungame: true, br: true };
+const FORCES_COOP = { wave: true };
 function fillSizeOptions() {
-  const team = battleCfg.team;
-  bsSizeLabel.textContent = team ? 'Team size' : 'Combatants';
-  const lo = team ? 1 : 2, hi = team ? 4 : 8, def = team ? 2 : 6;
+  const teamSel = battleCfg.team && !FORCES_FFA[battleCfg.mode] && !FORCES_COOP[battleCfg.mode];
+  const wave = battleCfg.mode === 'wave';
+  bsSizeLabel.textContent = wave ? 'Wave size' : teamSel ? 'Team size' : 'Combatants';
+  const lo = teamSel ? 1 : 2, hi = teamSel ? 4 : 8, def = teamSel ? 2 : 6;
   bsSize.innerHTML = '';
-  for (let n = lo; n <= hi; n++) { const o = document.createElement('option'); o.value = n; o.textContent = team ? `${n} v ${n}` : n; bsSize.appendChild(o); }
+  for (let n = lo; n <= hi; n++) { const o = document.createElement('option'); o.value = n; o.textContent = teamSel ? `${n} v ${n}` : n; bsSize.appendChild(o); }
   battleCfg.size = Math.min(hi, Math.max(lo, def));
   bsSize.value = battleCfg.size;
 }
 function refreshBattleSetup() {
+  const m = battleCfg.mode;
+  bsTeamRow.style.display = (FORCES_FFA[m] || FORCES_COOP[m]) ? 'none' : 'flex';
+  bsScoreRow.style.display = (m === 'gungame' || m === 'br') ? 'none' : 'flex';   // auto win conditions
   bsFFA.classList.toggle('active', !battleCfg.team);
   bsTeam.classList.toggle('active', battleCfg.team);
 }
+bsGameMode.addEventListener('change', (e) => { battleCfg.mode = e.target.value; fillSizeOptions(); refreshBattleSetup(); });
 bsFFA.addEventListener('click', () => { battleCfg.team = false; fillSizeOptions(); refreshBattleSetup(); });
 bsTeam.addEventListener('click', () => { battleCfg.team = true; fillSizeOptions(); refreshBattleSetup(); });
 bsSize.addEventListener('change', (e) => { battleCfg.size = parseInt(e.target.value, 10); });
@@ -581,7 +595,7 @@ function die() {
   refreshOverlays();
 }
 
-// Battle: no permadeath — credit the kill, then respawn at a (team) spawn point.
+// Battle: credit the kill. Most modes respawn; Battle Royale eliminates you.
 function battleDeath() {
   const now = performance.now() / 1000;
   const killer = (now - lastHitTime < 10) ? lastHitBy : null;
@@ -589,16 +603,34 @@ function battleDeath() {
   if (mp.online) mp.sendDeath(killer);
   if (isAuthority()) registerKill(killer, selfId(), myName());
   particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 80, 80], 30);
-  sfx.gun('sniper');
+  sfx.gun('sniper'); lastHitBy = null;
+  if (gameMode === 'br') {
+    eliminated = true;
+    player.pos.set(0.5, ARENA.FLOOR + 24, 0.5); player.vel.set(0, 0, 0);
+    health = 20; hud.setHealth(20); invuln = 999;
+    hud.announce('Eliminated', '#ff5b5b'); hud.flashHurt();
+    return;
+  }
   const sp = teamSpawnPoint(myTeam);
   player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
-  health = 20; hud.setHealth(20); invuln = 1.6; lastHitBy = null;
+  health = 20; hud.setHealth(20); invuln = 1.6;
+  if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
   hud.flashHurt();
 }
 
 // ---------- Battle match: teams, bots, scoreboard, rounds ----------
 const TEAM_NONE = -1, TEAM_RED = 0, TEAM_BLUE = 1;
 let teamMode = false, myTeam = TEAM_NONE, scoreLimit = 20;
+// Game-mode state (dm / gungame / koth / br / wave).
+let gameMode = 'dm';
+let gunLevelShown = -1;          // gun game: which ladder weapon we're holding
+let hillTimer = 0;               // koth scoring tick
+let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
+let waveNum = 0, waveBreak = 0;  // wave survival
+const GUNGAME_LADDER = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, PLASMA_GUN, SNIPER, RAILGUN, ROCKET_LAUNCHER];
+const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
+const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
+let hillMesh = null, zoneMesh = null;
 let myKills = 0, myDeaths = 0;
 const humanScore = new Map();   // remote human id -> { k, d }
 const teamAssign = new Map();   // combatant id -> team
@@ -632,18 +664,28 @@ function computeCoverPoints() {
 
 // Build the match (authority spawns bots; everyone rebuilds the board).
 function setupMatch() {
-  teamMode = battleCfg.team; scoreLimit = battleCfg.scoreLimit;
+  gameMode = battleCfg.mode;
+  teamMode = battleCfg.team;
+  if (gameMode === 'gungame' || gameMode === 'br') teamMode = false;
+  if (gameMode === 'wave') teamMode = true;                 // all humans vs the bots
+  scoreLimit = gameMode === 'gungame' ? GUNGAME_LADDER.length : battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
   matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
+  gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
+  zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   botMgr.clear();
   computeCoverPoints();
+  setupHill(gameMode === 'koth');
+  setupZone(gameMode === 'br');
 
   const humans = [selfId()];
   if (mp.online) for (const id of mp.roster.keys()) humans.push(id);
 
   let botTeams = [];
-  if (teamMode) {
+  if (gameMode === 'wave') {
+    myTeam = TEAM_RED; for (const id of humans) teamAssign.set(id, TEAM_RED);   // bots arrive in waves
+  } else if (teamMode) {
     myTeam = TEAM_RED; teamAssign.set(selfId(), TEAM_RED);
     let r = 1, b = 0;
     for (const id of humans) { if (id === selfId()) continue; if (r <= b) { teamAssign.set(id, TEAM_RED); r++; } else { teamAssign.set(id, TEAM_BLUE); b++; } }
@@ -656,7 +698,98 @@ function setupMatch() {
     botTeams = new Array(Math.max(0, battleCfg.size - humans.length)).fill(TEAM_NONE);
   }
   if (isAuthority() && botTeams.length) botMgr.spawn(botTeams.length, botTeams, battleCfg.botDiff, teamSpawnPoint, colorForBot);
+  if (gameMode === 'gungame') applyGunGameLevel(true);
+  if (gameMode === 'wave' && isAuthority()) startWave(1);
   rebuildBoard(); broadcastBoard();
+}
+
+// ---- Mode helpers ----
+function setupHill(on) {
+  if (hillMesh) { scene.remove(hillMesh); hillMesh.geometry.dispose(); hillMesh.material.dispose(); hillMesh = null; }
+  if (on) {
+    hillMesh = new THREE.Mesh(new THREE.CylinderGeometry(HILL_R, HILL_R, 0.25, 36),
+      new THREE.MeshBasicMaterial({ color: 0xffd86b, transparent: true, opacity: 0.18, depthWrite: false }));
+    hillMesh.position.set(0, ARENA.FLOOR + 1.15, 0);
+    scene.add(hillMesh);
+  }
+}
+function setupZone(on) {
+  if (zoneMesh) { scene.remove(zoneMesh); zoneMesh.geometry.dispose(); zoneMesh.material.dispose(); zoneMesh = null; }
+  if (on) {
+    zoneMesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 14, 48, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x4aa3ff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+    zoneMesh.position.set(0, ARENA.FLOOR + 7, 0);
+    scene.add(zoneMesh);
+  }
+}
+function applyGunGameLevel(force, killsOverride) {
+  const kills = killsOverride != null ? killsOverride : myKills;
+  const lvl = Math.min(kills, GUNGAME_LADDER.length - 1);
+  if (force || lvl !== gunLevelShown) { gunLevelShown = lvl; inventory.setLoadout([GUNGAME_LADDER[lvl]]); }
+}
+function myBoardKills() { const e = board.find((x) => x.id === selfId()); return e ? e.kills : 0; }
+// KOTH/objective: give one point to a combatant (frags double as the score).
+function awardScore(id) {
+  if (!id) return;
+  if (id === selfId()) myKills++;
+  else { const b = botMgr.get(id); if (b) b.kills++; else { const s = humanScore.get(id) || { k: 0, d: 0 }; s.k++; humanScore.set(id, s); } }
+  checkWin(); rebuildBoard(); broadcastBoard();
+}
+function kothAward() {
+  const inHill = (x, z) => (x * x + z * z) < HILL_R * HILL_R;
+  if (teamMode) {
+    let red = 0, blue = 0, repRed = null, repBlue = null;
+    if (!eliminated && health > 0 && inHill(player.pos.x, player.pos.z)) { myTeam === TEAM_RED ? (red++, repRed = selfId()) : (blue++, repBlue = selfId()); }
+    for (const b of botMgr.bots) if (b.alive && inHill(b.pos.x, b.pos.z)) { if (b.team === TEAM_RED) { red++; repRed = repRed || b.id; } else { blue++; repBlue = repBlue || b.id; } }
+    if (red > 0 && blue === 0) awardScore(repRed);
+    else if (blue > 0 && red === 0) awardScore(repBlue);
+  } else {
+    let occ = null, count = 0;
+    if (!eliminated && health > 0 && inHill(player.pos.x, player.pos.z)) { count++; occ = selfId(); }
+    for (const b of botMgr.bots) if (b.alive && inHill(b.pos.x, b.pos.z)) { count++; occ = b.id; }
+    if (count === 1) awardScore(occ);
+  }
+}
+function brTick(dt) {
+  zoneRadius = Math.max(5, zoneRadius - 0.5 * dt);
+  if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
+  stormTimer -= dt;
+  if (stormTimer <= 0) {
+    stormTimer = 1.0;
+    const out = (x, z) => (x * x + z * z) > zoneRadius * zoneRadius;
+    if (!eliminated && health > 0 && out(player.pos.x, player.pos.z)) damagePlayer(6);
+    for (const b of botMgr.bots) if (b.alive && out(b.pos.x, b.pos.z)) b.hurt(8);
+  }
+  const aliveBots = botMgr.bots.filter((b) => b.alive).length;
+  const meAlive = (!eliminated && health > 0) ? 1 : 0;
+  if (aliveBots + meAlive <= 1 && !matchWinner) {
+    endMatch(meAlive ? myName() : (botMgr.bots.find((b) => b.alive)?.name || 'Nobody'));
+  }
+}
+function startWave(n) {
+  waveNum = n; waveBreak = 0;
+  botMgr.clear();
+  const count = 3 + n * 2;
+  botMgr.spawn(count, new Array(count).fill(TEAM_BLUE), battleCfg.botDiff, teamSpawnPoint, colorForBot);
+  hud.announce(`Wave ${n}`, '#ff8f3a'); sfx.announce('multi');
+  rebuildBoard(); broadcastBoard();
+}
+function waveTick(dt) {
+  const aliveBots = botMgr.bots.filter((b) => b.alive).length;
+  if (aliveBots > 0) return;
+  if (waveBreak <= 0) { waveBreak = 4; hud.announce(`Wave ${waveNum} cleared`, '#57d977'); sfx.announce('win'); }
+  else { waveBreak -= dt; if (waveBreak <= 0) { if (waveNum >= WAVE_TARGET) endMatch('Survivors'); else startWave(waveNum + 1); } }
+}
+// Per-frame mode logic (authority).
+function modeTick(dt) {
+  if (gameMode === 'gungame') {
+    for (const b of botMgr.bots) {
+      const want = GUNGAME_LADDER[Math.min(b.kills, GUNGAME_LADDER.length - 1)];
+      if (b.gunId !== want) { b.gunId = want; b.gun = gunOf(want); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0; }
+    }
+  } else if (gameMode === 'koth') { hillTimer -= dt; if (hillTimer <= 0) { hillTimer = 1.0; kothAward(); } }
+  else if (gameMode === 'br') brTick(dt);
+  else if (gameMode === 'wave') waveTick(dt);
 }
 
 function rebuildBoard() {
@@ -687,7 +820,7 @@ function registerKill(killerName, victimId) {
   checkWin(); rebuildBoard(); broadcastBoard();
 }
 function checkWin() {
-  if (matchWinner) return;
+  if (matchWinner || gameMode === 'br' || gameMode === 'wave') return;   // those have their own win logic
   if (teamMode) {
     let red = 0, blue = 0;
     (myTeam === TEAM_RED ? red += myKills : blue += myKills);
@@ -712,10 +845,14 @@ function endMatch(winner) {
 function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
-  for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); }
+  gunLevelShown = -1; eliminated = false; stormTimer = 0;
+  zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   matchWinner = null; hud.hideRoundOver();
+  if (gameMode === 'wave') { if (isAuthority()) startWave(1); }
+  else { for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); } }
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   health = 20; hud.setHealth(20); invuln = 1.5; lastHitBy = null;
+  if (gameMode === 'gungame') applyGunGameLevel(true);
   if (mp.isHost) mp.broadcast({ t: 'roundreset' });
   rebuildBoard(); broadcastBoard();
 }
@@ -741,9 +878,10 @@ function respawnBot(b) {
   b._chooseGun(); b.mesh.visible = true;
 }
 function manageBots(dt) {
+  const respawns = gameMode !== 'br' && gameMode !== 'wave';   // BR eliminates; waves replace
   for (const b of botMgr.bots) {
     if (!b.alive && !b.deathProcessed) { b.deathProcessed = true; onBotKilled(b); }
-    else if (!b.alive && b.respawnIn > 0) { b.respawnIn -= dt; if (b.respawnIn <= 0) respawnBot(b); }
+    else if (respawns && !b.alive && b.respawnIn > 0) { b.respawnIn -= dt; if (b.respawnIn <= 0) respawnBot(b); }
   }
 }
 
@@ -1051,7 +1189,47 @@ function updateViewModel() {
   if (gid === viewGunId) return;
   viewGunId = gid;
   if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); viewModel = null; }
-  if (gid !== -1) { viewModel = makeViewModel(gid); camera.add(viewModel); }
+  if (gid !== -1) { viewModel = makeViewModel(gid); camera.add(viewModel); vmEquip = 1; }
+}
+
+// Procedural viewmodel animation: hip↔ADS, walk bob, idle breathing, look sway,
+// recoil kick, reload dip/roll, and a raise-up on equip.
+const VM_HIP = [0.42, -0.5, -0.85], VM_HIPR = [0.04, -0.13, 0.0];
+const VM_ADS = [0.0, -0.31, -0.55], VM_ADSR = [0.0, 0.0, 0.0];
+function animateViewModel(dt) {
+  if (!viewModel) return;
+  vmEquip *= Math.max(0, 1 - 6 * dt);
+  const dyaw = player.yaw - lastYaw, dpitch = player.pitch - lastPitch;
+  lastYaw = player.yaw; lastPitch = player.pitch;
+  const k = Math.min(1, 9 * dt);
+  vmSwayX += (Math.max(-0.05, Math.min(0.05, dyaw * 0.5)) - vmSwayX) * k;
+  vmSwayY += (Math.max(-0.05, Math.min(0.05, dpitch * 0.5)) - vmSwayY) * k;
+
+  const a = adsAmount, hip = 1 - a;
+  let px = VM_HIP[0] + (VM_ADS[0] - VM_HIP[0]) * a;
+  let py = VM_HIP[1] + (VM_ADS[1] - VM_HIP[1]) * a;
+  let pz = VM_HIP[2] + (VM_ADS[2] - VM_HIP[2]) * a;
+  let rx = VM_HIPR[0] + (VM_ADSR[0] - VM_HIPR[0]) * a;
+  let ry = VM_HIPR[1] + (VM_ADSR[1] - VM_HIPR[1]) * a;
+  let rz = VM_HIPR[2] + (VM_ADSR[2] - VM_HIPR[2]) * a;
+
+  const bob = player.bobAmount || 0, bt = player.bobTime || 0;
+  px += Math.cos(bt) * 0.016 * bob * hip;
+  py -= Math.abs(Math.sin(bt)) * 0.02 * bob * hip;
+  rz += Math.cos(bt) * 0.012 * bob * hip;
+  const now = performance.now() * 0.001, idle = (1 - Math.min(1, bob)) * hip;
+  py += Math.sin(now * 1.6) * 0.006 * idle;
+  rx += Math.sin(now * 1.2) * 0.012 * idle;
+  ry += Math.sin(now * 0.9) * 0.01 * idle;
+
+  px += vmSwayX * hip; ry += vmSwayX * 0.7; py += vmSwayY * hip; rx -= vmSwayY * 0.7;
+  pz += vmRecoil * 0.14; rx -= vmRecoil * 0.42; py += vmRecoil * 0.03;
+  const rl = reloadingGun >= 0 ? Math.sin(Math.min(1, 1 - reloadTimer / reloadDur) * Math.PI) : 0;
+  py -= rl * 0.28; rx += rl * 0.95; rz += rl * 0.6; px += rl * 0.06;
+  py -= vmEquip * 0.45; rx += vmEquip * 0.7;
+
+  viewModel.position.set(px, py, pz);
+  viewModel.rotation.set(rx, ry, rz);
 }
 
 // Sniper scope: narrow the FOV, swap the crosshair for the scope overlay, and
@@ -1101,18 +1279,30 @@ function raycastEnemies(origin, dir, maxDist) {
   return best;
 }
 let _suppressDmgNum = false;
-// One hitscan ray (already-perturbed `dir`) resolved against enemies, mobs and
-// blocks. Returns the world-space endpoint, applying damage to whatever it hits.
-function castBullet(dir, range, damage) {
-  const enemy = raycastEnemies(_eye, dir, range);
-  const mobHit = mobs.raycast(_eye, dir, range);
-  const blockHit = voxelRaycast(_eye, dir, range, (x, y, z) => world.getBlock(x, y, z));
-  const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - _eye.x, blockHit.y + 0.5 - _eye.y, blockHit.z + 0.5 - _eye.z) : Infinity;
+// One hitscan ray (already-perturbed `dir`) from `origin`, drawing its own tracer
+// from `tracerStart`. Resolves against enemies, mobs, blocks — and passes through
+// portals, continuing the shot out the paired one.
+function castBullet(origin, dir, range, damage, tracerStart, color, depth = 0) {
+  const start = tracerStart || origin;
+  const portalHit = depth < 2 ? portals.rayPortal(origin, dir, range) : null;
+  const enemy = raycastEnemies(origin, dir, range);
+  const mobHit = mobs.raycast(origin, dir, range);
+  const blockHit = voxelRaycast(origin, dir, range, (x, y, z) => world.getBlock(x, y, z));
+  const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - origin.x, blockHit.y + 0.5 - origin.y, blockHit.z + 0.5 - origin.z) : Infinity;
   const enemyDist = enemy ? enemy.dist : Infinity;
   const mobDist = mobHit ? mobHit.dist : Infinity;
-  const nearest = Math.min(blockDist, enemyDist, mobDist);
+  const portalDist = portalHit ? portalHit.dist : Infinity;
+  const nearest = Math.min(blockDist, enemyDist, mobDist, portalDist);
+
+  if (portalHit && portalDist === nearest) {
+    const pp = origin.clone().addScaledVector(dir, portalDist);
+    if (color != null) tracers.add(start, pp, color);
+    castBullet(portalHit.exitPos, portalHit.exitDir, range - portalDist, damage, portalHit.exitPos.clone(), color, depth + 1);
+    return;
+  }
+  let end;
   if (enemy && enemyDist === nearest) {
-    const end = _eye.clone().addScaledVector(dir, enemyDist);
+    end = origin.clone().addScaledVector(dir, enemyDist);
     if (!friendly(enemy.id)) {
       const dmg = enemy.head ? Math.round(damage * 1.7) : damage;
       if (enemy.bot) botHurt(enemy.id, dmg, myName(), enemy.head); else mp.sendHit(enemy.id, dmg, enemy.head);
@@ -1120,38 +1310,33 @@ function castBullet(dir, range, damage) {
       if (!_suppressDmgNum) damageNumbers.spawn(end, dmg, enemy.head);
       hud.hitMarker(enemy.head);
     }
-    return end;
-  }
-  if (mobHit && mobDist === nearest) {
+  } else if (mobHit && mobDist === nearest) {
     mobHit.mob.hurt(damage, player.pos.x, player.pos.z);
-    const end = _eye.clone().addScaledVector(dir, mobDist);
+    end = origin.clone().addScaledVector(dir, mobDist);
     particles.burst(end.x, end.y, end.z, [220, 80, 80], 8);
     if (!_suppressDmgNum) damageNumbers.spawn(end, damage, false);
     hud.hitMarker(false);
-    return end;
-  }
-  if (blockHit.hit) {
-    const end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
+  } else if (blockHit.hit) {
+    end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
     particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
-    return end;
+  } else {
+    end = origin.clone().addScaledVector(dir, range);
   }
-  return _eye.clone().addScaledVector(dir, range);
+  if (color != null) tracers.add(start, end, color);
 }
 
 function fireHitscan(gun, muzzle) {
-  const dir = spreadDir(_dir, gun.spread);
-  const end = castBullet(dir, gun.range, gun.damage);
-  tracers.add(muzzle, end, gun.zoom ? 0xbfe4ff : 0xffe08a);
+  const dir = spreadDir(_dir, gun.spread * (1 - adsAmount * 0.85));
+  castBullet(_eye.clone(), dir.clone(), gun.range, gun.damage, muzzle, gun.zoom ? 0xbfe4ff : 0xffe08a);
   sfx.gun(gun.zoom ? 'sniper' : 'handgun');
 }
 
 // Shotgun: a cone of pellets (no per-pellet damage numbers — markers suffice).
 function fireShotgun(gun, muzzle) {
   _suppressDmgNum = true;
+  const spread = gun.spread * (1 - adsAmount * 0.55);   // shotgun stays a cone even ADS
   for (let i = 0; i < gun.pellets; i++) {
-    const dir = spreadDir(_dir, gun.spread);
-    const end = castBullet(dir, gun.range, gun.damage);
-    tracers.add(muzzle, end, 0xffc46a);
+    castBullet(_eye.clone(), spreadDir(_dir, spread).clone(), gun.range, gun.damage, muzzle, 0xffc46a);
   }
   _suppressDmgNum = false;
   sfx.gun('shotgun');
@@ -1286,7 +1471,7 @@ function frame() {
   world.processQueues(loaded ? 6 : 16);
   if (!loaded) updateLoading();
 
-  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen();
+  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated;
 
   if (loaded && player.locked && !dead) {
     player.update(dt);
@@ -1297,10 +1482,10 @@ function frame() {
       const fb = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z));
       sfx.step(stepCategory(fb));
     }
-    // Recoil (player camera only): vertical kick + horizontal sway, recovering.
+    // Camera recoil (kick up + horizontal sway) + screen shake.
     recoilPitch *= Math.max(0, 1 - 14 * dt);
     recoilYaw *= Math.max(0, 1 - 10 * dt);
-    recoilKick *= Math.max(0, 1 - 12 * dt);
+    vmRecoil *= Math.max(0, 1 - 9 * dt);
     camera.rotation.x -= recoilPitch;
     camera.rotation.y += recoilYaw;
     if (shakeAmt > 0.001) {
@@ -1309,14 +1494,11 @@ function frame() {
       camera.position.z += (Math.random() - 0.5) * shakeAmt * 0.5;
       camera.rotation.z += (Math.random() - 0.5) * shakeAmt * 0.6;
     }
-    if (viewModel) viewModel.position.z = -0.85 + recoilKick;
-    updateViewModel();
   } else if (menuView) {
     menuCamera(dt);
     hideViewModel();
   } else {
     player.update(0);   // paused (inventory / death) after playing
-    updateViewModel();
   }
 
   if (reloadingGun >= 0) { reloadTimer -= dt; if (reloadTimer <= 0) { const rg = gunOf(reloadingGun); if (rg) ammo[reloadingGun] = rg.mag; reloadingGun = -1; sfx.place(); } }
@@ -1339,8 +1521,12 @@ function frame() {
     if (isAuthority()) {
       botMgr.update(matchWinner ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
       manageBots(dt);
+      if (!matchWinner) modeTick(dt);
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
     }
+    // Gun Game weapon follows your level on every client (host kills are local,
+    // guests read their kill count off the synced scoreboard).
+    if (gameMode === 'gungame') applyGunGameLevel(false, isAuthority() ? myKills : myBoardKills());
     if (matchOverTimer > 0) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
     pickups.update(dt, player.pos, active ? applyPickup : () => false);
 
@@ -1356,7 +1542,16 @@ function frame() {
     for (const [id, r] of mp.remotes) addBlip(r.group.position, teamOf(id), r.group.visible);
     if (isAuthority()) for (const b of botMgr.bots) addBlip(b.pos, b.team, b.alive);
     hud.drawRadar(blips);
-  }
+
+    // Objective readout.
+    let info;
+    if (gameMode === 'gungame') info = `Gun Game · Level ${Math.min((isAuthority() ? myKills : myBoardKills()), GUNGAME_LADDER.length - 1) + 1}/${GUNGAME_LADDER.length}`;
+    else if (gameMode === 'koth') info = `King of the Hill · ${scoreLimit} to win`;
+    else if (gameMode === 'br') { const a = botMgr.bots.filter((b) => b.alive).length + (!eliminated && health > 0 ? 1 : 0); info = eliminated ? `Spectating · ${a} alive` : `Battle Royale · ${a} alive · zone ${Math.round(zoneRadius)}m`; }
+    else if (gameMode === 'wave') info = `Wave ${waveNum}/${WAVE_TARGET} · ${botMgr.bots.filter((b) => b.alive).length} left`;
+    else info = `Deathmatch · first to ${scoreLimit}`;
+    hud.setModeInfo(info);
+  } else hud.setModeInfo(null);
 
   // Interaction
   invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt; fireCD -= dt; fire2CD -= dt;
@@ -1374,21 +1569,30 @@ function frame() {
         // Per-gun recoil: vertical kick, a little horizontal sway, viewmodel kickback.
         const rc = gun.recoil || 0.015;
         muzzle.flash();
-        recoilPitch += rc;
-        recoilYaw += (Math.random() - 0.5) * rc * 0.9;
-        recoilKick += Math.min(0.16, rc * 1.6 + 0.03);
+        // ADS reduces vertical recoil; recoil also kicks the viewmodel.
+        recoilPitch += rc * (1 - adsAmount * 0.45);
+        recoilYaw += (Math.random() - 0.5) * rc * 0.9 * (1 - adsAmount * 0.6);
+        vmRecoil = Math.min(1, vmRecoil + 0.5 + rc * 4);
         addShake(Math.min(0.1, rc * 0.9));
         fireCD = gun.rate;
         if (!gun.auto) triggerConsumed = true;
       }
     }
-    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); recoilKick += 0.05; fire2CD = gun.rate; }
+    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); vmRecoil = Math.min(1, vmRecoil + 0.3); fire2CD = gun.rate; }
   } else if (active) {
     if (mouseLeft) attackOrBreak(dt); else resetBreak();
     if (mouseRight && placeCD <= 0) { handleUse(); placeCD = 0.25; }
   }
   setScoped(active && !!gun && !!gun.zoom && mouseRight);
   if (active) survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
+
+  // Aim-down-sights (every non-scope gun) + animated viewmodel.
+  const adsActive = active && gun && !gun.zoom && gun.kind !== 'portal' && mouseRight;
+  adsAmount += ((adsActive ? 1 : 0) - adsAmount) * Math.min(1, 13 * dt);
+  if (adsAmount < 0.002) adsAmount = 0;
+  if (!zoomed) { const f = player.fov * (1 - 0.17 * adsAmount); if (Math.abs(camera.fov - f) > 0.04) { camera.fov = f; camera.updateProjectionMatrix(); } }
+  crosshairEl.classList.toggle('ads', adsAmount > 0.5);
+  if (!menuView) { updateViewModel(); animateViewModel(dt); }
 
   // Block highlight (hidden while aiming a gun)
   const hit = castFromEye();
