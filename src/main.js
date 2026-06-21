@@ -1535,7 +1535,9 @@ function frame() {
   // cinematic background; while playing it follows the player.
   const menuView = !loaded || (!everPlayed && !player.locked);
   world.update(menuView ? SPAWN.x : player.pos.x, menuView ? SPAWN.z : player.pos.z);
-  world.processQueues(loaded ? 6 : 16);
+  // While the loading screen is up there's no gameplay to keep smooth, so spend a
+  // big per-frame budget on generation/meshing — loads fast even on slow GPUs.
+  world.processQueues(loaded ? 6 : 40);
   if (!loaded) updateLoading();
 
   const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated;
