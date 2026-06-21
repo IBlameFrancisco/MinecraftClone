@@ -23,6 +23,22 @@
       #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
       #crosshair::after  { top: 50%; left: 0; height: 2px; width: 100%;  transform: translateY(-50%); }
 
+      /* ---- Sniper scope ---- */
+      #scope { position: fixed; inset: 0; z-index: 18; display: none; pointer-events: none; }
+      #scope .lens {
+        position: absolute; inset: 0;
+        background: radial-gradient(circle at 50% 50%,
+          rgba(0,0,0,0) calc(min(38vh, 38vw) - 3px),
+          rgba(140,180,150,0.55) calc(min(38vh, 38vw) - 2px),
+          rgba(0,0,0,0.93) min(38vh, 38vw), #000 100%);
+      }
+      #scope .reticle { position: absolute; left: 50%; top: 50%; width: min(74vh, 74vw); height: min(74vh, 74vw); transform: translate(-50%, -50%); }
+      #scope .reticle::before, #scope .reticle::after { content: ''; position: absolute; background: rgba(8,14,8,0.92); }
+      #scope .reticle::before { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%); }
+      #scope .reticle::after  { top: 50%; left: 0; height: 1.5px; width: 100%;  transform: translateY(-50%); }
+      #scope .dot { position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; border-radius: 50%;
+        background: #ff4040; box-shadow: 0 0 4px rgba(255,60,60,0.8); transform: translate(-50%, -50%); }
+
       #hotbar {
         position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
         display: flex; gap: 4px; padding: 4px; background: rgba(0,0,0,0.30);
@@ -192,6 +208,7 @@
         <span class="key">T</span> chat &nbsp; <span class="key">R</span> reload gun &nbsp; <span class="key">Esc</span> release
       </div>
       <div id="hotbar"></div>
+      <div id="scope"><div class="lens"></div><div class="reticle"></div><div class="dot"></div></div>
     </div>
     <div id="loading">
       <div class="loader">
@@ -204,10 +221,11 @@
     <div id="overlay" class="hidden">
       <div class="card">
         <div class="gclogo"><span class="g1">GUN</span><span class="g2">CRAFT</span></div>
-        <p class="tagline">A voxel sandbox with guns &amp; co-op</p>
+        <p class="tagline">A voxel sandbox — build, survive &amp; battle with guns</p>
         <div class="moderow">
           <button id="modeSurvival" class="modebtn active">⛏ Survival</button>
           <button id="modeCreative" class="modebtn">✦ Creative</button>
+          <button id="modeBattle" class="modebtn">⚔ Battle</button>
         </div>
         <div class="diffrow" id="diffrow">
           <label for="diffSelect">Difficulty</label>

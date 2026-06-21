@@ -66,8 +66,25 @@ export class SFX {
 
   gun(kind) {
     if (!this.ctx) return;
-    if (kind === 'sniper') { this._noise(0.20, 1100, 0.8, 0.5, 'lowpass'); this._tone(240, 55, 0.2, 0.26, 'square'); }
-    else { this._noise(0.07, 1900, 0.7, 0.34, 'highpass'); this._tone(330, 120, 0.06, 0.16, 'square'); }
+    // Punchier reports: a sharp transient + a body tone with a low thump.
+    if (kind === 'sniper') {
+      this._noise(0.05, 5000, 0.6, 0.6, 'highpass');     // crack
+      this._noise(0.30, 700, 0.9, 0.55, 'lowpass');      // boom tail
+      this._tone(260, 45, 0.28, 0.30, 'square');
+      this._tone(70, 40, 0.22, 0.22, 'sine');            // sub thump
+    } else {
+      this._noise(0.04, 3200, 0.7, 0.42, 'highpass');    // snap
+      this._noise(0.10, 1200, 0.8, 0.30, 'lowpass');
+      this._tone(360, 110, 0.07, 0.20, 'square');
+      this._tone(90, 50, 0.08, 0.14, 'sine');
+    }
+  }
+
+  // Player took damage — a short oof.
+  hurt() {
+    if (!this.ctx) return;
+    this._tone(200, 90, 0.18, 0.22, 'sawtooth');
+    this._noise(0.08, 900, 0.8, 0.16, 'lowpass');
   }
   plasma() {
     if (!this.ctx) return;

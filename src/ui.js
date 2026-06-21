@@ -19,8 +19,11 @@ export class HUD {
     this.chatInput.autocomplete = 'off';
     this.playerList = document.createElement('div'); this.playerList.id = 'playerlist';
     this.ammoEl = document.createElement('div'); this.ammoEl.id = 'ammo';
+    this.killFeed = document.createElement('div'); this.killFeed.id = 'killfeed';
+    this.hitEl = document.createElement('div'); this.hitEl.id = 'hitmarker';
     ui.appendChild(this.chatLog); ui.appendChild(this.chatInput);
     ui.appendChild(this.playerList); ui.appendChild(this.ammoEl);
+    ui.appendChild(this.killFeed); ui.appendChild(this.hitEl);
     this.chatOpen = false;
 
     this.chatInput.addEventListener('keydown', (e) => {
@@ -76,8 +79,10 @@ export class HUD {
     wrap.innerHTML = `<canvas id="health" width="200" height="18"></canvas>
                       <canvas id="hunger" width="200" height="18"></canvas>`;
     document.getElementById('ui').appendChild(wrap);
-    this.healthCtx = wrap.querySelector('#health').getContext('2d');
-    this.hungerCtx = wrap.querySelector('#hunger').getContext('2d');
+    this.healthCanvasEl = wrap.querySelector('#health');
+    this.hungerCanvasEl = wrap.querySelector('#hunger');
+    this.healthCtx = this.healthCanvasEl.getContext('2d');
+    this.hungerCtx = this.hungerCanvasEl.getContext('2d');
     this.statusEl = wrap;
 
     this.modeEl = document.createElement('div');
@@ -109,7 +114,43 @@ export class HUD {
     this.modeEl.textContent = survival ? 'Survival' : 'Creative';
     this.modeEl.style.color = survival ? '#ff8f6a' : '#7ad0ff';
     this.statusEl.style.display = survival ? 'flex' : 'none';
+    this.hungerCanvasEl.style.display = '';
     this.diffEl.style.display = survival ? 'block' : 'none';
+  }
+
+  // Battle mode: show health only (no hunger / difficulty), red "Battle" badge.
+  setBattle(on) {
+    if (!on) return;
+    this.modeEl.textContent = '⚔ Battle';
+    this.modeEl.style.color = '#ff5b6e';
+    this.statusEl.style.display = 'flex';
+    this.hungerCanvasEl.style.display = 'none';
+    this.diffEl.style.display = 'none';
+  }
+
+  // PvP kill feed (top-right): "Killer ☠ Victim", auto-fading.
+  addKill(victim, killer) {
+    const line = document.createElement('div');
+    line.className = 'kfline';
+    line.innerHTML = killer
+      ? `<span class="kf-k">${escapeHtml(killer)}</span> <span class="kf-s">☠</span> <span class="kf-v">${escapeHtml(victim)}</span>`
+      : `<span class="kf-v">${escapeHtml(victim)}</span> <span class="kf-s">fell</span>`;
+    this.killFeed.appendChild(line);
+    while (this.killFeed.children.length > 5) this.killFeed.removeChild(this.killFeed.firstChild);
+    setTimeout(() => line.classList.add('fade'), 4200);
+    setTimeout(() => { if (line.parentNode) line.remove(); }, 5400);
+  }
+
+  // Brief crosshair confirmation when you land a hit.
+  hitMarker() {
+    this.hitEl.style.transition = 'none';
+    this.hitEl.style.opacity = '1';
+    this.hitEl.style.transform = 'translate(-50%, -50%) scale(1.25)';
+    requestAnimationFrame(() => {
+      this.hitEl.style.transition = 'opacity 0.3s, transform 0.3s';
+      this.hitEl.style.opacity = '0';
+      this.hitEl.style.transform = 'translate(-50%, -50%) scale(1)';
+    });
   }
 
   setDifficulty(name) {
@@ -201,6 +242,19 @@ export class HUD {
         font-family:monospace; text-shadow:0 2px 4px #000; }
       #ammo .rl { font-size:13px; color:#ffcf6a; }
       #ammo .inf { color:#9fe0ff; }
+      #killfeed { position:absolute; right:14px; top:150px; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+      .kfline { background:rgba(0,0,0,0.45); padding:3px 9px; border-radius:5px; font-size:13px;
+        text-shadow:0 1px 2px #000; transition:opacity 0.9s; border-left:3px solid #ff5b6e; }
+      .kfline.fade { opacity:0; }
+      .kfline .kf-k { font-weight:800; color:#ffd86b; }
+      .kfline .kf-v { font-weight:700; color:#ff8f8f; }
+      .kfline .kf-s { opacity:0.85; margin:0 2px; }
+      #hitmarker { position:absolute; left:50%; top:50%; width:22px; height:22px;
+        transform:translate(-50%,-50%); opacity:0; pointer-events:none; mix-blend-mode:screen; }
+      #hitmarker::before, #hitmarker::after { content:''; position:absolute; left:50%; top:50%; width:2px; height:9px;
+        background:#fff; box-shadow:0 0 4px #fff; }
+      #hitmarker::before { transform:translate(-50%,-50%) rotate(45deg); }
+      #hitmarker::after  { transform:translate(-50%,-50%) rotate(-45deg); }
     `;
     document.head.appendChild(s);
   }
