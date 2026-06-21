@@ -165,14 +165,17 @@ export class BotManager {
     b.fireCD -= dt; b.reactTimer -= dt; b.strafeTimer -= dt; b.jumpCD -= dt; b.coverTimer -= dt;
     if (b.reloadTimer > 0) { b.reloadTimer -= dt; if (b.reloadTimer <= 0) b.ammo = b.gun.mag || Infinity; }
 
-    // --- Target selection: nearest living enemy combatant (different team / FFA) ---
+    // --- Target selection: nearest living enemy (different team / FFA). Human
+    // players are weighted as "closer" so bots prefer hunting people over bots,
+    // which keeps the action centred on the player even from across the map. ---
     const all = ctx.targets;
     let best = null, bestVis = null, bestD = Infinity, bestVisD = Infinity;
     b.eye(this._eyeA);
     for (const t of all) {
       if (!t.alive || t.id === b.id) continue;
       if (b.team >= 0 && t.team === b.team) continue;      // teammate
-      const d = Math.hypot(t.pos.x - b.pos.x, t.pos.z - b.pos.z);
+      const human = !String(t.id).startsWith('bot:');
+      const d = Math.hypot(t.pos.x - b.pos.x, t.pos.z - b.pos.z) * (human ? 0.55 : 1);
       if (d < bestD) { bestD = d; best = t; }
       const tex = t.pos.x, tey = t.pos.y + EYE, tez = t.pos.z;
       if (ctx.los(this._eyeA.x, this._eyeA.y, this._eyeA.z, tex, tey, tez) && d < bestVisD) { bestVisD = d; bestVis = t; }
