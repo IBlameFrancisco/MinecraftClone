@@ -6,7 +6,61 @@ export class HUD {
     this._injectStyles();
     this._buildNameLabel();
     this._buildStatus();
+    this._buildChat();
     this._scheduleHintFade();
+    this.onChatSend = () => {};
+  }
+
+  _buildChat() {
+    const ui = document.getElementById('ui');
+    this.chatLog = document.createElement('div'); this.chatLog.id = 'chatlog';
+    this.chatInput = document.createElement('input'); this.chatInput.id = 'chatinput';
+    this.chatInput.maxLength = 100; this.chatInput.placeholder = 'Say something…';
+    this.chatInput.autocomplete = 'off';
+    this.playerList = document.createElement('div'); this.playerList.id = 'playerlist';
+    this.ammoEl = document.createElement('div'); this.ammoEl.id = 'ammo';
+    ui.appendChild(this.chatLog); ui.appendChild(this.chatInput);
+    ui.appendChild(this.playerList); ui.appendChild(this.ammoEl);
+    this.chatOpen = false;
+
+    this.chatInput.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.code === 'Enter') {
+        const t = this.chatInput.value.trim();
+        this.chatInput.value = '';
+        this.closeChat();
+        if (t) this.onChatSend(t);
+      } else if (e.code === 'Escape') {
+        this.chatInput.value = ''; this.closeChat();
+      }
+    });
+  }
+
+  openChat() { this.chatOpen = true; this.chatInput.style.display = 'block'; this.chatInput.focus(); }
+  closeChat() { this.chatOpen = false; this.chatInput.style.display = 'none'; this.chatInput.blur(); }
+  isChatOpen() { return this.chatOpen; }
+
+  addChat(name, text, system) {
+    const line = document.createElement('div');
+    line.className = 'chatline';
+    if (system) line.innerHTML = `<span class="sys">✦ ${escapeHtml(text)}</span>`;
+    else line.innerHTML = `<b>${escapeHtml(name)}:</b> ${escapeHtml(text)}`;
+    this.chatLog.appendChild(line);
+    while (this.chatLog.children.length > 10) this.chatLog.removeChild(this.chatLog.firstChild);
+    setTimeout(() => { line.classList.add('fade'); }, 9000);
+  }
+
+  setPlayers(list) {
+    if (!list || list.length <= 1) { this.playerList.style.display = 'none'; return; }
+    this.playerList.style.display = 'block';
+    this.playerList.innerHTML = `<div class="pltitle">Players (${list.length})</div>` +
+      list.map((p) => `<div class="plrow">${escapeHtml(p.name)}${p.you ? ' <span class="you">(you)</span>' : ''}</div>`).join('');
+  }
+
+  setAmmo(text) {
+    if (!text) { this.ammoEl.style.display = 'none'; return; }
+    this.ammoEl.style.display = 'block';
+    this.ammoEl.innerHTML = text;
   }
 
   _buildNameLabel() {
@@ -131,7 +185,27 @@ export class HUD {
         background:rgba(0,0,0,0.30); padding:3px 9px; border-radius:8px; text-shadow:0 1px 2px #000; }
       #hurt { position:absolute; inset:0; pointer-events:none; opacity:0;
         background:radial-gradient(ellipse at center, rgba(120,0,0,0) 40%, rgba(150,0,0,0.85) 100%); }
+      #chatlog { position:absolute; left:14px; bottom:110px; max-width:380px; font-size:13px; line-height:1.5; }
+      .chatline { background:rgba(0,0,0,0.42); padding:2px 8px; border-radius:5px; margin-top:3px; width:fit-content;
+        text-shadow:0 1px 2px #000; transition:opacity 1s; }
+      .chatline.fade { opacity:0; }
+      .chatline .sys { color:#9fd0ff; font-style:italic; }
+      #chatinput { display:none; position:absolute; left:14px; bottom:80px; width:380px; padding:8px 10px;
+        font-size:14px; border-radius:7px; border:1px solid rgba(255,255,255,0.3); background:rgba(0,0,0,0.6);
+        color:#fff; outline:none; pointer-events:auto; }
+      #playerlist { display:none; position:absolute; right:14px; top:100px; min-width:120px;
+        background:rgba(0,0,0,0.4); border-radius:8px; padding:6px 10px; font-size:13px; text-shadow:0 1px 2px #000; }
+      #playerlist .pltitle { font-weight:700; opacity:0.7; font-size:11px; text-transform:uppercase; margin-bottom:3px; }
+      #playerlist .you { opacity:0.6; }
+      #ammo { display:none; position:absolute; right:18px; bottom:78px; font-size:24px; font-weight:800;
+        font-family:monospace; text-shadow:0 2px 4px #000; }
+      #ammo .rl { font-size:13px; color:#ffcf6a; }
+      #ammo .inf { color:#9fe0ff; }
     `;
     document.head.appendChild(s);
   }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }

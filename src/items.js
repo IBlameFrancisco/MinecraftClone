@@ -54,10 +54,10 @@ export const ITEMS = {
   [STONE_AXE]:    { name: 'Stone Axe', ...tool('axe', 2) },
   [STONE_SHOVEL]: { name: 'Stone Shovel', ...tool('shovel', 2) },
   [STONE_SWORD]:  { name: 'Stone Sword', ...tool('sword', 2) },
-  [HANDGUN]:    { name: 'Handgun',    gun: { kind: 'hitscan', rate: 0.16, damage: 6,  range: 64,  color: 0x3a3f47 } },
-  [SNIPER]:     { name: 'Sniper',     gun: { kind: 'hitscan', rate: 1.1,  damage: 34, range: 240, zoom: true, color: 0x23262b } },
-  [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.30, damage: 12, range: 90,  speed: 40, color: 0x2bd6c0 } },
-  [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, color: 0xdadada } },
+  [HANDGUN]:    { name: 'Handgun',    gun: { kind: 'hitscan', rate: 0.16, damage: 6,  range: 64,  mag: 12, reload: 1.0, recoil: 0.018, color: 0x3a3f47 } },
+  [SNIPER]:     { name: 'Sniper',     gun: { kind: 'hitscan', rate: 1.1,  damage: 34, range: 240, zoom: true, mag: 5, reload: 1.7, recoil: 0.06, color: 0x23262b } },
+  [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.30, damage: 12, range: 90,  speed: 40, mag: 20, reload: 1.4, recoil: 0.03, color: 0x2bd6c0 } },
+  [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, recoil: 0.01, color: 0xdadada } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 

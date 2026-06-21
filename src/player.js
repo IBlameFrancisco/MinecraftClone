@@ -53,6 +53,8 @@ export class Player {
 
   _bindInput() {
     document.addEventListener('keydown', (e) => {
+      const a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return; // typing in chat/menu
       if (e.code === 'Tab') e.preventDefault();
       this.keys.add(e.code);
       if (!e.repeat) {

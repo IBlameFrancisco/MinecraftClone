@@ -29,7 +29,7 @@ import { voxelRaycast } from './raycast.js';
 import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
-import { Tracers, Plasmas, Portals, makeViewModel } from './guns.js';
+import { Tracers, Plasmas, Portals, makeViewModel, MuzzleFlash } from './guns.js';
 
 const SURVIVAL = 0, CREATIVE = 1;
 const MELEE_REACH = 4;
@@ -145,6 +145,8 @@ const tracers = new Tracers(scene);
 const plasmas = new Plasmas(scene);
 const portals = new Portals(scene);
 scene.add(camera); // so first-person gun viewmodels (camera children) render
+const muzzle = new MuzzleFlash(camera);
+const isTyping = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
 
 // Re-apply player edits to a (re)generated chunk so builds survive unload/reload
 // and reach late-joining peers.
@@ -191,6 +193,13 @@ scene.add(crackMesh);
 
 let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
+const ammo = {};
+let reloadingGun = -1, reloadTimer = 0, recoilPitch = 0, recoilKick = 0;
+function ammoFor(gun, id) { if (!gun.mag) return Infinity; if (ammo[id] === undefined) ammo[id] = gun.mag; return ammo[id]; }
+function startReload(gun, id) {
+  if (!gun.mag || reloadingGun === id || (ammo[id] ?? gun.mag) >= gun.mag) return;
+  reloadingGun = id; reloadTimer = gun.reload;
+}
 function resetBreak() { breakKey = null; breakProgress = 0; crackMesh.visible = false; }
 
 // ---------- Spawn ----------
@@ -279,7 +288,11 @@ const mpHandlers = {
   },
   onEdit: (x, y, z, id) => recordEdit(x, y, z, id),
   onStatus: setMpStatus,
+  onChat: (name, text) => hud.addChat(name, text, false),
+  onSystem: (msg) => { hud.addChat(null, msg, true); hud.setPlayers(mp.playerList()); },
+  onRoster: () => hud.setPlayers(mp.playerList()),
 };
+hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
 document.getElementById('hostBtn').addEventListener('click', () => {
   const code = randomRoom();
   mp.host(code, playerName(), mpHandlers);
@@ -341,6 +354,7 @@ function applyDifficulty() {
 
 // ---------- Keyboard (E inventory, G mode, B difficulty) ----------
 window.addEventListener('keydown', (e) => {
+  if (isTyping()) return; // don't trigger game keys while typing in chat/menu
   if (e.code === 'KeyE') {
     if (dead) return;
     if (inventory.open) closeInventory(); else openInventory(2);
@@ -350,6 +364,11 @@ window.addEventListener('keydown', (e) => {
     if (!dead && !inventory.open) toggleMode();
   } else if (e.code === 'KeyB') {
     if (!dead && !inventory.open) applyDifficulty();
+  } else if (e.code === 'KeyR') {
+    const g2 = gunOf(inventory.selectedId());
+    if (g2 && g2.mag && player.locked && !dead) startReload(g2, inventory.selectedId());
+  } else if (e.code === 'KeyT' || e.code === 'Enter') {
+    if (player.locked && !inventory.open && !dead && !hud.isChatOpen()) { e.preventDefault(); hud.openChat(); }
   }
 });
 
@@ -602,7 +621,7 @@ function frame() {
     return;
   }
 
-  const active = player.locked && !inventory.open && !dead;
+  const active = player.locked && !inventory.open && !dead && !hud.isChatOpen();
 
   if (active) {
     player.update(dt);
@@ -614,6 +633,13 @@ function frame() {
   } else {
     player.update(0);
   }
+
+  // Recoil decay + apply (after the player set the camera transform); reload timer.
+  recoilPitch *= Math.max(0, 1 - 14 * dt);
+  recoilKick *= Math.max(0, 1 - 12 * dt);
+  camera.rotation.x -= recoilPitch;
+  if (viewModel) viewModel.position.z = -0.85 + recoilKick;
+  if (reloadingGun >= 0) { reloadTimer -= dt; if (reloadTimer <= 0) { const rg = gunOf(reloadingGun); if (rg) ammo[reloadingGun] = rg.mag; reloadingGun = -1; sfx.place(); } }
 
   sky.update(dt);
   hud.setClock(sky.clockString());
@@ -633,8 +659,18 @@ function frame() {
   const gun = gunOf(inventory.selectedId());
   if (active && gun) {
     resetBreak();
-    if (mouseLeft && fireCD <= 0) { fireGun(gun, false); fireCD = gun.rate; }
-    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); fire2CD = gun.rate; }
+    const id = inventory.selectedId();
+    if (mouseLeft && fireCD <= 0) {
+      if (gun.mag && reloadingGun === id) { /* busy reloading */ }
+      else if (gun.mag && ammoFor(gun, id) <= 0) { startReload(gun, id); fireCD = 0.25; }
+      else {
+        fireGun(gun, false);
+        if (gun.mag) ammo[id]--;
+        muzzle.flash(); recoilPitch += gun.recoil || 0; recoilKick += 0.08;
+        fireCD = gun.rate;
+      }
+    }
+    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); recoilKick += 0.05; fire2CD = gun.rate; }
     if (gun.zoom && mouseRight) { if (!zoomed) { camera.fov = 26; camera.updateProjectionMatrix(); zoomed = true; } }
     else if (zoomed) { camera.fov = player.fov; camera.updateProjectionMatrix(); zoomed = false; }
   } else if (active) {
@@ -649,8 +685,17 @@ function frame() {
   highlight.visible = active && !gun && hit.hit;
   if (hit.hit) highlight.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
 
+  // Ammo readout
+  if (gun) {
+    const id = inventory.selectedId();
+    if (!gun.mag) hud.setAmmo('<span class="inf">∞</span>');
+    else if (reloadingGun === id) hud.setAmmo('<span class="rl">RELOADING…</span>');
+    else hud.setAmmo(`${ammoFor(gun, id)}<span style="opacity:.5">/${gun.mag}</span>`);
+  } else hud.setAmmo(null);
+
   // Guns / projectiles / portals / co-op
   updateViewModel();
+  muzzle.update(dt);
   tracers.update(dt);
   plasmas.update(dt, world, mobs, plasmaImpact);
   portals.update(dt, player);

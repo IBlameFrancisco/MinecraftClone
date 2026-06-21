@@ -44,7 +44,8 @@ export class Multiplayer {
     this.scene = scene;
     this.peer = null;
     this.conns = new Map();      // peerId -> DataConnection
-    this.remotes = new Map();    // peerId -> { group, target }
+    this.remotes = new Map();    // peerId -> { group, target } (avatars)
+    this.roster = new Map();     // peerId -> name (for the player list)
     this.isHost = false;
     this.online = false;
     this.myId = null;
@@ -87,18 +88,46 @@ export class Multiplayer {
       }
     });
     conn.on('data', (d) => this._onData(conn, d));
-    conn.on('close', () => { this.conns.delete(conn.peer); this._removeRemote(conn.peer); });
+    conn.on('close', () => {
+      this.conns.delete(conn.peer);
+      this._roster(conn.peer, null);
+      this._removeRemote(conn.peer);
+    });
+  }
+
+  _roster(id, name) {
+    if (!id || id === this.myId) return;
+    if (name) {
+      if (!this.roster.has(id)) { this.roster.set(id, name); this.handlers.onSystem?.(`${name} joined`); this.handlers.onRoster?.(); }
+      else if (this.roster.get(id) !== name) { this.roster.set(id, name); this.handlers.onRoster?.(); }
+    } else if (this.roster.has(id)) {
+      const n = this.roster.get(id); this.roster.delete(id);
+      this.handlers.onSystem?.(`${n} left`); this.handlers.onRoster?.();
+    }
   }
 
   _onData(conn, d) {
     switch (d.t) {
-      case 'init': this.handlers.onInit(d); break;
-      case 'hello': if (this.isHost) this._relay(conn.peer, d); break;
-      case 'pos': this._updateRemote(d.id, d); if (this.isHost) this._relay(conn.peer, d); break;
+      case 'init': this._roster(conn.peer, d.hostName || 'Host'); this.handlers.onInit(d); break;
+      case 'hello': this._roster(d.id, d.name); if (this.isHost) this._relay(conn.peer, d); break;
+      case 'pos': this._roster(d.id, d.name); this._updateRemote(d.id, d); if (this.isHost) this._relay(conn.peer, d); break;
       case 'edit': this.handlers.onEdit(d.x, d.y, d.z, d.id); if (this.isHost) this._relay(conn.peer, d); break;
       case 'edits': for (const e of d.list) this.handlers.onEdit(e[0], e[1], e[2], e[3]); if (this.isHost) this._relay(conn.peer, d); break;
-      case 'leave': this._removeRemote(d.id); if (this.isHost) this._relay(conn.peer, d); break;
+      case 'chat': this.handlers.onChat?.(d.name, d.text); if (this.isHost) this._relay(conn.peer, d); break;
+      case 'leave': this._roster(d.id, null); this._removeRemote(d.id); if (this.isHost) this._relay(conn.peer, d); break;
     }
+  }
+
+  sendChat(text) {
+    if (!this.online || !text) return;
+    this.handlers.onChat?.(this.name, text);      // local echo
+    this.broadcast({ t: 'chat', name: this.name, text });
+  }
+
+  playerList() {
+    const list = [{ name: this.name, you: true }];
+    for (const name of this.roster.values()) list.push({ name });
+    return list;
   }
 
   _relay(from, d) { for (const [pid, c] of this.conns) if (pid !== from) c.send(d); }
@@ -122,7 +151,10 @@ export class Multiplayer {
   }
   _removeRemote(id) {
     const r = this.remotes.get(id);
-    if (r) { this.group.remove(r.group); r.group.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); this.remotes.delete(id); }
+    if (r) {
+      this.group.remove(r.group); r.group.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      this.remotes.delete(id);
+    }
   }
 
   update(dt) {

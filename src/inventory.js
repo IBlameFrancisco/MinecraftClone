@@ -338,6 +338,8 @@ export class Inventory {
 
   _bind() {
     window.addEventListener('keydown', (e) => {
+      const a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
       if (e.code.startsWith('Digit')) { const n = parseInt(e.code.slice(5), 10) - 1; if (n >= 0 && n < 9) this.select(n); }
     });
     window.addEventListener('wheel', (e) => {
