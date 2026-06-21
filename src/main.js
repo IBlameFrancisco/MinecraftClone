@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB } from './items.js';
 import { World } from './world.js';
 import { ARENA } from './worldgen.js';
 import { Player } from './player.js';
@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -41,7 +41,7 @@ const SURVIVAL = 0, CREATIVE = 1, BATTLE = 2;
 const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
-const BATTLE_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, PORTAL_GUN];
+const BATTLE_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
 
 // Difficulty (peaceful → hardcore) controls mob spawns, damage, and respawn.
@@ -155,6 +155,7 @@ const tracers = new Tracers(scene);
 const plasmas = new Plasmas(scene);
 const rockets = new Rockets(scene);
 const grenades = new Grenades(scene);
+const blackholes = new BlackHoles(scene);
 const portals = new Portals(scene);
 const botMgr = new BotManager(scene);
 const damageNumbers = new DamageNumbers(scene);
@@ -1319,6 +1320,7 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'rail') fireRail(gun, muzzle);
   else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); }
   else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); }
+  else if (gun.kind === 'blackhole') { blackholes.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.blackhole(); }
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
 }
 
@@ -1474,6 +1476,58 @@ function rocketImpact(pos, gun) {
   explodeDamage(pos, gun.radius, gun.splash, 0.45);
   blastCover(pos, 2);
 }
+
+// ---- Black hole bomb ----
+// The singularity's gravity well: drags bots/mobs in kinematically (their AABB
+// collision resolves it) and shoves the local player's velocity (so it can be
+// fought); the core shreds anything inside ~3 blocks. Remotes take the DOT only.
+function blackHoleField(pos, dt, gun) {
+  const R = gun.radius, R2 = R * R;
+  const well = (cx, cy, cz, scale) => {
+    const dx = pos.x - cx, dy = pos.y - cy, dz = pos.z - cz, d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > R2) return null;
+    const d = Math.sqrt(d2) || 0.001, fall = 1 - d / R;
+    return { d, ux: dx / d, uy: dy / d, uz: dz / d, spd: gun.pull * (0.3 + fall * fall) * scale };  // inward blocks/sec
+  };
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    const w = well(b.pos.x, b.pos.y + 1, b.pos.z, 1); if (!w) continue;
+    b.pos.x += w.ux * w.spd * dt; b.pos.z += w.uz * w.spd * dt; b.pos.y += w.uy * w.spd * dt * 0.6;
+    if (w.d < 3.2) botHurt(b.id, Math.max(1, Math.round(gun.damage * dt * 4)), myName(), false);
+  }
+  for (const m of mobs.list) {
+    const w = well(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, 1); if (!w) continue;
+    m.pos.x += w.ux * w.spd * dt; m.pos.z += w.uz * w.spd * dt; m.pos.y += w.uy * w.spd * dt * 0.6;
+    if (w.d < 3.2) m.hurt(Math.max(1, Math.round(gun.damage * dt * 4)), pos.x, pos.z);
+  }
+  if ((mode === BATTLE || mode === SURVIVAL) && !dead && !eliminated) {
+    const w = well(player.pos.x, player.pos.y + 0.9, player.pos.z, 0.5);
+    if (w) {
+      const a = w.spd * 2.6;
+      player.vel.x += w.ux * a * dt; player.vel.z += w.uz * a * dt; player.vel.y += w.uy * a * dt * 0.6;
+      if (w.d < 3.2 && invuln <= 0) damagePlayer(Math.max(1, Math.round(gun.damage * dt * 2)), pos.x, pos.z);
+    }
+  }
+  if (mp.online) for (const { id } of mp.playersNear(pos, R)) { if (friendly(id)) continue; mp.sendHit(id, Math.max(1, Math.round(gun.damage * dt * 2.5))); }
+}
+const blackHoleHooks = {
+  // Detonate early if the singularity reaches a combatant (else it anchors on a block / its range).
+  anchorAt: (pos) => {
+    for (const m of mobs.list) if (Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z) < 1.5) return true;
+    if (isAuthority()) for (const b of botMgr.bots) if (b.alive && Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z) < 1.5) return true;
+    return false;
+  },
+  onAnchor: (pos) => { sfx.blackhole(); addShake(Math.max(0, 0.45 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 30))); },
+  onField: (pos, dt, gun) => blackHoleField(pos, dt, gun),
+  onCollapse: (pos, gun) => {
+    particles.burst(pos.x, pos.y, pos.z, [180, 120, 255], 64);
+    particles.burst(pos.x, pos.y, pos.z, [255, 230, 200], 32);
+    sfx.explosionAt(pos.x, pos.y, pos.z);
+    addShake(Math.max(0, 0.75 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 26)));
+    explodeDamage(pos, gun.radius * 0.5, gun.splash, 0.4);
+    blastCover(pos, 3);
+  },
+};
 
 // Thrown frag explosion.
 function grenadeExplode(pos) {
@@ -1724,6 +1778,7 @@ function frame() {
   const enemyBots = isAuthority() ? botMgr.bots : null;   // bolts/rockets collide with arena bots
   plasmas.update(sdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
   rockets.update(sdt, world, mobs, enemyBots, mp, portals, rocketImpact);
+  blackholes.update(sdt, world, blackHoleHooks);
   grenades.update(sdt, world);
   grenadeCD -= dt;
   portals.update(dt, portalBodies());
@@ -1754,7 +1809,7 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, portals,
+  world, player, sky, scene, renderer, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, blackholes, blackHoleHooks, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },

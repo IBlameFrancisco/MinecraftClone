@@ -31,8 +31,9 @@ export const ASSAULT_RIFLE = 278;
 export const SHOTGUN = 279;
 export const ROCKET_LAUNCHER = 280;
 export const RAILGUN = 281;
+export const BLACK_HOLE_BOMB = 282;
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -68,6 +69,9 @@ export const ITEMS = {
   [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.30, damage: 12, range: 90,  speed: 40, mag: 20, reload: 1.4, recoil: 0.03, color: 0x2bd6c0 } },
   [ROCKET_LAUNCHER]: { name: 'Rocket Launcher', gun: { kind: 'rocket', rate: 1.0, damage: 18, splash: 48, radius: 4.0, speed: 34, range: 96, mag: 3, reload: 2.0, recoil: 0.08, color: 0x556b2f } },
   [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, recoil: 0.01, color: 0xdadada } },
+  // Lobs a singularity that anchors, drags every nearby combatant into its core
+  // (shredding DOT), then collapses in a final implosion blast.
+  [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 8, range: 70, speed: 24, radius: 12, pull: 26, duration: 3.6, splash: 70, mag: 2, reload: 3.0, recoil: 0.05, color: 0x7b3ff2 } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
@@ -177,6 +181,13 @@ function drawGun(ctx, id) {
     ctx.fillStyle = '#556b2f'; ctx.fillRect(1, 6, 13, 3.6); ctx.fillRect(4, 9.4, 2.6, 3.4);
     ctx.fillStyle = '#3f5022'; ctx.beginPath(); ctx.arc(2, 7.8, 1.9, Math.PI / 2, -Math.PI / 2); ctx.fill();
     ctx.fillStyle = '#d23a2a'; ctx.beginPath(); ctx.moveTo(14, 6); ctx.lineTo(15.5, 7.8); ctx.lineTo(14, 9.6); ctx.closePath(); ctx.fill(); // warhead
+  } else if (id === BLACK_HOLE_BOMB) {
+    ctx.fillStyle = '#241a33'; ctx.fillRect(2, 6, 9, 4); ctx.fillRect(3, 9.5, 3, 3.5);  // dark launcher
+    ctx.fillStyle = '#140d1f'; ctx.fillRect(10, 5, 3, 6);                               // muzzle housing
+    const grad = ctx.createRadialGradient(11.5, 8, 0, 11.5, 8, 3.2);                    // void orb + halo
+    grad.addColorStop(0, '#000'); grad.addColorStop(0.45, '#000');
+    grad.addColorStop(0.7, '#9b6bff'); grad.addColorStop(1, 'rgba(123,63,242,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(11.5, 8, 3.2, 0, Math.PI * 2); ctx.fill();
   } else { // PORTAL_GUN
     ctx.fillStyle = '#d6d6d6'; ctx.fillRect(2, 6, 9, 3.6); ctx.fillRect(3, 9, 3, 4);
     ctx.fillStyle = '#ff8c2b'; ctx.fillRect(10, 6, 2, 1.8);

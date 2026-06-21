@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows.
@@ -226,6 +226,125 @@ export class Grenades {
   }
 }
 
+// ---------------- Black hole bomb ----------------
+// A banded, swirling accretion disk: hot white/orange near the event horizon,
+// cooling to violet at the rim. Spinning the mesh makes the bands churn.
+function accretionTexture() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'); const img = g.createImageData(S, S); const d = img.data;
+  const cx = S / 2, cy = S / 2;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const dx = x - cx, dy = y - cy, r = Math.hypot(dx, dy) / cx, th = Math.atan2(dy, dx);
+    let a = 0;
+    if (r > 0.28 && r < 1.0) {
+      const inner = Math.min(1, (r - 0.28) / 0.10);
+      const outer = Math.min(1, (1.0 - r) / 0.55);
+      const band = 0.45 + 0.55 * Math.pow(Math.max(0, Math.sin(th * 6 + r * 26)), 1.5);  // spiral streaks
+      a = inner * outer * band;
+    }
+    const t = Math.min(1, Math.max(0, (r - 0.28) / 0.72));   // hot -> cool
+    const idx = (y * S + x) * 4;
+    d[idx] = 255 * (1 - 0.25 * t);
+    d[idx + 1] = 220 * (1 - t) + 50 * t;
+    d[idx + 2] = 110 * (1 - t) + 255 * t;
+    d[idx + 3] = Math.min(255, a * 340);
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
+}
+// A thin bright ring (the lensed photon ring / Einstein ring) framing the core.
+function einsteinRingTexture() {
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'); const img = g.createImageData(S, S); const d = img.data;
+  const cx = S / 2;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const r = Math.hypot(x - cx, y - cx) / cx;
+    const a = Math.exp(-((r - 0.84) * (r - 0.84)) / 0.004);   // sharp ring at r~0.84
+    const idx = (y * S + x) * 4;
+    d[idx] = 255; d[idx + 1] = 226; d[idx + 2] = 180; d[idx + 3] = Math.min(255, a * 255);
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
+}
+function easeOutBack(x) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); }
+
+// Lobs a singularity that flies until it hits a block / enemy / its range, then
+// anchors and runs an open -> hold -> collapse lifecycle. Damage + the gravity
+// pull live in main (it owns the entities); this class owns the animation and
+// drives main via hooks (anchorAt / onAnchor / onField / onCollapse).
+export class BlackHoles {
+  constructor(scene) {
+    this.group = new THREE.Group(); scene.add(this.group); this.list = [];
+    this._diskTex = accretionTexture();
+    this._ringTex = einsteinRingTexture();
+  }
+  spawn(pos, dir, gun, ownerId) {
+    const g = new THREE.Group(); g.position.copy(pos); g.scale.setScalar(0.45);
+    const add = (m) => { g.add(m); return m; };
+    const core = add(new THREE.Mesh(new THREE.SphereGeometry(1.3, 24, 16), new THREE.MeshBasicMaterial({ color: 0x000000 })));
+    const glow = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x7b3ff2, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+    glow.scale.setScalar(7);
+    const disk = add(new THREE.Mesh(new THREE.CircleGeometry(4.6, 64), new THREE.MeshBasicMaterial({ map: this._diskTex, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+    disk.rotation.x = -1.18;
+    const disk2 = add(new THREE.Mesh(new THREE.CircleGeometry(3.3, 56), new THREE.MeshBasicMaterial({ map: this._diskTex, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+    disk2.rotation.set(-1.18, 0.6, 0.4);
+    const ring = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: this._ringTex, color: 0xffe2b0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false })));
+    ring.scale.setScalar(4.3); ring.renderOrder = 1000;
+    const shock = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: this._ringTex, color: 0xb98bff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false })));
+    shock.renderOrder = 1001;
+    const parts = [];
+    for (let i = 0; i < 16; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffd0a0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      g.add(s); parts.push({ s, ang: Math.random() * 6.28, rad: 2 + Math.random() * 2.6, y: (Math.random() - 0.5) * 1.4, spd: 1.6 + Math.random() * 1.8, fall: 0.6 + Math.random() * 0.9 });
+    }
+    for (const o of [disk, disk2, ring, shock, ...parts.map((p) => p.s)]) o.visible = false;  // fly = just the orb
+    this.group.add(g);
+    this.list.push({ phase: 'fly', pos: pos.clone(), vel: dir.clone().normalize().multiplyScalar(gun.speed),
+      gun, ownerId, t: 0, travelled: 0, c: 0, g, core, glow, disk, disk2, ring, shock, parts });
+  }
+  _dispose(h) { this.group.remove(h.g); h.g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
+  update(dt, world, hooks) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const h = this.list[i], gun = h.gun;
+      if (h.phase === 'fly') {
+        const step = h.vel.clone().multiplyScalar(dt); h.pos.add(step); h.travelled += step.length();
+        h.g.position.copy(h.pos);
+        h.g.rotation.y += dt * 6; h.glow.material.opacity = 0.7 + 0.3 * Math.sin(h.t * 20); h.t += dt;
+        const solid = isSolid(world.getBlock(Math.floor(h.pos.x), Math.floor(h.pos.y), Math.floor(h.pos.z)));
+        if (solid || h.travelled > gun.range || (hooks.anchorAt && hooks.anchorAt(h.pos))) {
+          h.phase = 'open'; h.t = 0; h.g.rotation.set(0, 0, 0);
+          for (const o of [h.disk, h.disk2, h.ring, h.shock, ...h.parts.map((p) => p.s)]) o.visible = true;
+          if (hooks.onAnchor) hooks.onAnchor(h.pos.clone());
+        }
+        continue;
+      }
+      h.t += dt;
+      let s = 1;
+      if (h.phase === 'open') { s = easeOutBack(Math.min(1, h.t / 0.45)) * 1.0; if (h.t >= 0.45) h.phase = 'hold'; }
+      else if (h.phase === 'hold') { s = 1 + 0.04 * Math.sin(h.t * 8); if (h.t >= gun.duration - 0.5) { h.phase = 'collapse'; h.c = 0; } }
+      else { h.c += dt; const k = Math.min(1, h.c / 0.5); s = (1 - k) * (1 - k) * (1 + 0.6 * Math.sin(k * 30));
+        if (h.c >= 0.5) { if (hooks.onCollapse) hooks.onCollapse(h.pos.clone(), gun); this._dispose(h); this.list.splice(i, 1); continue; } }
+      h.g.scale.setScalar(Math.max(0.001, s));
+      h.disk.rotation.z += dt * 2.6; h.disk2.rotation.z -= dt * 3.4;
+      h.ring.material.rotation += dt * 0.6;
+      const pulse = 0.9 + 0.1 * Math.sin(h.t * 7);
+      h.ring.material.opacity = pulse; h.glow.material.opacity = 0.85 * pulse;
+      if (h.t < 0.6 && h.phase !== 'collapse') { const k = Math.min(1, h.t / 0.55); h.shock.scale.setScalar(2 + k * 11); h.shock.material.opacity = (1 - k) * 0.7; }
+      else h.shock.material.opacity = 0;
+      for (const p of h.parts) {
+        p.ang += p.spd * dt; p.rad -= p.fall * dt;
+        if (p.rad < 0.25) { p.rad = 2.4 + Math.random() * 2.4; p.y = (Math.random() - 0.5) * 1.6; }
+        p.s.position.set(Math.cos(p.ang) * p.rad, p.y * Math.min(1, p.rad / 1.6), Math.sin(p.ang) * p.rad);
+        const cl = Math.min(1, p.rad / 4);
+        p.s.material.color.setRGB(1, 0.45 + 0.45 * cl, 0.3 + 0.6 * cl);
+        p.s.scale.setScalar(0.22 + (1 - cl) * 0.4);
+        p.s.material.opacity = 0.75;
+      }
+      if (hooks.onField) hooks.onField(h.pos, dt, gun, h.phase);
+    }
+  }
+}
+
 // ---------------- Portals ----------------
 export class Portals {
   constructor(scene) {
@@ -425,6 +544,13 @@ export function makeViewModel(id) {
     const warhead = box(0.16, 0.16, 0.18, 0xd23a2a, 0, 0, -0.86);
     warhead.material = new THREE.MeshBasicMaterial({ color: 0xe04a36, fog: false });
     box(0.1, 0.2, 0.14, 0x3f5022, 0, -0.16, 0.06);
+  } else if (id === BLACK_HOLE_BOMB) {
+    box(0.22, 0.22, 0.62, 0x241a33, 0, 0, -0.26);          // dark body
+    box(0.27, 0.27, 0.16, 0x140d1f, 0, 0, -0.54);          // muzzle housing
+    const orb = box(0.16, 0.16, 0.16, 0x000000, 0, 0, -0.6); orb.material = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false }); // void orb
+    const e1 = box(0.04, 0.04, 0.5, 0x9b6bff, 0.12, 0.07, -0.26); e1.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
+    const e2 = box(0.04, 0.04, 0.5, 0x9b6bff, -0.12, 0.07, -0.26); e2.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
+    box(0.1, 0.2, 0.14, 0x1c1430, 0, -0.16, 0.04);         // grip
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xd6d6d6, 0, 0, -0.2);
     box(0.06, 0.06, 0.12, 0xff8c2b, 0.05, 0, -0.48);
