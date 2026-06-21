@@ -26,10 +26,19 @@ export class HUD {
     ui.appendChild(this.announceEl); ui.appendChild(this.dmgDirEl);
   }
 
-  // Big fading announcer banner (First Blood, multikills, round win…).
+  // Big fading announcer banner (First Blood, multikills, round win…). Queued so two
+  // banners fired in the same frame (e.g. multikill + killstreak) both show in turn
+  // instead of the second silently clobbering the first.
   announce(text, color) {
+    (this._annQ || (this._annQ = [])).push({ text, color: color || '#ffe27a' });
+    if (!this._annActive) this._annNext();
+  }
+  _annNext() {
+    if (!this._annQ || !this._annQ.length) { this._annActive = false; return; }
+    this._annActive = true;
+    const { text, color } = this._annQ.shift();
     this.announceEl.textContent = text;
-    this.announceEl.style.color = color || '#ffe27a';
+    this.announceEl.style.color = color;
     this.announceEl.style.transition = 'none';
     this.announceEl.style.opacity = '1';
     this.announceEl.style.transform = 'translateX(-50%) scale(1.15)';
@@ -38,6 +47,8 @@ export class HUD {
       this.announceEl.style.opacity = '0';
       this.announceEl.style.transform = 'translateX(-50%) scale(1)';
     });
+    clearTimeout(this._annTimer);
+    this._annTimer = setTimeout(() => this._annNext(), this._annQ.length ? 850 : 1300);
   }
 
   // Red wedge pointing toward where damage came from (relative to facing).
@@ -101,7 +112,7 @@ export class HUD {
     this.roEl.innerHTML = `<div class="rocard"><div class="rowin">${escapeHtml(winner || 'Nobody')} wins!</div><div class="rosub">Next round starting…</div></div>`;
   }
   hideRoundOver() { this.roEl.style.display = 'none'; }
-  setModeInfo(text) { this.modeInfoEl.style.display = text ? 'block' : 'none'; if (text) this.modeInfoEl.textContent = text; }
+  setModeInfo(text) { this.modeInfoEl.style.display = text ? 'block' : 'none'; this.modeInfoEl.textContent = text || ''; }
   setGrenades(n) {
     if (!this.nadeEl) { this.nadeEl = document.createElement('div'); this.nadeEl.id = 'nades'; document.getElementById('ui').appendChild(this.nadeEl); }
     this.nadeEl.style.display = n > 0 ? 'block' : 'none';
@@ -270,6 +281,7 @@ export class HUD {
   }
 
   _drawIcons(ctx, cur, max, type) {
+    cur = Math.max(0, Math.min(max, cur || 0));   // guard fractional / over-max / NaN
     const n = max / 2;          // 10 icons, each = 2 points
     ctx.clearRect(0, 0, 200, 18);
     for (let i = 0; i < n; i++) {
