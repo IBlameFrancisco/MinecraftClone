@@ -134,6 +134,8 @@ export class Multiplayer {
       this.conns.delete(conn.peer);
       this._roster(conn.peer, null);
       this._removeRemote(conn.peer);
+      // Star topology: tell the other guests to drop this peer's avatar + roster entry.
+      if (this.isHost) this._relay(conn.peer, { t: 'leave', id: conn.peer });
     });
   }
 
@@ -165,7 +167,7 @@ export class Multiplayer {
         this.handlers.onKillFeed?.(d.name, d.by);
         if (this.isHost) { this.handlers.onDeathAuthority?.(d.by, d.id); this._relay(conn.peer, d); }
         break;
-      case 'bpos': for (const bd of d.bots) this._updateBot(bd); break;     // host → guests
+      case 'bpos': this._syncBots(d.bots); break;     // host → guests
       case 'bfire': this.handlers.onBotFire?.(d); break;
       case 'board': this.handlers.onBoard?.(d); break;
       case 'roundover': this.handlers.onRoundOver?.(d.winner); break;
@@ -202,8 +204,8 @@ export class Multiplayer {
 
   // PvP: tell a peer it took damage (each client owns its own health). Routed via
   // the host relay, so it works whether shooter and target are host or guests.
-  sendHit(target, dmg, head) {
-    if (this.online && dmg > 0) this.broadcast({ t: 'hit', target, dmg, head: !!head, from: this.myId, fromName: this.name });
+  sendHit(target, dmg, head, fromName = this.name) {
+    if (this.online && dmg > 0) this.broadcast({ t: 'hit', target, dmg, head: !!head, from: this.myId, fromName });
   }
   sendDeath(by) { if (this.online) this.broadcast({ t: 'death', id: this.myId, name: this.name, by: by || null }); }
 
@@ -270,6 +272,15 @@ export class Multiplayer {
     }
     r.target = { x: d.x, y: d.y, z: d.z, yaw: d.yaw };
     r.group.visible = d.alive !== false;
+  }
+  // Apply a full bot snapshot from the host and prune avatars for bots it no longer
+  // reports (cleared/replaced across matches or mode changes) so they don't ghost.
+  _syncBots(bots) {
+    const live = new Set();
+    for (const bd of bots) { live.add(bd.id); this._updateBot(bd); }
+    const stale = [];
+    for (const [id, r] of this.remotes) if (r.bot && !live.has(id)) stale.push(id);
+    for (const id of stale) this._removeRemote(id);
   }
   recolorBots(colorFn) { for (const r of this.remotes.values()) if (r.bot) tintAvatarColor(r.group, colorFn(r.team)); }
   _removeRemote(id) {

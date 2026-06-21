@@ -148,6 +148,7 @@ export class World {
       this.genQueue.sort((a, b) => this.dist2(b) - this.dist2(a)); // nearest at end
       while (this.genQueue.length && performance.now() - t0 < budgetMs) {
         const c = this.genQueue.pop();
+        if (this.getChunk(c.cx, c.cz) !== c) continue;   // unloaded/replaced while queued — drop it
         if (!c.generated) {
           this.gen.generate(c);
           if (this.applyEditsToChunk) this.applyEditsToChunk(c);
@@ -173,6 +174,7 @@ export class World {
 
   buildMesh(c) {
     c.dirty = false;
+    c.meshed = true;
     const { solid, water } = buildChunkGeometry(this, c.cx, c.cz);
     const px = c.cx * CHUNK_SIZE, pz = c.cz * CHUNK_SIZE;
 
@@ -197,9 +199,10 @@ export class World {
     }
   }
 
-  // True once the chunk the player stands in is meshed (used to gate spawn).
+  // True once the chunk the player stands in is meshed (used to gate spawn so the
+  // player/mobs don't drop in before the floor geometry exists).
   isReady(wx, wz) {
     const c = this.getChunk(Math.floor(wx / CHUNK_SIZE), Math.floor(wz / CHUNK_SIZE));
-    return !!(c && c.generated);
+    return !!(c && c.meshed);
   }
 }
