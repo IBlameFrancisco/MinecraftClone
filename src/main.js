@@ -17,9 +17,9 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG } from './items.js';
 import { World } from './world.js';
-import { ARENA } from './worldgen.js';
+import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY } from './worldgen.js';
 import { Player } from './player.js';
 import { Sky } from './sky.js';
 import { Particles } from './particles.js';
@@ -42,6 +42,8 @@ const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
 const BATTLE_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB];
+// D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
+const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
 
 // Difficulty (peaceful → hardcore) controls mob spawns, damage, and respawn.
@@ -177,7 +179,8 @@ let difficulty = NORMAL;
 let menuMode = SURVIVAL, menuDiff = NORMAL;   // chosen on the start screen
 let health = 20, hunger = 20, dead = false;
 let invuln = 0, regenTimer = 0, hungerTimer = 0, starveTimer = 0;
-let arena = false;                 // is the current world the battle arena?
+let arena = false;                 // is the current world a battle map (arena/beach)?
+let battleMap = 'arena';           // which battle map: 'arena' or 'beach' (D-Day)
 let lastHitBy = null, lastHitTime = -100;   // for PvP kill attribution
 let shakeAmt = 0;                  // screen-shake magnitude
 let combo = 0, comboTimer = 0, firstBlood = true;   // announcer multikill tracking
@@ -300,6 +303,7 @@ function finishLoading() {
   if (arena) {
     const sp = teamSpawnPoint(myTeam);
     player.pos.set(sp.x, sp.y, sp.z);
+    if (sp.yaw !== undefined) player.yaw = sp.yaw;
   } else {
     player.pos.set(SPAWN.x, world.surfaceHeight(Math.floor(SPAWN.x), Math.floor(SPAWN.z)) + 2, SPAWN.z);
     SPAWN.y = player.pos.y;
@@ -310,14 +314,15 @@ function finishLoading() {
 }
 
 // Regenerate from a seed (start-screen "New World" / Battle / joining a host).
-function loadWorld(seedStr, asArena) {
+function loadWorld(seedStr, mapKind) {
   currentSeedStr = (seedStr && seedStr.trim()) ? seedStr.trim() : randomSeedStr();
   seedInput.value = currentSeedStr;
-  arena = asArena;
-  world.regenerate(hashSeed(currentSeedStr), asArena);
+  arena = !!mapKind;
+  battleMap = mapKind === 'beach' ? 'beach' : 'arena';
+  world.regenerate(hashSeed(currentSeedStr), mapKind);
   edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll(); botMgr.clear();
   setupHill(false); setupZone(false);
-  if (!asArena && mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
+  if (!mapKind && mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
   dead = false; resetBreak(); startWorld();
 }
 function newWorld(seedStr) { loadWorld(seedStr, false); }
@@ -362,7 +367,7 @@ function startSelectedMode(seedStr, forceNew) {
     setGameMode(BATTLE);
     inventory.setLoadout(BATTLE_LOADOUT);
     health = 20; hud.setHealth(20);
-    loadWorld(seedStr, true);
+    loadWorld(seedStr, battleCfg.mode === 'war' ? 'beach' : 'arena');
     setupMatch();
   } else {
     setGameMode(menuMode);
@@ -394,6 +399,12 @@ function refreshModePicker() {
   modeBattleBtn.classList.toggle('active', menuMode === BATTLE);
   diffRow.style.visibility = menuMode === SURVIVAL ? 'visible' : 'hidden';
   battleSetupEl.classList.toggle('show', menuMode === BATTLE);
+  updateSkinVisibility();
+}
+// War uses fixed faction uniforms, so hide the character/skin picker for it.
+function updateSkinVisibility() {
+  const sr = document.querySelector('.skinrow');
+  if (sr) sr.style.display = (menuMode === BATTLE && battleCfg.mode === 'war') ? 'none' : '';
 }
 modeSurvBtn.addEventListener('click', () => { menuMode = SURVIVAL; refreshModePicker(); });
 modeCreaBtn.addEventListener('click', () => { menuMode = CREATIVE; refreshModePicker(); });
@@ -401,7 +412,7 @@ modeBattleBtn.addEventListener('click', () => { menuMode = BATTLE; refreshModePi
 document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
 
 // ---------- Battle setup (game mode, FFA/Teams, size, bot difficulty, score) ----------
-const battleCfg = { mode: 'dm', team: false, size: 6, botDiff: 'normal', scoreLimit: 20 };
+const battleCfg = { mode: 'dm', team: false, side: 'allied', size: 6, botDiff: 'normal', scoreLimit: 20 };
 const bsGameMode = document.getElementById('bsGameMode');
 const bsTeamRow = document.getElementById('bsTeamRow');
 const bsFFA = document.getElementById('bsModeFFA');
@@ -415,25 +426,30 @@ const bsScoreRow = bsScore.closest('.bsrow');
 const FORCES_FFA = { gungame: true, br: true };
 const FORCES_COOP = { wave: true };
 function fillSizeOptions() {
-  const teamSel = battleCfg.team && !FORCES_FFA[battleCfg.mode] && !FORCES_COOP[battleCfg.mode];
+  const war = battleCfg.mode === 'war';
+  const teamSel = battleCfg.team && !FORCES_FFA[battleCfg.mode] && !FORCES_COOP[battleCfg.mode] && !war;
   const wave = battleCfg.mode === 'wave';
-  bsSizeLabel.textContent = wave ? 'Wave size' : teamSel ? 'Team size' : 'Combatants';
-  const lo = teamSel ? 1 : 2, hi = teamSel ? 4 : 8, def = teamSel ? 2 : 6;
+  bsSizeLabel.textContent = war ? 'Defenders' : wave ? 'Wave size' : teamSel ? 'Team size' : 'Combatants';
+  const lo = war ? 4 : teamSel ? 1 : 2, hi = war ? 12 : teamSel ? 4 : 8, def = war ? 8 : teamSel ? 2 : 6;
   bsSize.innerHTML = '';
   for (let n = lo; n <= hi; n++) { const o = document.createElement('option'); o.value = n; o.textContent = teamSel ? `${n} v ${n}` : n; bsSize.appendChild(o); }
   battleCfg.size = Math.min(hi, Math.max(lo, def));
   bsSize.value = battleCfg.size;
 }
 function refreshBattleSetup() {
-  const m = battleCfg.mode;
+  const m = battleCfg.mode, war = m === 'war';
   bsTeamRow.style.display = (FORCES_FFA[m] || FORCES_COOP[m]) ? 'none' : 'flex';
-  bsScoreRow.style.display = (m === 'gungame' || m === 'br') ? 'none' : 'flex';   // auto win conditions
-  bsFFA.classList.toggle('active', !battleCfg.team);
-  bsTeam.classList.toggle('active', battleCfg.team);
+  bsScoreRow.style.display = (m === 'gungame' || m === 'br' || war) ? 'none' : 'flex';   // auto win conditions
+  // For War the FFA/Teams chips become an Allied/Axis side picker.
+  bsFFA.textContent = war ? '⚔ Storm (Allied)' : 'Free-for-all';
+  bsTeam.textContent = war ? '🛡 Hold (Axis)' : 'Teams';
+  bsFFA.classList.toggle('active', war ? battleCfg.side === 'allied' : !battleCfg.team);
+  bsTeam.classList.toggle('active', war ? battleCfg.side === 'axis' : battleCfg.team);
+  updateSkinVisibility();
 }
 bsGameMode.addEventListener('change', (e) => { battleCfg.mode = e.target.value; fillSizeOptions(); refreshBattleSetup(); });
-bsFFA.addEventListener('click', () => { battleCfg.team = false; fillSizeOptions(); refreshBattleSetup(); });
-bsTeam.addEventListener('click', () => { battleCfg.team = true; fillSizeOptions(); refreshBattleSetup(); });
+bsFFA.addEventListener('click', () => { if (battleCfg.mode === 'war') battleCfg.side = 'allied'; else battleCfg.team = false; fillSizeOptions(); refreshBattleSetup(); });
+bsTeam.addEventListener('click', () => { if (battleCfg.mode === 'war') battleCfg.side = 'axis'; else battleCfg.team = true; fillSizeOptions(); refreshBattleSetup(); });
 bsSize.addEventListener('change', (e) => { battleCfg.size = parseInt(e.target.value, 10); });
 bsBotDiff.addEventListener('change', (e) => { battleCfg.botDiff = e.target.value; });
 bsScore.addEventListener('change', (e) => { battleCfg.scoreLimit = parseInt(e.target.value, 10); });
@@ -518,15 +534,16 @@ const playerName = () => (document.getElementById('nameInput').value.trim() || _
 const mpHandlers = {
   getInit: () => ({
     seed: hashSeed(currentSeedStr),
-    arena, battle: mode === BATTLE, team: teamMode, scoreLimit,
+    arena, battleMap, battle: mode === BATTLE, team: teamMode, scoreLimit,
     edits: [...edits.entries()].map(([k, v]) => { const [x, y, z] = k.split(',').map(Number); return [x, y, z, v]; }),
   }),
   onInit: (d) => {
     currentSeedStr = String(d.seed);
     seedInput.value = currentSeedStr;
     arena = !!d.arena;
+    battleMap = d.battleMap === 'beach' ? 'beach' : 'arena';
     botMgr.clear();
-    world.regenerate(d.seed, arena);
+    world.regenerate(d.seed, arena ? battleMap : false);
     edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
     for (const e of d.edits) recordEdit(e[0], e[1], e[2], e[3]);
     if (d.battle) {
@@ -594,9 +611,9 @@ function setGameMode(m) {
   mode = m;
   player.setMode(m === CREATIVE ? 1 : 0);          // creative flies; survival/battle walk
   inventory.setMode(m === CREATIVE || m === BATTLE); // battle uses the infinite (creative) set
-  sky.setHorror(m === BATTLE);                       // creepy arena atmosphere
-  if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }
+  if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }  // atmosphere set in setupMatch
   else {
+    sky.setHorror(false); sky.setWar(false);
     hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear(); hud.setGrenades(0);
     if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
   }
@@ -652,8 +669,19 @@ function battleDeath() {
     hud.announce('Eliminated — spectating', '#ff5b5b'); hud.flashHurt();
     return;
   }
+  if (gameMode === 'war' && myTeam === WAR_ALLIED) {
+    if (warTickets > 0) warTickets--;     // a reinforcement comes ashore in your place
+    else {                                // assault spent — spectate from above the bluff
+      eliminated = true; player.flying = true;
+      player.pos.set(BEACH.OBJ_X + 0.5, BEACH.FLOOR + 26, BEACH.OBJ_Z + 0.5); player.vel.set(0, 0, 0);
+      health = 20; hud.setHealth(20); invuln = 999;
+      hud.announce('No reinforcements left — spectating', '#ff5b5b'); hud.flashHurt();
+      return;
+    }
+  }
   const sp = teamSpawnPoint(myTeam);
   player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
+  if (sp.yaw !== undefined) player.yaw = sp.yaw;
   health = 20; hud.setHealth(20); invuln = 1.6;
   grenadeCount = 2; hud.setGrenades(2);
   if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
@@ -669,6 +697,13 @@ let gunLevelShown = -1;          // gun game: which ladder weapon we're holding
 let hillTimer = 0;               // koth scoring tick
 let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
 let waveNum = 0, waveBreak = 0;  // wave survival
+// War (D-Day): Allied attack from the sea, Axis defend the bunker line.
+const WAR_ALLIED = TEAM_RED, WAR_AXIS = TEAM_BLUE;
+let warSide = 'allied';          // the local player's faction
+let warTickets = 0;              // Allied reinforcements left (respawns)
+let warTimer = 0;                // countdown — Axis win if it runs out
+let warCapture = 0;             // Allied capture progress on the objective (0..100)
+const WAR_TIME = 270, WAR_TICKETS = 28;
 const GUNGAME_LADDER = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, PLASMA_GUN, SNIPER, RAILGUN, ROCKET_LAUNCHER];
 const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
 const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
@@ -686,12 +721,24 @@ function colorForBot(team) { return (teamMode && team === myTeam) ? 0x57d977 : 0
 function friendly(id) { return teamMode && myTeam !== TEAM_NONE && teamOf(id) === myTeam; }
 
 function teamSpawnPoint(team) {
+  if (gameMode === 'war') {
+    const pool = team === WAR_AXIS ? BEACH_SPAWN_AXIS : BEACH_SPAWN_ALLIED;
+    const [x, z] = pool[(Math.random() * pool.length) | 0];
+    return { x: x + 0.5, y: beachGroundY(z) + 1.2, z: z + 0.5, yaw: team === WAR_AXIS ? Math.PI : 0 };
+  }
   let pool = BATTLE_SPAWNS;
   if (team === TEAM_RED) pool = BATTLE_SPAWNS.filter(([x]) => x < 0);
   else if (team === TEAM_BLUE) pool = BATTLE_SPAWNS.filter(([x]) => x > 0);
   if (!pool.length) pool = BATTLE_SPAWNS;
   const [x, z] = pool[(Math.random() * pool.length) | 0];
   return { x: x + 0.5, y: ARENA.FLOOR + 1.2, z: z + 0.5 };
+}
+
+// Nearest MG-nest / bunker hold point for a defender to anchor on.
+function nearestNest(x, z) {
+  let best = BEACH_NESTS[0], bd = Infinity;
+  for (const [nx, nz] of BEACH_NESTS) { const d = (nx - x) ** 2 + (nz - z) ** 2; if (d < bd) { bd = d; best = [nx, nz]; } }
+  return new THREE.Vector3(best[0] + 0.5, beachGroundY(best[1]) + 1, best[1] + 0.5);
 }
 
 // Bot retreat/cover points, mirrored from the arena layout.
@@ -709,7 +756,7 @@ function setupMatch() {
   gameMode = battleCfg.mode;
   teamMode = battleCfg.team;
   if (gameMode === 'gungame' || gameMode === 'br') teamMode = false;
-  if (gameMode === 'wave') teamMode = true;                 // all humans vs the bots
+  if (gameMode === 'wave' || gameMode === 'war') teamMode = true;
   scoreLimit = gameMode === 'gungame' ? GUNGAME_LADDER.length : battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
   matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
@@ -723,12 +770,16 @@ function setupMatch() {
   computeCoverPoints();
   setupHill(gameMode === 'koth');
   setupZone(gameMode === 'br');
+  sky.setHorror(gameMode !== 'war'); sky.setWar(gameMode === 'war');
+  if (gameMode === 'war') pickups.clear();
 
   const humans = [selfId()];
   if (mp.online) for (const id of mp.roster.keys()) humans.push(id);
 
   let botTeams = [];
-  if (gameMode === 'wave') {
+  if (gameMode === 'war') {
+    setupWar(humans);                                       // spawns its own faction bots
+  } else if (gameMode === 'wave') {
     myTeam = TEAM_RED; for (const id of humans) teamAssign.set(id, TEAM_RED);   // bots arrive in waves
   } else if (teamMode) {
     myTeam = TEAM_RED; teamAssign.set(selfId(), TEAM_RED);
@@ -746,6 +797,47 @@ function setupMatch() {
   if (gameMode === 'gungame') applyGunGameLevel(true);
   if (gameMode === 'wave' && isAuthority()) startWave(1);
   rebuildBoard(); broadcastBoard();
+}
+
+// D-Day uniforms: olive-drab for the Allies, feldgrau for the Axis. The team-colour
+// override on avatars becomes the faction tunic colour (friend/foe read by uniform).
+function warColor(team) { return team === WAR_AXIS ? 0x474d3f : 0x595d39; }
+function factionSkin(team) {
+  const axis = team === WAR_AXIS;
+  return { skin: 0xdcb38e, hair: axis ? 0x3a3026 : 0x4a3320, hairStyle: 'short', eye: 0x2a2a2a,
+    shirt: axis ? 0x474d3f : 0x595d39, pants: axis ? 0x35392e : 0x42452a,
+    hat: 'helmet', hatColor: axis ? 0x33372d : 0x474b30 };
+}
+const _pick = (a) => a[(Math.random() * a.length) | 0];
+
+// War setup: Allied storm in from the sea, Axis hold the bunker line. Humans fight
+// on the chosen side together; bots fill both. Axis defenders man the MG nests.
+function setupWar(humans) {
+  warSide = battleCfg.side === 'axis' ? 'axis' : 'allied';
+  myTeam = warSide === 'axis' ? WAR_AXIS : WAR_ALLIED;
+  for (const id of humans) teamAssign.set(id, myTeam);
+  warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0;
+  inventory.setLoadout(WAR_LOADOUT);
+  if (!isAuthority()) return;
+
+  const hN = humans.length;
+  const axisN = Math.max(3, battleCfg.size - (warSide === 'axis' ? hN : 0));
+  const alliedN = Math.max(5, battleCfg.size + 4 - (warSide === 'allied' ? hN : 0));
+  const teams = [];
+  for (let i = 0; i < alliedN; i++) teams.push(WAR_ALLIED);
+  for (let i = 0; i < axisN; i++) teams.push(WAR_AXIS);
+  botMgr.spawn(teams.length, teams, battleCfg.botDiff, teamSpawnPoint, warColor, factionSkin);
+  for (const b of botMgr.bots) {
+    if (b.team === WAR_AXIS) {                              // defenders: hold the nest, brace the MG
+      b.defend = true; b.anchor = nearestNest(b.pos.x, b.pos.z); b.yaw = Math.PI;
+      b.gunId = HEAVY_MG;
+    } else {                                                // attackers: push up the beach to the objective
+      b.defend = false; b.anchor = null; b.yaw = 0;
+      b.advance = true; b.advanceGoal = new THREE.Vector3(BEACH.OBJ_X + (Math.random() - 0.5) * 10, 0, BEACH.OBJ_Z + 2);
+      b.gunId = _pick([ASSAULT_RIFLE, SMG, ASSAULT_RIFLE, SHOTGUN]);
+    }
+    b.gun = gunOf(b.gunId); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0;
+  }
 }
 
 // ---- Mode helpers ----
@@ -838,6 +930,26 @@ function modeTick(dt) {
   } else if (gameMode === 'koth') { hillTimer -= dt; if (hillTimer <= 0) { hillTimer = 1.0; kothAward(); } }
   else if (gameMode === 'br') brTick(dt);
   else if (gameMode === 'wave') waveTick(dt);
+  else if (gameMode === 'war') warTick(dt);
+}
+
+// D-Day: Allied win by capturing the bunker objective; Axis win by running out the
+// clock (holding the line) or repelling the assault (Allied reinforcements spent).
+function warTick(dt) {
+  warTimer -= dt;
+  const ox = BEACH.OBJ_X, oz = BEACH.OBJ_Z, r2 = BEACH.OBJ_R * BEACH.OBJ_R;
+  const inObj = (x, z) => (x - ox) ** 2 + (z - oz) ** 2 < r2;
+  let allied = 0, axis = 0;
+  if (!eliminated && health > 0 && inObj(player.pos.x, player.pos.z)) (myTeam === WAR_ALLIED ? allied++ : axis++);
+  for (const b of botMgr.bots) if (b.alive && inObj(b.pos.x, b.pos.z)) (b.team === WAR_ALLIED ? allied++ : axis++);
+  if (mp.online) for (const [id, rr] of mp.remotes) if (rr.group.visible && inObj(rr.group.position.x, rr.group.position.z)) (teamOf(id) === WAR_ALLIED ? allied++ : axis++);
+  if (allied > 0 && axis === 0) warCapture = Math.min(100, warCapture + dt * (100 / 14));      // ~14s uncontested to take it
+  else if (axis > 0 && allied === 0) warCapture = Math.max(0, warCapture - dt * (100 / 22));   // Axis retake it slower
+  if (matchWinner) return;
+  if (warCapture >= 100) { endMatch('Allied — beachhead secured'); return; }
+  if (warTimer <= 0) { endMatch('Axis — the line held'); return; }
+  const alliedAlive = (myTeam === WAR_ALLIED && !eliminated && health > 0 ? 1 : 0) + botMgr.bots.filter((b) => b.alive && b.team === WAR_ALLIED).length;
+  if (warTickets <= 0 && alliedAlive === 0) endMatch('Axis — assault repelled');
 }
 
 function rebuildBoard() {
@@ -868,7 +980,7 @@ function registerKill(killerName, victimId) {
   checkWin(); rebuildBoard(); broadcastBoard();
 }
 function checkWin() {
-  if (matchWinner || gameMode === 'br' || gameMode === 'wave') return;   // those have their own win logic
+  if (matchWinner || gameMode === 'br' || gameMode === 'wave' || gameMode === 'war') return;   // those have their own win logic
   if (teamMode) {
     let red = 0, blue = 0;
     (myTeam === TEAM_RED ? red += myKills : blue += myKills);
@@ -931,7 +1043,15 @@ function manageBots(dt) {
   const respawns = gameMode !== 'br' && gameMode !== 'wave';   // BR eliminates; waves replace
   for (const b of botMgr.bots) {
     if (!b.alive && !b.deathProcessed) { b.deathProcessed = true; onBotKilled(b); }
-    else if (respawns && !b.alive && b.respawnIn > 0) { b.respawnIn -= dt; if (b.respawnIn <= 0) respawnBot(b); }
+    else if (respawns && !b.alive && b.respawnIn > 0) {
+      b.respawnIn -= dt;
+      if (b.respawnIn <= 0) {
+        // War: Allied attackers cost a reinforcement ticket to land again; once spent
+        // they stay down. Axis defenders hold the line and respawn freely.
+        if (gameMode === 'war' && b.team === WAR_ALLIED) { if (warTickets > 0) { warTickets--; respawnBot(b); } }
+        else respawnBot(b);
+      }
+    }
   }
 }
 
@@ -1730,6 +1850,11 @@ function frame() {
     else if (gameMode === 'koth') info = `King of the Hill · ${scoreLimit} to win`;
     else if (gameMode === 'br') { const a = botMgr.bots.filter((b) => b.alive).length + (!eliminated && health > 0 ? 1 : 0); info = eliminated ? `Spectating · ${a} alive` : `Battle Royale · ${a} alive · zone ${Math.round(zoneRadius)}m`; }
     else if (gameMode === 'wave') info = `Wave ${waveNum}/${WAVE_TARGET} · ${botMgr.bots.filter((b) => b.alive).length} left`;
+    else if (gameMode === 'war') {
+      const role = myTeam === WAR_ALLIED ? '🪖 Allied' : '🛡 Axis';
+      const mm = Math.max(0, Math.floor(warTimer / 60)), ss = Math.max(0, Math.floor(warTimer % 60));
+      info = `D-Day · ${role} · Beachhead ${Math.floor(warCapture)}% · ${mm}:${String(ss).padStart(2, '0')} · Reinf ${Math.max(0, warTickets)}`;
+    }
     else info = `Deathmatch · first to ${scoreLimit}`;
     hud.setModeInfo(info);
   } else hud.setModeInfo(null);

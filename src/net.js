@@ -69,6 +69,7 @@ export function makeAvatar(name, skin, shirtOverride) {
   if (skin.hat === 'sombrero') { add(1.15, 0.07, 1.15, 0xd9b25a, 0, 2.06, 0); add(0.52, 0.36, 0.52, 0xc99a3e, 0, 2.26, 0); }
   else if (skin.hat === 'cap') { add(0.55, 0.18, 0.55, skin.hatColor || 0x303030, 0, 2.02, 0); add(0.42, 0.07, 0.3, skin.hatColor || 0x303030, 0, 1.99, 0.34); }
   else if (skin.hat === 'beanie') { add(0.57, 0.28, 0.57, skin.hatColor || 0x884444, 0, 2.03, 0); }
+  else if (skin.hat === 'helmet') { const hc = skin.hatColor || 0x4a4f30; add(0.58, 0.22, 0.58, hc, 0, 2.03, 0); add(0.66, 0.06, 0.66, darken(hc, 0.8), 0, 1.93, 0); }  // steel helmet (dome + brim)
   add(0.22, 0.62, 0.25, shirt, -0.41, 1.56, 0, true);      // arms (sleeves)
   add(0.22, 0.62, 0.25, shirt, 0.41, 1.56, 0, true);
   add(0.22, 0.16, 0.25, skin.skin, -0.41, 1.17, 0);        // hands

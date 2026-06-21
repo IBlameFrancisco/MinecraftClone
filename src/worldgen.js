@@ -41,6 +41,28 @@ const ARENA_STRUCT = [
   { x0: 28, x1: 28, z0: 16, z1: 16, y0: 1, y1: 1, mat: COBBLE,   cap: TORCH },
 ];
 
+// ---- War / D-Day beach (an asymmetric assault map) ----
+// Allied storm in from the sea (high +Z) across an open, obstacle-studded beach,
+// breach a seawall, and assault a fortified bluff of bunkers, MG nests and a
+// trench (low -Z) to capture the command bunker. Axis defend from the line.
+export const BEACH = { FLOOR: 50, HALF: 38, WALL_H: 9, OBJ_X: 0, OBJ_Z: -20, OBJ_R: 6 };
+// Spawn pools [x, z]: Allied wade in at the surf; Axis hold the bunker line.
+export const BEACH_SPAWN_ALLIED = [[-24, 26], [-16, 27], [-8, 26], [0, 27], [8, 26], [16, 27], [24, 26], [0, 24]];
+export const BEACH_SPAWN_AXIS = [[-26, 2], [-13, 1], [0, -4], [13, 1], [26, 2], [-20, -5], [20, -5], [0, 2]];
+// Defender hold points: MG nests on the bluff front + the bunkers behind.
+export const BEACH_NESTS = [[-26, 4], [-13, 4], [0, 4], [13, 4], [26, 4], [-20, -4], [0, -4], [20, -4]];
+
+// Ground (top solid y) along the assault axis: deep sea -> surf -> beach ->
+// seawall shelf -> fortified bluff.
+export function beachGroundY(wz) {
+  const F = BEACH.FLOOR;
+  if (wz >= 32) return F - 5;                                 // deep sea (landing craft float here)
+  if (wz >= 24) return F - Math.round((wz - 24) * 5 / 8);     // surf ramp: F .. F-5
+  if (wz >= 6) return F;                                      // open killing beach
+  if (wz >= 4) return F + 1;                                  // seawall shelf (MG nests)
+  return F + 2;                                               // fortified bluff (bunkers, trench)
+}
+
 function hash2(x, z) {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -58,6 +80,7 @@ export class WorldGen {
     this.ore = new SimplexNoise(seed + 31);
     this._hCache = new Map();
     this.arena = false;          // when true, generate() builds the PvP arena
+    this.beach = false;          // when true, generate() builds the D-Day beach
   }
 
   climate(wx, wz) {
@@ -82,6 +105,12 @@ export class WorldGen {
       if (m > ARENA.HALF) return 0;
       if (m >= ARENA.HALF - 1) return ARENA.FLOOR + ARENA.WALL_H;
       return ARENA.FLOOR + 2;
+    }
+    if (this.beach) {
+      const m = Math.max(Math.abs(wx), Math.abs(wz));
+      if (m > BEACH.HALF) return 0;
+      if (m >= BEACH.HALF - 1) return BEACH.FLOOR + BEACH.WALL_H;
+      return Math.max(BEACH.FLOOR, beachGroundY(wz)) + 2;     // approx (structures add a little)
     }
     const key = wx + ',' + wz;
     const cached = this._hCache.get(key);
@@ -118,6 +147,7 @@ export class WorldGen {
   // Fill one chunk: terrain, caves, ores, water, then decorations (trees/cacti).
   generate(chunk) {
     if (this.arena) return this.generateArena(chunk);
+    if (this.beach) return this.generateBeach(chunk);
     const ox = chunk.cx * CHUNK_SIZE;
     const oz = chunk.cz * CHUNK_SIZE;
 
@@ -278,5 +308,94 @@ export class WorldGen {
     }
     chunk.recomputeHeightMap();
     chunk.generated = true;
+  }
+
+  // The D-Day beach: sea + landing craft (high +Z) -> open obstacle-strewn beach
+  // -> seawall -> a fortified bluff of bunkers / MG nests / trench -> the Axis
+  // command bunker (low -Z). Bounded by a containing cliff so nobody falls out.
+  generateBeach(chunk) {
+    const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
+    const F = BEACH.FLOOR, HALF = BEACH.HALF, WH = BEACH.WALL_H;
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const wx = ox + lx, wz = oz + lz;
+        const m = Math.max(Math.abs(wx), Math.abs(wz));
+        if (m > HALF) continue;                                    // void beyond the map
+        const gy = beachGroundY(wz);
+        if (m >= HALF - 1) {                                       // containing cliff/wall
+          for (let y = F - 6; y <= F + WH; y++) chunk.setLocal(lx, y, lz, y <= F - 5 ? BEDROCK : COBBLE);
+          continue;
+        }
+        const topMat = wz < 6 ? GRAVEL : SAND;                     // shingle bluff / sandy beach
+        for (let y = F - 6; y <= gy; y++) chunk.setLocal(lx, y, lz, y <= F - 6 ? BEDROCK : y >= gy - 2 ? topMat : STONE);
+        for (let y = gy + 1; y <= F; y++) if (chunk.getLocal(lx, y, lz) === AIR) chunk.setLocal(lx, y, lz, WATER);
+        this.beachProps(chunk, lx, lz, wx, wz, gy);
+      }
+    }
+    chunk.recomputeHeightMap();
+    chunk.generated = true;
+  }
+
+  beachProps(chunk, lx, lz, wx, wz, gy) {
+    const F = BEACH.FLOOR;
+    const set = (y, b) => chunk.setLocal(lx, y, lz, b);
+
+    // Landing craft (Higgins boats) in the surf, hull open toward the beach.
+    for (const cx of [-16, 0, 16]) {
+      if (Math.abs(wx - cx) <= 2 && wz >= 30 && wz <= 33) {
+        set(F - 4, PLANK);
+        if (Math.abs(wx - cx) === 2 || wz === 33) { set(F - 3, PLANK); set(F - 2, PLANK); }
+      }
+    }
+
+    // Beach obstacles (sparse, deterministic): hedgehog stakes, sandbags, craters.
+    if (wz >= 9 && wz <= 23) {
+      const h = hash2(wx, wz);
+      if (h < 0.020) { set(gy + 1, IRON_ORE); set(gy + 2, LOG); set(gy + 3, IRON_ORE); }   // anti-boat hedgehog
+      else if (h < 0.034) set(gy + 1, GRAVEL);                                              // lone sandbag
+      else if (h < 0.040) set(gy, COAL_ORE);                                                // scorched crater
+    }
+    if (wz === 8 && (wx & 1) === 0) set(F + 1, IRON_ORE);          // wire / stake line out on the sand
+
+    // Seawall at the top of the beach: 2 high, with climb gaps ~every 14 blocks.
+    if (wz === 6 && (((wx % 14) + 14) % 14) >= 3) { set(F + 1, COBBLE); set(F + 2, COBBLE); }
+
+    // MG nests on the shelf: sandbag U facing the beach, with the gun behind it.
+    for (const nx of [-26, -13, 0, 13, 26]) {
+      if (Math.abs(wx - nx) <= 2 && (wz === 4 || wz === 5)) {
+        if (wz === 5 || Math.abs(wx - nx) === 2) set(F + 2, GRAVEL);   // front (beach side) + sides
+      }
+      if (wx === nx && wz === 4) { set(F + 2, COBBLE); set(F + 3, COAL_ORE); }  // the gun
+    }
+
+    // Bunkers on the bluff: hollow cobble shell, beach-facing firing slit.
+    for (const cx of [-20, 0, 20]) {
+      if (Math.abs(wx - cx) <= 3 && wz >= -6 && wz <= -2) {
+        set(F + 5, COBBLE);                                         // roof
+        const onWall = Math.abs(wx - cx) === 3 || wz === -6 || wz === -2;
+        if (onWall) { for (let y = F + 3; y <= F + 4; y++) if (!(wz === -2 && y === F + 4)) set(y, COBBLE); }
+        else { set(F + 3, AIR); set(F + 4, AIR); }
+      }
+    }
+
+    // Trench tying the line together: 1 deep, sandbag lip toward the beach.
+    if (wz >= -1 && wz <= 1 && Math.abs(wx) <= 30) set(F + 2, AIR);
+    if (wz === 2 && Math.abs(wx) <= 30 && (wx & 1) === 0) set(F + 3, GRAVEL);
+
+    this.beachObjective(chunk, lx, lz, wx, wz);
+  }
+
+  // The Axis command bunker + flag — the Allied capture objective at the rear.
+  beachObjective(chunk, lx, lz, wx, wz) {
+    const F = BEACH.FLOOR, ox = BEACH.OBJ_X, oz = BEACH.OBJ_Z;
+    const set = (y, b) => chunk.setLocal(lx, y, lz, b);
+    if (Math.abs(wx - ox) <= 4 && wz >= oz - 3 && wz <= oz + 3) {
+      set(F + 6, COBBLE);                                          // roof
+      const onWall = Math.abs(wx - ox) === 4 || wz === oz - 3 || wz === oz + 3;
+      if (onWall) { for (let y = F + 3; y <= F + 5; y++) if (!(wz === oz + 3 && y === F + 4)) set(y, COBBLE); }
+      else for (let y = F + 3; y <= F + 5; y++) set(y, AIR);
+    }
+    if (wx === ox && wz === oz) for (let y = F + 3; y <= F + 8; y++) set(y, y < F + 7 ? COBBLE : GLOWSTONE); // flagpole + beacon
+    if (wx === ox + 1 && wz === oz) { set(F + 6, WOOL); set(F + 7, WOOL); }   // flag cloth
   }
 }

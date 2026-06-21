@@ -32,8 +32,9 @@ export const SHOTGUN = 279;
 export const ROCKET_LAUNCHER = 280;
 export const RAILGUN = 281;
 export const BLACK_HOLE_BOMB = 282;
+export const HEAVY_MG = 283;
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -72,6 +73,8 @@ export const ITEMS = {
   // Lobs a singularity that anchors, drags every nearby combatant into its core
   // (shredding DOT), then collapses in a final implosion blast.
   [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 8, range: 70, speed: 24, radius: 12, pull: 26, duration: 3.6, splash: 70, mag: 2, reload: 3.0, recoil: 0.05, color: 0x7b3ff2 } },
+  // Belt-fed LMG (MG42): a brutal sustained-fire weapon — the bunker nest gun.
+  [HEAVY_MG]: { name: 'MG42', gun: { kind: 'hitscan', rate: 0.055, damage: 5, range: 82, auto: true, spread: 0.05, mag: 75, reload: 3.2, recoil: 0.022, color: 0x2b2b2f } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
@@ -181,6 +184,13 @@ function drawGun(ctx, id) {
     ctx.fillStyle = '#556b2f'; ctx.fillRect(1, 6, 13, 3.6); ctx.fillRect(4, 9.4, 2.6, 3.4);
     ctx.fillStyle = '#3f5022'; ctx.beginPath(); ctx.arc(2, 7.8, 1.9, Math.PI / 2, -Math.PI / 2); ctx.fill();
     ctx.fillStyle = '#d23a2a'; ctx.beginPath(); ctx.moveTo(14, 6); ctx.lineTo(15.5, 7.8); ctx.lineTo(14, 9.6); ctx.closePath(); ctx.fill(); // warhead
+  } else if (id === HEAVY_MG) {
+    ctx.fillStyle = '#2b2b2f'; ctx.fillRect(1, 6, 12, 2.6);                 // long receiver
+    ctx.fillStyle = '#46484e'; ctx.fillRect(11, 5.6, 4, 3.2);              // perforated barrel shroud
+    ctx.fillStyle = '#1c1c20'; ctx.fillRect(11.5, 6.2, 0.7, 2); ctx.fillRect(13, 6.2, 0.7, 2);
+    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(2, 8.4, 3.2, 1.8);             // wooden stock
+    ctx.strokeStyle = '#b08a3a'; ctx.lineWidth = 1; ctx.beginPath();      // ammo belt
+    ctx.moveTo(6, 8.6); ctx.lineTo(7, 11); ctx.lineTo(9, 11.5); ctx.stroke();
   } else if (id === BLACK_HOLE_BOMB) {
     ctx.fillStyle = '#241a33'; ctx.fillRect(2, 6, 9, 4); ctx.fillRect(3, 9.5, 3, 3.5);  // dark launcher
     ctx.fillStyle = '#140d1f'; ctx.fillRect(10, 5, 3, 6);                               // muzzle housing
