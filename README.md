@@ -45,7 +45,7 @@ bundle in `dist/`.
 | Creative ↔ Survival  | `G`                                |
 | Difficulty cycle     | `B`                                |
 | Select hotbar slot   | `1`–`9` or mouse wheel             |
-| Release mouse        | `Esc`                              |
+| Pause menu           | `Esc`                              |
 
 ## Gameplay
 

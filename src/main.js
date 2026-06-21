@@ -258,6 +258,8 @@ function pickSpawn() {
 const SPAWN = new THREE.Vector3();
 let loaded = false;
 let everPlayed = false;
+let atMenu = true;    // on the home/start screen (before play or after Main Menu)
+let paused = false;   // the in-game pause menu (Esc) is showing
 let menuAngle = Math.random() * Math.PI * 2;
 
 // Cinematic orbit used as the live menu / loading background.
@@ -319,8 +321,9 @@ function loadWorld(seedStr, asArena) {
 }
 function newWorld(seedStr) { loadWorld(seedStr, false); }
 
-// ---------- Overlays (play / death) ----------
+// ---------- Overlays (play / pause / death) ----------
 const overlay = document.getElementById('overlay');
+const pauseEl = document.getElementById('pause');
 const deathEl = document.createElement('div');
 deathEl.id = 'death';
 deathEl.innerHTML = `<div class="card"><h1>YOU DIED</h1><p class="play" id="respawn">↺ Respawn</p><p id="hcnote" style="display:none;opacity:0.8;font-size:14px;margin-top:8px">Hardcore — reload the page to start a new world</p></div>`;
@@ -329,10 +332,24 @@ document.getElementById('ui').appendChild(deathEl);
 
 function refreshOverlays() {
   const locked = document.pointerLockElement === renderer.domElement;
-  overlay.classList.toggle('hidden', !loaded || locked || inventory.open || dead);
+  const blocked = dead || inventory.open || hud.isChatOpen();
+  const inWorld = loaded && !atMenu;                 // has entered a game
+  // Home/start menu: only before entering a world (or after Main Menu).
+  overlay.classList.toggle('hidden', !loaded || locked || blocked || inWorld);
+  // Pause menu: after entering, whenever the pointer is released (Esc / focus loss).
+  paused = inWorld && !locked && !blocked;
+  pauseEl.classList.toggle('hidden', !paused);
   deathEl.style.display = dead ? 'flex' : 'none';
 }
 refreshOverlays();
+
+// Resume from the pause menu; Main Menu drops back to the home/start screen.
+function resumeGame() { if (loaded && !dead) renderer.domElement.requestPointerLock(); }
+function quitToMenu() { atMenu = true; document.exitPointerLock(); refreshOverlays(); }
+pauseEl.addEventListener('click', (e) => { if (e.target === pauseEl) resumeGame(); });
+document.getElementById('resumeBtn').addEventListener('click', resumeGame);
+document.getElementById('pauseMenuBtn').addEventListener('click', quitToMenu);
+document.getElementById('pauseSettingsBtn').addEventListener('click', () => document.getElementById('settings').classList.remove('hidden'));
 const seedInput = document.getElementById('seedInput');
 seedInput.value = currentSeedStr;
 
@@ -552,7 +569,7 @@ document.getElementById('joinBtn').addEventListener('click', () => {
   mp.join(code, playerName(), mpHandlers);
 });
 document.addEventListener('pointerlockchange', () => {
-  if (document.pointerLockElement === renderer.domElement) everPlayed = true;
+  if (document.pointerLockElement === renderer.domElement) { everPlayed = true; atMenu = false; }
   refreshOverlays();
 });
 deathEl.querySelector('#respawn').addEventListener('click', () => respawn());
@@ -1537,7 +1554,7 @@ function frame() {
 
   // In the menu / loading screen the camera slowly orbits the spawn as a live
   // cinematic background; while playing it follows the player.
-  const menuView = !loaded || (!everPlayed && !player.locked);
+  const menuView = !loaded || (atMenu && !player.locked);
   world.update(menuView ? SPAWN.x : player.pos.x, menuView ? SPAWN.z : player.pos.z);
   // While the loading screen is up there's no gameplay to keep smooth, so spend a
   // big per-frame budget on generation/meshing — loads fast even on slow GPUs.
@@ -1545,6 +1562,9 @@ function frame() {
   if (!loaded) updateLoading();
 
   const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated;
+  // Pausing (Esc) freezes the single-player world; co-op keeps running (can't pause others).
+  const frozen = paused && !mp.online;
+  const sdt = frozen ? 0 : dt;
 
   if (loaded && player.locked && !dead) {
     player.update(dt);
@@ -1576,16 +1596,16 @@ function frame() {
 
   if (reloadingGun >= 0) { reloadTimer -= dt; if (reloadTimer <= 0) { const rg = gunOf(reloadingGun); if (rg) ammo[reloadingGun] = rg.mag; reloadingGun = -1; sfx.place(); } }
 
-  sky.update(dt);
+  sky.update(sdt);
   hud.setClock(sky.clockString());
-  waterTime.value += dt;
+  waterTime.value += sdt;
 
   // Drive mob lighting from the sun.
   sun.position.copy(sky.sunDir).multiplyScalar(100);
   sun.color.copy(sky.dirColor); sun.intensity = sky.dirIntensity;
   ambient.color.copy(sky.dirColor); ambient.intensity = sky.ambIntensity;
 
-  mobs.update(loaded && !dead && mode !== BATTLE ? dt : 0, player, sky.isNight, {
+  mobs.update(loaded && !dead && mode !== BATTLE && !frozen ? dt : 0, player, sky.isNight, {
     damagePlayer, onKill, explode, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
   });
 
@@ -1593,15 +1613,15 @@ function frame() {
   if (mode === BATTLE && loaded) {
     if (isAuthority()) {
       botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
-      botMgr.update(matchWinner ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
-      manageBots(dt);
-      if (!matchWinner) modeTick(dt);
+      botMgr.update((matchWinner || frozen) ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
+      if (!frozen) manageBots(dt);
+      if (!matchWinner && !frozen) modeTick(dt);
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
     }
     // Gun Game weapon follows your level on every client (host kills are local,
     // guests read their kill count off the synced scoreboard).
     if (gameMode === 'gungame') applyGunGameLevel(false, isAuthority() ? myKills : myBoardKills());
-    if (matchOverTimer > 0) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
+    if (matchOverTimer > 0 && !frozen) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
     pickups.update(dt, player.pos, active ? applyPickup : () => false);
 
     // Radar: teammates green, enemies red, rotated so you face up.
@@ -1684,9 +1704,9 @@ function frame() {
   // Guns / projectiles / portals / co-op
   muzzle.update(dt);
   tracers.update(dt);
-  plasmas.update(dt, world, mobs, mp, portals, plasmaImpact);
-  rockets.update(dt, world, mobs, mp, portals, rocketImpact);
-  grenades.update(dt, world);
+  plasmas.update(sdt, world, mobs, mp, portals, plasmaImpact);
+  rockets.update(sdt, world, mobs, mp, portals, rocketImpact);
+  grenades.update(sdt, world);
   grenadeCD -= dt;
   portals.update(dt, portalBodies());
   mp.update(dt);
