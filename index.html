@@ -138,6 +138,16 @@
       #overlay .diffrow { margin-top: 10px; font-size: 13px; opacity: 0.9; display: flex; gap: 8px; align-items: center; justify-content: center; }
       #overlay #diffSelect { padding: 6px 10px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.2);
         background: rgba(0,0,0,0.4); color: #fff; outline: none; cursor: pointer; }
+      #overlay .battlesetup { display: none; margin-top: 12px; flex-direction: column; gap: 9px; }
+      #overlay .battlesetup.show { display: flex; }
+      #overlay .bsrow { display: flex; gap: 8px; align-items: center; justify-content: center; font-size: 13px; }
+      #overlay .bsrow label { opacity: 0.85; }
+      #overlay .bsrow select { padding: 6px 9px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.2);
+        background: rgba(0,0,0,0.4); color: #fff; outline: none; cursor: pointer; }
+      #overlay .bschip { padding: 8px 16px; font-size: 14px; border-radius: 9px; border: 2px solid rgba(255,255,255,0.18);
+        background: rgba(255,255,255,0.07); color: #fff; cursor: pointer; transition: all 0.15s; }
+      #overlay .bschip:hover { background: rgba(255,255,255,0.16); }
+      #overlay .bschip.active { border-color: #ff8f6a; background: rgba(255,143,106,0.18); box-shadow: 0 0 0 1px rgba(255,143,106,0.4); }
       #overlay .mptitle { margin-top: 18px; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.6; }
       #overlay .mprow { margin-top: 8px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
       #overlay .mprow input { width: 120px; padding: 8px 10px; font-size: 13px; border-radius: 8px;
@@ -205,7 +215,7 @@
         <span class="key">G</span> creative/survival &nbsp; <span class="key">B</span> difficulty<br />
         <span class="key">L-click</span> break/attack &nbsp; <span class="key">R-click</span> place/eat/use<br />
         <span class="key">E</span> inventory+craft &nbsp; <span class="key">1</span>–<span class="key">9</span> / wheel select<br />
-        <span class="key">T</span> chat &nbsp; <span class="key">R</span> reload gun &nbsp; <span class="key">Esc</span> release
+        <span class="key">T</span> chat &nbsp; <span class="key">R</span> reload &nbsp; <span class="key">Tab</span> scores &nbsp; <span class="key">Esc</span> release
       </div>
       <div id="hotbar"></div>
       <div id="scope"><div class="lens"></div><div class="reticle"></div><div class="dot"></div></div>
@@ -236,6 +246,32 @@
             <option value="3">Hard</option>
             <option value="4">Hardcore</option>
           </select>
+        </div>
+        <div class="battlesetup" id="battlesetup">
+          <div class="bsrow">
+            <button id="bsModeFFA" class="bschip active">Free-for-all</button>
+            <button id="bsModeTeam" class="bschip">Teams</button>
+          </div>
+          <div class="bsrow">
+            <label id="bsSizeLabel">Combatants</label>
+            <select id="bsSize"></select>
+            <label>Bots</label>
+            <select id="bsBotDiff">
+              <option value="easy">Easy</option>
+              <option value="normal" selected>Normal</option>
+              <option value="hard">Hard</option>
+              <option value="insane">Insane</option>
+            </select>
+          </div>
+          <div class="bsrow">
+            <label>Score to win</label>
+            <select id="bsScore">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="30">30</option>
+              <option value="50">50</option>
+            </select>
+          </div>
         </div>
         <div class="seedrow">
           <label for="seedInput">Seed</label>

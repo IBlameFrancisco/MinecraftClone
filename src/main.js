@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN } from './items.js';
 import { World } from './world.js';
 import { ARENA } from './worldgen.js';
 import { Player } from './player.js';
@@ -28,16 +28,19 @@ import { HUD } from './ui.js';
 import { Inventory } from './inventory.js';
 import { Mobs } from './entities.js';
 import { voxelRaycast } from './raycast.js';
+import { rayAABB } from './physics.js';
 import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
-import { Tracers, Plasmas, Portals, makeViewModel, MuzzleFlash } from './guns.js';
+import { Tracers, Plasmas, Rockets, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
+import { BotManager } from './bots.js';
+import { Pickups } from './pickups.js';
 
 const SURVIVAL = 0, CREATIVE = 1, BATTLE = 2;
 const MELEE_REACH = 4;
 
-// Battle mode: gun loadout + arena spawn points (must sit on clear arena floor).
-const BATTLE_LOADOUT = [HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, WOOL, COBBLE, PLANK, GLASS, GLOWSTONE];
+// Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
+const BATTLE_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, PORTAL_GUN];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
 
 // Difficulty (peaceful → hardcore) controls mob spawns, damage, and respawn.
@@ -149,7 +152,11 @@ const mobs = new Mobs(scene, world);
 const mp = new Multiplayer(scene);
 const tracers = new Tracers(scene);
 const plasmas = new Plasmas(scene);
+const rockets = new Rockets(scene);
 const portals = new Portals(scene);
+const botMgr = new BotManager(scene);
+const damageNumbers = new DamageNumbers(scene);
+const pickups = new Pickups(scene);
 scene.add(camera); // so first-person gun viewmodels (camera children) render
 const muzzle = new MuzzleFlash(camera);
 const isTyping = () => { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
@@ -202,8 +209,9 @@ scene.add(crackMesh);
 
 let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
+let triggerConsumed = false;   // for semi-auto guns: one shot per click
 const ammo = {};
-let reloadingGun = -1, reloadTimer = 0, recoilPitch = 0, recoilKick = 0;
+let reloadingGun = -1, reloadTimer = 0, recoilPitch = 0, recoilYaw = 0, recoilKick = 0;
 function ammoFor(gun, id) { if (!gun.mag) return Infinity; if (ammo[id] === undefined) ammo[id] = gun.mag; return ammo[id]; }
 function startReload(gun, id) {
   if (!gun.mag || reloadingGun === id || (ammo[id] ?? gun.mag) >= gun.mag) return;
@@ -222,10 +230,6 @@ function pickSpawn() {
     }
   }
   return [8.5, 8.5];
-}
-function battleSpawn() {
-  const [x, z] = BATTLE_SPAWNS[(Math.random() * BATTLE_SPAWNS.length) | 0];
-  return { x: x + 0.5, z: z + 0.5 };
 }
 const SPAWN = new THREE.Vector3();
 let loaded = false;
@@ -267,8 +271,8 @@ function updateLoading() {
 function finishLoading() {
   loaded = true;
   if (arena) {
-    const sp = battleSpawn();
-    player.pos.set(sp.x, ARENA.FLOOR + 1.2, sp.z);
+    const sp = teamSpawnPoint(myTeam);
+    player.pos.set(sp.x, sp.y, sp.z);
   } else {
     player.pos.set(SPAWN.x, world.surfaceHeight(Math.floor(SPAWN.x), Math.floor(SPAWN.z)) + 2, SPAWN.z);
     SPAWN.y = player.pos.y;
@@ -284,7 +288,7 @@ function loadWorld(seedStr, asArena) {
   seedInput.value = currentSeedStr;
   arena = asArena;
   world.regenerate(hashSeed(currentSeedStr), asArena);
-  edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
+  edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll(); botMgr.clear();
   if (!asArena && mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
   dead = false; resetBreak(); startWorld();
 }
@@ -316,6 +320,7 @@ function startSelectedMode(seedStr, forceNew) {
     inventory.setLoadout(BATTLE_LOADOUT);
     health = 20; hud.setHealth(20);
     loadWorld(seedStr, true);
+    setupMatch();
   } else {
     setGameMode(menuMode);
     setDifficultyDirect(menuDiff);
@@ -339,16 +344,46 @@ const modeSurvBtn = document.getElementById('modeSurvival');
 const modeCreaBtn = document.getElementById('modeCreative');
 const modeBattleBtn = document.getElementById('modeBattle');
 const diffRow = document.getElementById('diffrow');
+const battleSetupEl = document.getElementById('battlesetup');
 function refreshModePicker() {
   modeSurvBtn.classList.toggle('active', menuMode === SURVIVAL);
   modeCreaBtn.classList.toggle('active', menuMode === CREATIVE);
   modeBattleBtn.classList.toggle('active', menuMode === BATTLE);
   diffRow.style.visibility = menuMode === SURVIVAL ? 'visible' : 'hidden';
+  battleSetupEl.classList.toggle('show', menuMode === BATTLE);
 }
 modeSurvBtn.addEventListener('click', () => { menuMode = SURVIVAL; refreshModePicker(); });
 modeCreaBtn.addEventListener('click', () => { menuMode = CREATIVE; refreshModePicker(); });
 modeBattleBtn.addEventListener('click', () => { menuMode = BATTLE; refreshModePicker(); });
 document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
+
+// ---------- Battle setup (FFA/Teams, size, bot difficulty, score limit) ----------
+const battleCfg = { team: false, size: 6, botDiff: 'normal', scoreLimit: 20 };
+const bsFFA = document.getElementById('bsModeFFA');
+const bsTeam = document.getElementById('bsModeTeam');
+const bsSize = document.getElementById('bsSize');
+const bsSizeLabel = document.getElementById('bsSizeLabel');
+const bsBotDiff = document.getElementById('bsBotDiff');
+const bsScore = document.getElementById('bsScore');
+function fillSizeOptions() {
+  const team = battleCfg.team;
+  bsSizeLabel.textContent = team ? 'Team size' : 'Combatants';
+  const lo = team ? 1 : 2, hi = team ? 4 : 8, def = team ? 2 : 6;
+  bsSize.innerHTML = '';
+  for (let n = lo; n <= hi; n++) { const o = document.createElement('option'); o.value = n; o.textContent = team ? `${n} v ${n}` : n; bsSize.appendChild(o); }
+  battleCfg.size = Math.min(hi, Math.max(lo, def));
+  bsSize.value = battleCfg.size;
+}
+function refreshBattleSetup() {
+  bsFFA.classList.toggle('active', !battleCfg.team);
+  bsTeam.classList.toggle('active', battleCfg.team);
+}
+bsFFA.addEventListener('click', () => { battleCfg.team = false; fillSizeOptions(); refreshBattleSetup(); });
+bsTeam.addEventListener('click', () => { battleCfg.team = true; fillSizeOptions(); refreshBattleSetup(); });
+bsSize.addEventListener('change', (e) => { battleCfg.size = parseInt(e.target.value, 10); });
+bsBotDiff.addEventListener('change', (e) => { battleCfg.botDiff = e.target.value; });
+bsScore.addEventListener('change', (e) => { battleCfg.scoreLimit = parseInt(e.target.value, 10); });
+fillSizeOptions(); refreshBattleSetup();
 refreshModePicker();
 
 // ---------- Settings (FOV / sensitivity / render distance, persisted) ----------
@@ -383,17 +418,21 @@ const playerName = () => (document.getElementById('nameInput').value.trim() || '
 const mpHandlers = {
   getInit: () => ({
     seed: hashSeed(currentSeedStr),
-    arena, battle: mode === BATTLE,
+    arena, battle: mode === BATTLE, team: teamMode, scoreLimit,
     edits: [...edits.entries()].map(([k, v]) => { const [x, y, z] = k.split(',').map(Number); return [x, y, z, v]; }),
   }),
   onInit: (d) => {
     currentSeedStr = String(d.seed);
     seedInput.value = currentSeedStr;
     arena = !!d.arena;
+    botMgr.clear();
     world.regenerate(d.seed, arena);
     edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
     for (const e of d.edits) recordEdit(e[0], e[1], e[2], e[3]);
-    if (d.battle) { setGameMode(BATTLE); inventory.setLoadout(BATTLE_LOADOUT); health = 20; hud.setHealth(20); }
+    if (d.battle) {
+      setGameMode(BATTLE); inventory.setLoadout(BATTLE_LOADOUT); health = 20; hud.setHealth(20);
+      teamMode = !!d.team; scoreLimit = d.scoreLimit || 20; computeCoverPoints();
+    }
     startWorld();
     setMpStatus(`Joined ${d.hostName || 'host'}'s ${d.battle ? 'battle arena' : 'world'}!`);
   },
@@ -401,10 +440,21 @@ const mpHandlers = {
   onStatus: setMpStatus,
   onChat: (name, text) => hud.addChat(name, text, false),
   onSystem: (msg) => { hud.addChat(null, msg, true); hud.setPlayers(mp.playerList()); },
-  onRoster: () => hud.setPlayers(mp.playerList()),
+  onRoster: () => { hud.setPlayers(mp.playerList()); if (mode === BATTLE && isAuthority()) { rebuildBoard(); broadcastBoard(); } },
   // PvP: someone hit me — apply the damage locally and remember who, for the kill feed.
   onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg); },
   onKillFeed: (victim, killer) => hud.addKill(victim, killer),
+  onBotHit: (botId, dmg, fromName) => botHurt(botId, dmg, fromName),
+  onDeathAuthority: (by, id) => registerKill(by, id),
+  onBotFire: (d) => shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color),
+  onBoard: (d) => {
+    board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
+    const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
+    hud.setScoreboard(board, teamMode, scoreLimit, myTeam); mp.recolorBots(colorForBot);
+  },
+  onRoundOver: (winner) => hud.showRoundOver(winner),
+  onRoundReset: () => { hud.hideRoundOver(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
+  botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
 document.getElementById('hostBtn').addEventListener('click', () => {
@@ -424,6 +474,10 @@ document.addEventListener('pointerlockchange', () => {
 });
 deathEl.querySelector('#respawn').addEventListener('click', () => respawn());
 
+// Hold Tab for the battle scoreboard.
+window.addEventListener('keydown', (e) => { if (e.code === 'Tab' && mode === BATTLE && !isTyping()) { e.preventDefault(); hud.showScoreboard(); } });
+window.addEventListener('keyup', (e) => { if (e.code === 'Tab') hud.hideScoreboard(); });
+
 // ---------- Modes / damage / death ----------
 const myName = () => (mp.online ? mp.name : playerName());
 
@@ -433,8 +487,11 @@ function setGameMode(m) {
   mode = m;
   player.setMode(m === CREATIVE ? 1 : 0);          // creative flies; survival/battle walk
   inventory.setMode(m === CREATIVE || m === BATTLE); // battle uses the infinite (creative) set
-  if (m === BATTLE) hud.setBattle(true);
-  else { hud.setBattle(false); hud.setMode(m === SURVIVAL); if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); } }
+  if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }
+  else {
+    hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear();
+    if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
+  }
   resetBreak();
 }
 function toggleMode() {
@@ -463,18 +520,267 @@ function die() {
   refreshOverlays();
 }
 
-// Battle: no permadeath — credit the kill, then respawn at an arena spawn point.
+// Battle: no permadeath — credit the kill, then respawn at a (team) spawn point.
 function battleDeath() {
   const now = performance.now() / 1000;
   const killer = (now - lastHitTime < 10) ? lastHitBy : null;
   hud.addKill(myName(), killer);
   if (mp.online) mp.sendDeath(killer);
+  if (isAuthority()) registerKill(killer, selfId(), myName());
   particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 80, 80], 30);
   sfx.gun('sniper');
-  const sp = battleSpawn();
-  player.pos.set(sp.x, ARENA.FLOOR + 1.2, sp.z); player.vel.set(0, 0, 0);
+  const sp = teamSpawnPoint(myTeam);
+  player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   health = 20; hud.setHealth(20); invuln = 1.6; lastHitBy = null;
   hud.flashHurt();
+}
+
+// ---------- Battle match: teams, bots, scoreboard, rounds ----------
+const TEAM_NONE = -1, TEAM_RED = 0, TEAM_BLUE = 1;
+let teamMode = false, myTeam = TEAM_NONE, scoreLimit = 20;
+let myKills = 0, myDeaths = 0;
+const humanScore = new Map();   // remote human id -> { k, d }
+const teamAssign = new Map();   // combatant id -> team
+let board = [];                 // scoreboard snapshot
+let matchWinner = null, matchOverTimer = 0;
+let coverPoints = [];
+const isAuthority = () => (!mp.online || mp.isHost);
+const selfId = () => (mp.online ? mp.myId : 'me');
+function teamOf(id) { const e = board.find((x) => x.id === id); return e ? e.team : (id === selfId() ? myTeam : TEAM_NONE); }
+function colorForBot(team) { return (teamMode && team === myTeam) ? 0x57d977 : 0xff5b5b; }
+function friendly(id) { return teamMode && myTeam !== TEAM_NONE && teamOf(id) === myTeam; }
+
+function teamSpawnPoint(team) {
+  let pool = BATTLE_SPAWNS;
+  if (team === TEAM_RED) pool = BATTLE_SPAWNS.filter(([x]) => x < 0);
+  else if (team === TEAM_BLUE) pool = BATTLE_SPAWNS.filter(([x]) => x > 0);
+  if (!pool.length) pool = BATTLE_SPAWNS;
+  const [x, z] = pool[(Math.random() * pool.length) | 0];
+  return { x: x + 0.5, y: ARENA.FLOOR + 1.2, z: z + 0.5 };
+}
+
+// Bot retreat/cover points, mirrored from the arena layout.
+function computeCoverPoints() {
+  coverPoints = [];
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    coverPoints.push(new THREE.Vector3(sx * 11.5, ARENA.FLOOR + 1, sz * 11.5));
+    coverPoints.push(new THREE.Vector3(sx * 20.5, ARENA.FLOOR + 1, sz * 20.5));
+    coverPoints.push(new THREE.Vector3(sx * 28, ARENA.FLOOR + 1, sz * 28));
+  }
+}
+
+// Build the match (authority spawns bots; everyone rebuilds the board).
+function setupMatch() {
+  teamMode = battleCfg.team; scoreLimit = battleCfg.scoreLimit;
+  myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
+  matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
+  botMgr.clear();
+  computeCoverPoints();
+
+  const humans = [selfId()];
+  if (mp.online) for (const id of mp.roster.keys()) humans.push(id);
+
+  let botTeams = [];
+  if (teamMode) {
+    myTeam = TEAM_RED; teamAssign.set(selfId(), TEAM_RED);
+    let r = 1, b = 0;
+    for (const id of humans) { if (id === selfId()) continue; if (r <= b) { teamAssign.set(id, TEAM_RED); r++; } else { teamAssign.set(id, TEAM_BLUE); b++; } }
+    let redH = 0, blueH = 0; for (const t of teamAssign.values()) t === TEAM_RED ? redH++ : blueH++;
+    for (let i = 0; i < battleCfg.size - redH; i++) botTeams.push(TEAM_RED);
+    for (let i = 0; i < battleCfg.size - blueH; i++) botTeams.push(TEAM_BLUE);
+  } else {
+    myTeam = TEAM_NONE;
+    for (const id of humans) teamAssign.set(id, TEAM_NONE);
+    botTeams = new Array(Math.max(0, battleCfg.size - humans.length)).fill(TEAM_NONE);
+  }
+  if (isAuthority() && botTeams.length) botMgr.spawn(botTeams.length, botTeams, battleCfg.botDiff, teamSpawnPoint, colorForBot);
+  rebuildBoard(); broadcastBoard();
+}
+
+function rebuildBoard() {
+  board = [{ id: selfId(), name: myName(), team: myTeam, kills: myKills, deaths: myDeaths, bot: false, you: true }];
+  if (mp.online) for (const [id, name] of mp.roster) {
+    const s = humanScore.get(id) || { k: 0, d: 0 };
+    board.push({ id, name, team: teamAssign.get(id) ?? TEAM_NONE, kills: s.k, deaths: s.d, bot: false });
+  }
+  for (const bt of botMgr.bots) board.push({ id: bt.id, name: bt.name, team: bt.team, kills: bt.kills, deaths: bt.deaths, bot: true });
+  hud.setScoreboard(board, teamMode, scoreLimit, myTeam);
+}
+function broadcastBoard() { if (mp.isHost) mp.broadcast({ t: 'board', board, team: teamMode, scoreLimit }); }
+
+function addKillByName(name) {
+  if (!name) return;
+  if (name === myName()) { myKills++; return; }
+  const bt = botMgr.bots.find((b) => b.name === name); if (bt) { bt.kills++; return; }
+  if (mp.online) for (const [id, n] of mp.roster) if (n === name) { const s = humanScore.get(id) || { k: 0, d: 0 }; s.k++; humanScore.set(id, s); return; }
+}
+function addDeathById(id) {
+  if (id === selfId()) { myDeaths++; return; }
+  const bt = botMgr.get(id); if (bt) { bt.deaths++; return; }
+  const s = humanScore.get(id) || { k: 0, d: 0 }; s.d++; humanScore.set(id, s);
+}
+function registerKill(killerName, victimId) {
+  if (!isAuthority() || matchWinner) { return; }
+  addKillByName(killerName); addDeathById(victimId);
+  checkWin(); rebuildBoard(); broadcastBoard();
+}
+function checkWin() {
+  if (matchWinner) return;
+  if (teamMode) {
+    let red = 0, blue = 0;
+    (myTeam === TEAM_RED ? red += myKills : blue += myKills);
+    for (const [id, s] of humanScore) (teamAssign.get(id) === TEAM_RED ? red += s.k : blue += s.k);
+    for (const b of botMgr.bots) (b.team === TEAM_RED ? red += b.kills : blue += b.kills);
+    if (red >= scoreLimit) endMatch('Red Team');
+    else if (blue >= scoreLimit) endMatch('Blue Team');
+  } else {
+    let top = -1, who = null;
+    const consider = (n, k) => { if (k > top) { top = k; who = n; } };
+    consider(myName(), myKills);
+    if (mp.online) for (const [id, n] of mp.roster) consider(n, (humanScore.get(id) || { k: 0 }).k);
+    for (const b of botMgr.bots) consider(b.name, b.kills);
+    if (top >= scoreLimit) endMatch(who);
+  }
+}
+function endMatch(winner) {
+  matchWinner = winner; matchOverTimer = 7;
+  if (mp.isHost) mp.broadcast({ t: 'roundover', winner });
+  hud.showRoundOver(winner);
+}
+function resetMatch() {
+  myKills = 0; myDeaths = 0; humanScore.clear();
+  for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); }
+  matchWinner = null; hud.hideRoundOver();
+  const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
+  health = 20; hud.setHealth(20); invuln = 1.5; lastHitBy = null;
+  if (mp.isHost) mp.broadcast({ t: 'roundreset' });
+  rebuildBoard(); broadcastBoard();
+}
+
+// Damage a bot locally (authority); death is finalised in manageBots().
+function botHurt(botId, dmg, fromName) {
+  const b = botMgr.get(botId); if (!b || !b.alive) return;
+  b.lastHitByName = fromName; b.lastHitTime = performance.now() / 1000;
+  b.hurt(dmg);
+}
+function onBotKilled(b) {
+  particles.burst(b.pos.x, b.pos.y + 1, b.pos.z, [255, 120, 120], 24);
+  const killer = (performance.now() / 1000 - (b.lastHitTime || 0) < 10) ? b.lastHitByName : null;
+  hud.addKill(b.name, killer);
+  if (mp.isHost) mp.broadcast({ t: 'death', id: b.id, name: b.name, by: killer });
+  registerKill(killer, b.id);
+  b.mesh.visible = false; b.respawnIn = 2.5;
+}
+function respawnBot(b) {
+  b.alive = true; b.deathProcessed = false; b.health = 20;
+  const sp = teamSpawnPoint(b.team); b.pos.set(sp.x, sp.y, sp.z); b.vel.set(0, 0, 0);
+  b._chooseGun(); b.mesh.visible = true;
+}
+function manageBots(dt) {
+  for (const b of botMgr.bots) {
+    if (!b.alive && !b.deathProcessed) { b.deathProcessed = true; onBotKilled(b); }
+    else if (!b.alive && b.respawnIn > 0) { b.respawnIn -= dt; if (b.respawnIn <= 0) respawnBot(b); }
+  }
+}
+
+// Arena pickups (health + ammo) — purely local; each player grabs their own.
+function setupArenaPickups() {
+  const F = ARENA.FLOOR + 1.4, spots = [];
+  for (const [x, z] of [[16, 0], [-16, 0], [0, 16], [0, -16]]) spots.push({ x, y: F, z, kind: 'health' });
+  for (const [x, z] of [[16, 16], [-16, 16], [16, -16], [-16, -16]]) spots.push({ x, y: F, z, kind: 'ammo' });
+  pickups.setup(spots);
+}
+function applyPickup(kind) {
+  if (kind === 'health') {
+    if (health >= 20) return false;
+    health = Math.min(20, health + 8); hud.setHealth(health);
+    sfx.place(); particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [80, 230, 120], 16);
+    return true;
+  }
+  let refilled = false;
+  for (const id of BATTLE_LOADOUT) { const g = gunOf(id); if (g && g.mag && (ammo[id] === undefined || ammo[id] < g.mag)) { ammo[id] = g.mag; refilled = true; } }
+  if (refilled) {
+    if (reloadingGun >= 0) reloadingGun = -1;
+    sfx.place(); particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [240, 200, 80], 16);
+  }
+  return refilled;
+}
+
+// Build the combatant target list bots reason about (players + bots).
+function buildTargets() {
+  const list = [{ id: selfId(), team: myTeam, pos: player.pos, vel: player.vel, alive: health > 0 }];
+  if (mp.online) for (const [id, r] of mp.remotes) { if (botMgr.get(id)) continue; list.push({ id, team: teamOf(id), pos: r.group.position, alive: true }); }
+  for (const b of botMgr.bots) list.push({ id: b.id, team: b.team, pos: b.pos, vel: b.vel, alive: b.alive });
+  return list;
+}
+const _los = new THREE.Vector3(), _losDir = new THREE.Vector3(), _botEye = new THREE.Vector3();
+function losClear(ax, ay, az, bx, by, bz) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+  if (len < 0.001) return true;
+  const hit = voxelRaycast(_los.set(ax, ay, az), _losDir.set(dx / len, dy / len, dz / len), len - 0.6, (x, y, z) => world.getBlock(x, y, z));
+  return !hit.hit;
+}
+
+// Resolve a bot's bullet against every combatant + the world (authority only).
+function localPlayerRayHit(origin, dir, maxDist) {
+  const t = rayAABB(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z,
+    player.pos.x - 0.3, player.pos.y, player.pos.z - 0.3, player.pos.x + 0.3, player.pos.y + 1.8, player.pos.z + 0.3);
+  if (t > maxDist) return null;
+  return { dist: t, head: (origin.y + dir.y * t) >= player.pos.y + 1.5 };
+}
+function botBullet(bot, dir, range, dmg, pierce) {
+  bot.eye(_botEye);
+  const block = voxelRaycast(_botEye, dir, range, (x, y, z) => world.getBlock(x, y, z));
+  const wallDist = block.hit ? Math.hypot(block.x + 0.5 - _botEye.x, block.y + 0.5 - _botEye.y, block.z + 0.5 - _botEye.z) : range;
+  // Gather candidate combatant hits within the wall distance.
+  const hits = [];
+  const lp = (bot.team < 0 || bot.team !== myTeam) ? localPlayerRayHit(_botEye, dir, wallDist) : null;
+  if (lp) hits.push({ kind: 'local', dist: lp.dist, head: lp.head });
+  const bh = botMgr.raycast(_botEye, dir, wallDist, bot.id);
+  if (bh && (bot.team < 0 || botMgr.get(bh.id).team !== bot.team)) hits.push({ kind: 'bot', id: bh.id, dist: bh.dist, head: bh.head });
+  if (mp.online) for (const ph of mp.raycastAll(_botEye, dir, wallDist)) {
+    if (bot.team >= 0 && teamOf(ph.id) === bot.team) continue;
+    hits.push({ kind: 'remote', id: ph.id, dist: ph.dist, head: ph.head });
+  }
+  const mh = mobs.raycast(_botEye, dir, wallDist);
+  if (mh) hits.push({ kind: 'mob', mob: mh.mob, dist: mh.dist });
+  hits.sort((a, b) => a.dist - b.dist);
+  for (const h of hits) {
+    const d = h.head ? Math.round(dmg * 1.5) : dmg;
+    if (h.kind === 'local') { lastHitBy = bot.name; lastHitTime = performance.now() / 1000; damagePlayer(d); }
+    else if (h.kind === 'bot') botHurt(h.id, d, bot.name);
+    else if (h.kind === 'remote') mp.sendHit(h.id, d);
+    else if (h.kind === 'mob') h.mob.hurt(d, bot.pos.x, bot.pos.z);
+    if (!pierce) break;
+  }
+}
+// Visual-only tracer for a shot (used locally and replayed from 'bfire').
+function shotTracer(kind, muzzle, dir, range, color) {
+  const block = voxelRaycast(muzzle, dir, range, (x, y, z) => world.getBlock(x, y, z));
+  const d = block.hit ? Math.hypot(block.x + 0.5 - muzzle.x, block.y + 0.5 - muzzle.y, block.z + 0.5 - muzzle.z) : Math.min(range, 60);
+  const end = muzzle.clone().addScaledVector(dir, d);
+  tracers.add(muzzle, end, color);
+  if (kind === 'rail') tracers.add(muzzle, end, 0xe6d4ff);
+}
+// A bot fires its current gun (authority): resolve damage + spawn/broadcast visuals.
+function botFire(bot, dir) {
+  const gun = bot.gun;
+  bot.eye(_botEye);
+  const muzzle = _botEye.clone().addScaledVector(dir, 0.6);
+  const color = gun.kind === 'rail' ? 0xb98bff : (gun.zoom ? 0xbfe4ff : 0xffd27a);
+  if (gun.kind === 'shotgun') {
+    for (let i = 0; i < gun.pellets; i++) { const pd = spreadDir(dir, gun.spread); botBullet(bot, pd, gun.range, gun.damage, false); shotTracer('shotgun', muzzle, pd, gun.range, color); }
+  } else if (gun.kind === 'rail') {
+    botBullet(bot, dir, gun.range, gun.damage, true); shotTracer('rail', muzzle, dir, gun.range, color);
+  } else {
+    const pd = gun.spread ? spreadDir(dir, gun.spread) : dir;
+    botBullet(bot, pd, gun.range, gun.damage, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
+  }
+  if (mp.isHost) mp.broadcast({ t: 'bfire', kind: gun.kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z, range: gun.range, color });
+}
+let botBroadcastT = 0;
+function broadcastBotPositions() {
+  mp.broadcast({ t: 'bpos', bots: botMgr.bots.map((b) => ({ id: b.id, name: b.name, team: b.team, x: b.pos.x, y: b.pos.y, z: b.pos.z, yaw: b.yaw, alive: b.alive })) });
 }
 function respawn() {
   if (difficulty === HARDCORE) return;
@@ -517,11 +823,11 @@ window.addEventListener('keydown', (e) => {
 let mouseLeft = false, mouseRight = false;
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== renderer.domElement) return;
-  if (e.button === 0) { mouseLeft = true; breakCD = 0; attackCD = 0; }
+  if (e.button === 0) { mouseLeft = true; breakCD = 0; attackCD = 0; triggerConsumed = false; }
   if (e.button === 2) { mouseRight = true; placeCD = 0; }
 });
 window.addEventListener('mouseup', (e) => {
-  if (e.button === 0) { mouseLeft = false; resetBreak(); }
+  if (e.button === 0) { mouseLeft = false; triggerConsumed = false; resetBreak(); }
   if (e.button === 2) mouseRight = false;
 });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -696,41 +1002,124 @@ function setScoped(on) {
   if (viewModel) viewModel.visible = !on;
 }
 
+// Perturb an aim direction within a cone of `spread` radians (returns a shared
+// temp vector — use it before the next call).
+const _rt = new THREE.Vector3(), _up2 = new THREE.Vector3(), _sd = new THREE.Vector3();
+const _WORLD_UP = new THREE.Vector3(0, 1, 0);
+function spreadDir(dir, spread) {
+  if (!spread) return dir;
+  _rt.crossVectors(dir, _WORLD_UP);
+  if (_rt.lengthSq() < 1e-6) _rt.set(1, 0, 0);
+  _rt.normalize();
+  _up2.crossVectors(_rt, dir).normalize();
+  const ox = (Math.random() + Math.random() - 1) * spread;
+  const oy = (Math.random() + Math.random() - 1) * spread;
+  return _sd.copy(dir).addScaledVector(_rt, ox).addScaledVector(_up2, oy).normalize();
+}
+
 function fireGun(gun, secondary) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
   if (gun.kind === 'hitscan') fireHitscan(gun, muzzle);
+  else if (gun.kind === 'shotgun') fireShotgun(gun, muzzle);
+  else if (gun.kind === 'rail') fireRail(gun, muzzle);
   else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); }
+  else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); }
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
 }
 
-function fireHitscan(gun, muzzle) {
-  const mobHit = mobs.raycast(_eye, _dir, gun.range);
-  const playerHit = mp.online ? mp.raycast(_eye, _dir, gun.range) : null;
-  const blockHit = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+// Nearest damageable enemy (remote humans + local bots) along a ray.
+function raycastEnemies(origin, dir, maxDist) {
+  let best = mp.online ? mp.raycast(origin, dir, maxDist) : null;
+  if (isAuthority()) { const b = botMgr.raycast(origin, dir, best ? best.dist : maxDist, null); if (b && (!best || b.dist < best.dist)) best = b; }
+  return best;
+}
+let _suppressDmgNum = false;
+// One hitscan ray (already-perturbed `dir`) resolved against enemies, mobs and
+// blocks. Returns the world-space endpoint, applying damage to whatever it hits.
+function castBullet(dir, range, damage) {
+  const enemy = raycastEnemies(_eye, dir, range);
+  const mobHit = mobs.raycast(_eye, dir, range);
+  const blockHit = voxelRaycast(_eye, dir, range, (x, y, z) => world.getBlock(x, y, z));
   const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - _eye.x, blockHit.y + 0.5 - _eye.y, blockHit.z + 0.5 - _eye.z) : Infinity;
+  const enemyDist = enemy ? enemy.dist : Infinity;
   const mobDist = mobHit ? mobHit.dist : Infinity;
-  const playerDist = playerHit ? playerHit.dist : Infinity;
-  const nearest = Math.min(blockDist, mobDist, playerDist);
-  let end;
-  if (playerHit && playerDist === nearest) {
-    mp.sendHit(playerHit.id, gun.damage);
-    end = _eye.clone().addScaledVector(_dir, playerDist);
-    particles.burst(end.x, end.y, end.z, [255, 70, 70], 12);
-    hud.hitMarker();
-  } else if (mobHit && mobDist === nearest) {
-    mobHit.mob.hurt(gun.damage, player.pos.x, player.pos.z);
-    end = _eye.clone().addScaledVector(_dir, mobDist);
-    particles.burst(end.x, end.y, end.z, [220, 80, 80], 8);
-    hud.hitMarker();
-  } else if (blockHit.hit) {
-    end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
-    particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
-  } else {
-    end = _eye.clone().addScaledVector(_dir, gun.range);
+  const nearest = Math.min(blockDist, enemyDist, mobDist);
+  if (enemy && enemyDist === nearest) {
+    const end = _eye.clone().addScaledVector(dir, enemyDist);
+    if (!friendly(enemy.id)) {
+      const dmg = enemy.head ? Math.round(damage * 1.7) : damage;
+      if (enemy.bot) botHurt(enemy.id, dmg, myName()); else mp.sendHit(enemy.id, dmg);
+      particles.burst(end.x, end.y, end.z, enemy.head ? [255, 220, 60] : [255, 70, 70], enemy.head ? 16 : 10);
+      if (!_suppressDmgNum) damageNumbers.spawn(end, dmg, enemy.head);
+      hud.hitMarker(enemy.head);
+    }
+    return end;
   }
+  if (mobHit && mobDist === nearest) {
+    mobHit.mob.hurt(damage, player.pos.x, player.pos.z);
+    const end = _eye.clone().addScaledVector(dir, mobDist);
+    particles.burst(end.x, end.y, end.z, [220, 80, 80], 8);
+    if (!_suppressDmgNum) damageNumbers.spawn(end, damage, false);
+    hud.hitMarker(false);
+    return end;
+  }
+  if (blockHit.hit) {
+    const end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
+    particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
+    return end;
+  }
+  return _eye.clone().addScaledVector(dir, range);
+}
+
+function fireHitscan(gun, muzzle) {
+  const dir = spreadDir(_dir, gun.spread);
+  const end = castBullet(dir, gun.range, gun.damage);
   tracers.add(muzzle, end, gun.zoom ? 0xbfe4ff : 0xffe08a);
   sfx.gun(gun.zoom ? 'sniper' : 'handgun');
+}
+
+// Shotgun: a cone of pellets (no per-pellet damage numbers — markers suffice).
+function fireShotgun(gun, muzzle) {
+  _suppressDmgNum = true;
+  for (let i = 0; i < gun.pellets; i++) {
+    const dir = spreadDir(_dir, gun.spread);
+    const end = castBullet(dir, gun.range, gun.damage);
+    tracers.add(muzzle, end, 0xffc46a);
+  }
+  _suppressDmgNum = false;
+  sfx.gun('shotgun');
+}
+
+// Railgun: a piercing beam that damages every enemy along the ray up to the wall.
+function fireRail(gun, muzzle) {
+  const blockHit = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  const wallDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - _eye.x, blockHit.y + 0.5 - _eye.y, blockHit.z + 0.5 - _eye.z) : gun.range;
+  for (const m of mobs.list) {
+    const t = m.rayHit(_eye.x, _eye.y, _eye.z, _dir.x, _dir.y, _dir.z, wallDist);
+    if (t < wallDist) m.hurt(gun.damage, player.pos.x, player.pos.z);
+  }
+  const enemies = [];
+  if (mp.online) for (const ph of mp.raycastAll(_eye, _dir, wallDist)) enemies.push({ id: ph.id, head: ph.head, bot: false });
+  if (isAuthority()) for (const bh of botMgr.raycastAll(_eye, _dir, wallDist, null)) enemies.push({ id: bh.id, head: bh.head, bot: true });
+  for (const e of enemies) {
+    if (friendly(e.id)) continue;
+    const dmg = e.head ? Math.round(gun.damage * 1.4) : gun.damage;
+    if (e.bot) botHurt(e.id, dmg, myName()); else mp.sendHit(e.id, dmg);
+    hud.hitMarker(e.head);
+  }
+  const end = _eye.clone().addScaledVector(_dir, wallDist);
+  tracers.add(muzzle, end, 0xb98bff);
+  tracers.add(muzzle, end, 0xe6d4ff);   // doubled for a thick beam
+  sfx.gun('rail');
+}
+
+// Everything portals can teleport: the player, mobs and bots.
+function portalBodies() {
+  const list = [player];
+  for (const m of mobs.list) list.push(m);
+  for (const b of botMgr.bots) if (b.alive) list.push(b);
+  return list;
 }
 
 function firePortal(slot, gun) {
@@ -740,6 +1129,34 @@ function firePortal(slot, gun) {
     new THREE.Vector3(hit.x + 0.5 + hit.nx * 0.5, hit.y + 0.5 + hit.ny * 0.5, hit.z + 0.5 + hit.nz * 0.5),
     new THREE.Vector3(hit.nx, hit.ny, hit.nz));
   sfx.portal();
+}
+
+// Rocket explosion: AoE damage (mobs / remote players / self with knockback) plus
+// destruction of soft cover (wool/planks/glass/leaves) — never the floor or walls.
+function rocketImpact(pos, gun) {
+  particles.burst(pos.x, pos.y, pos.z, [255, 150, 60], 44);
+  particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 22);
+  sfx.explosion();
+  const R = gun.radius;
+  for (const m of mobs.list) {
+    const d = Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z);
+    if (d < R) m.hurt(Math.round(gun.splash * (1 - d / R)), pos.x, pos.z);
+  }
+  if (mp.online) for (const { id, dist } of mp.playersNear(pos, R)) {
+    mp.sendHit(id, Math.round(gun.splash * (1 - dist / R))); hud.hitMarker(false);
+  }
+  // Self splash (rocket-jump): less damage, full knockback via damagePlayer.
+  const ds = Math.hypot(player.pos.x - pos.x, player.pos.y + 0.9 - pos.y, player.pos.z - pos.z);
+  if (ds < R) damagePlayer(Math.round(gun.splash * (1 - ds / R) * 0.45), pos.x, pos.z);
+  // Blow apart soft cover only.
+  const fx = Math.floor(pos.x), fy = Math.floor(pos.y), fz = Math.floor(pos.z);
+  const batch = [];
+  for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
+    if (dx * dx + dy * dy + dz * dz > 5) continue;
+    const x = fx + dx, y = fy + dy, z = fz + dz, b = world.getBlock(x, y, z);
+    if (b === WOOL || b === PLANK || b === GLASS || b === LEAVES) { recordEdit(x, y, z, AIR); batch.push([x, y, z, AIR]); }
+  }
+  mp.sendEdits(batch);
 }
 
 function plasmaImpact(pos, dmg, hitPlayer) {
@@ -812,10 +1229,12 @@ function frame() {
       const fb = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z));
       sfx.step(stepCategory(fb));
     }
-    // Recoil (player camera only)
+    // Recoil (player camera only): vertical kick + horizontal sway, recovering.
     recoilPitch *= Math.max(0, 1 - 14 * dt);
+    recoilYaw *= Math.max(0, 1 - 10 * dt);
     recoilKick *= Math.max(0, 1 - 12 * dt);
     camera.rotation.x -= recoilPitch;
+    camera.rotation.y += recoilYaw;
     if (viewModel) viewModel.position.z = -0.85 + recoilKick;
     updateViewModel();
   } else if (menuView) {
@@ -841,20 +1260,51 @@ function frame() {
     damagePlayer, onKill, explode, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
   });
 
+  // Bots + match flow: the authority simulates; guests render via broadcasts.
+  if (mode === BATTLE && loaded) {
+    if (isAuthority()) {
+      botMgr.update(matchWinner ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
+      manageBots(dt);
+      if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
+    }
+    if (matchOverTimer > 0) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
+    pickups.update(dt, player.pos, active ? applyPickup : () => false);
+
+    // Radar: teammates green, enemies red, rotated so you face up.
+    const RANGE = 64, blips = [], sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+    const addBlip = (pos, team, alive) => {
+      if (!alive) return;
+      const dx = pos.x - player.pos.x, dz = pos.z - player.pos.z;
+      if (dx * dx + dz * dz > RANGE * RANGE) return;
+      blips.push({ rx: (dx * cosY - dz * sinY) / RANGE, ry: -(dx * sinY + dz * cosY) / RANGE,
+        color: (teamMode && team === myTeam) ? '#57d977' : '#ff5b5b' });
+    };
+    for (const [id, r] of mp.remotes) addBlip(r.group.position, teamOf(id), r.group.visible);
+    if (isAuthority()) for (const b of botMgr.bots) addBlip(b.pos, b.team, b.alive);
+    hud.drawRadar(blips);
+  }
+
   // Interaction
   invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt; fireCD -= dt; fire2CD -= dt;
   const gun = gunOf(inventory.selectedId());
   if (active && gun) {
     resetBreak();
     const id = inventory.selectedId();
-    if (mouseLeft && fireCD <= 0) {
+    // Auto guns fire while held; the rest fire once per click.
+    if (mouseLeft && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
       if (gun.mag && reloadingGun === id) { /* busy reloading */ }
-      else if (gun.mag && ammoFor(gun, id) <= 0) { startReload(gun, id); fireCD = 0.25; }
+      else if (gun.mag && ammoFor(gun, id) <= 0) { startReload(gun, id); fireCD = 0.25; triggerConsumed = true; }
       else {
         fireGun(gun, false);
         if (gun.mag) ammo[id]--;
-        muzzle.flash(); recoilPitch += gun.recoil || 0; recoilKick += 0.08;
+        // Per-gun recoil: vertical kick, a little horizontal sway, viewmodel kickback.
+        const rc = gun.recoil || 0.015;
+        muzzle.flash();
+        recoilPitch += rc;
+        recoilYaw += (Math.random() - 0.5) * rc * 0.9;
+        recoilKick += Math.min(0.16, rc * 1.6 + 0.03);
         fireCD = gun.rate;
+        if (!gun.auto) triggerConsumed = true;
       }
     }
     if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); recoilKick += 0.05; fire2CD = gun.rate; }
@@ -881,12 +1331,14 @@ function frame() {
   // Guns / projectiles / portals / co-op
   muzzle.update(dt);
   tracers.update(dt);
-  plasmas.update(dt, world, mobs, mp, plasmaImpact);
-  portals.update(dt, player);
+  plasmas.update(dt, world, mobs, mp, portals, plasmaImpact);
+  rockets.update(dt, world, mobs, mp, portals, rocketImpact);
+  portals.update(dt, portalBodies());
   mp.update(dt);
   if (active) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw });
 
   particles.update(dt);
+  damageNumbers.update(dt);
   composer.render();
   stats.end();
 }
@@ -903,7 +1355,7 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, mobs, inventory, mp, tracers, plasmas, portals,
+  world, player, sky, scene, renderer, mobs, inventory, mp, tracers, plasmas, rockets, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },

@@ -26,8 +26,13 @@ export const HANDGUN = 273;
 export const SNIPER = 274;
 export const PLASMA_GUN = 275;
 export const PORTAL_GUN = 276;
+export const SMG = 277;
+export const ASSAULT_RIFLE = 278;
+export const SHOTGUN = 279;
+export const ROCKET_LAUNCHER = 280;
+export const RAILGUN = 281;
 
-export const GUNS = [HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -55,8 +60,13 @@ export const ITEMS = {
   [STONE_SHOVEL]: { name: 'Stone Shovel', ...tool('shovel', 2) },
   [STONE_SWORD]:  { name: 'Stone Sword', ...tool('sword', 2) },
   [HANDGUN]:    { name: 'Handgun',    gun: { kind: 'hitscan', rate: 0.16, damage: 6,  range: 64,  mag: 12, reload: 1.0, recoil: 0.018, color: 0x3a3f47 } },
+  [SMG]:        { name: 'SMG',        gun: { kind: 'hitscan', rate: 0.075, damage: 4, range: 48, auto: true, spread: 0.030, mag: 30, reload: 1.3, recoil: 0.010, color: 0x44464f } },
+  [ASSAULT_RIFLE]: { name: 'Assault Rifle', gun: { kind: 'hitscan', rate: 0.10, damage: 6, range: 74, auto: true, spread: 0.016, mag: 30, reload: 1.6, recoil: 0.018, color: 0x3a4a36 } },
+  [SHOTGUN]:    { name: 'Shotgun',    gun: { kind: 'shotgun', rate: 0.85, damage: 4, pellets: 9, range: 26, spread: 0.12, mag: 6, reload: 0.95, recoil: 0.06, color: 0x5a3a26 } },
   [SNIPER]:     { name: 'Sniper',     gun: { kind: 'hitscan', rate: 1.1,  damage: 34, range: 240, zoom: true, mag: 5, reload: 1.7, recoil: 0.06, color: 0x23262b } },
+  [RAILGUN]:    { name: 'Railgun',    gun: { kind: 'rail',    rate: 1.4, damage: 42, range: 260, pierce: true, mag: 4, reload: 2.1, recoil: 0.07, color: 0x342b4a } },
   [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.30, damage: 12, range: 90,  speed: 40, mag: 20, reload: 1.4, recoil: 0.03, color: 0x2bd6c0 } },
+  [ROCKET_LAUNCHER]: { name: 'Rocket Launcher', gun: { kind: 'rocket', rate: 1.0, damage: 18, splash: 48, radius: 4.0, speed: 34, range: 96, mag: 3, reload: 2.0, recoil: 0.08, color: 0x556b2f } },
   [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, recoil: 0.01, color: 0xdadada } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
@@ -134,17 +144,39 @@ function drawGun(ctx, id) {
     ctx.fillRect(2, 5, 9, 3.2);            // barrel
     ctx.fillRect(3, 7, 3.5, 6);            // grip
     ctx.fillStyle = '#6b7079'; ctx.fillRect(2, 5, 3, 1.2);
+  } else if (id === SMG) {
+    ctx.fillStyle = '#44464f'; ctx.fillRect(2, 6, 9, 3); ctx.fillRect(4, 8.5, 2.6, 4.5);
+    ctx.fillStyle = '#2c2e35'; ctx.fillRect(6, 9, 2, 5);   // magazine
+    ctx.fillStyle = '#73767f'; ctx.fillRect(2, 6, 2.4, 1);
+  } else if (id === ASSAULT_RIFLE) {
+    ctx.fillStyle = '#3a4a36'; ctx.fillRect(1, 6, 12, 2.8); ctx.fillRect(4, 8.5, 2.6, 4.5);
+    ctx.fillStyle = '#26301f'; ctx.fillRect(7, 9, 2.2, 4.6); // curved mag
+    ctx.fillStyle = '#5d6b4f'; ctx.fillRect(11, 5.4, 3, 1.4); // muzzle/sight
+  } else if (id === SHOTGUN) {
+    ctx.fillStyle = '#5a3a26'; ctx.fillRect(2, 7, 4, 3);   // stock
+    ctx.fillStyle = '#7a7d85'; ctx.fillRect(5, 6.5, 9, 2.2); // barrel
+    ctx.fillStyle = '#3a3c42'; ctx.fillRect(5, 8.4, 8, 1.4); // pump
   } else if (id === SNIPER) {
     ctx.fillStyle = '#23262b';
     ctx.fillRect(1, 7, 14, 2.4);           // long barrel
     ctx.fillRect(3, 8.5, 3, 4);            // grip
     ctx.fillStyle = '#111'; ctx.fillRect(6, 4.5, 5, 2);  // scope
     ctx.fillStyle = '#4aa3ff'; ctx.fillRect(10, 5, 1.4, 1.4);
+  } else if (id === RAILGUN) {
+    ctx.fillStyle = '#342b4a'; ctx.fillRect(1, 6, 13, 3); ctx.fillRect(4, 9, 2.6, 4);
+    ctx.fillStyle = '#9b6bff'; ctx.fillRect(2, 7, 11, 0.9); // energy rail
+    const grad = ctx.createRadialGradient(13, 7.5, 0, 13, 7.5, 3);
+    grad.addColorStop(0, '#d8c4ff'); grad.addColorStop(1, 'rgba(120,80,255,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(13, 7.5, 3, 0, Math.PI * 2); ctx.fill();
   } else if (id === PLASMA_GUN) {
     ctx.fillStyle = '#2a6f68'; ctx.fillRect(2, 6, 10, 4); ctx.fillRect(3, 9, 3, 4);
     const grad = ctx.createRadialGradient(12, 8, 0, 12, 8, 4);
     grad.addColorStop(0, '#bafff5'); grad.addColorStop(1, 'rgba(43,214,192,0)');
     ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(12, 8, 4, 0, Math.PI * 2); ctx.fill();
+  } else if (id === ROCKET_LAUNCHER) {
+    ctx.fillStyle = '#556b2f'; ctx.fillRect(1, 6, 13, 3.6); ctx.fillRect(4, 9.4, 2.6, 3.4);
+    ctx.fillStyle = '#3f5022'; ctx.beginPath(); ctx.arc(2, 7.8, 1.9, Math.PI / 2, -Math.PI / 2); ctx.fill();
+    ctx.fillStyle = '#d23a2a'; ctx.beginPath(); ctx.moveTo(14, 6); ctx.lineTo(15.5, 7.8); ctx.lineTo(14, 9.6); ctx.closePath(); ctx.fill(); // warhead
   } else { // PORTAL_GUN
     ctx.fillStyle = '#d6d6d6'; ctx.fillRect(2, 6, 9, 3.6); ctx.fillRect(3, 9, 3, 4);
     ctx.fillStyle = '#ff8c2b'; ctx.fillRect(10, 6, 2, 1.8);
