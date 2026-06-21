@@ -33,6 +33,8 @@ export class Player {
     this.keys = new Set();
     this.bobTime = 0;
     this.bobAmount = 0;
+    this.baseFov = BASE_FOV;
+    this.sens = 0.0022;
     this.fov = BASE_FOV;
 
     this.mode = 1;            // 0 survival, 1 creative (set by main)
@@ -50,6 +52,9 @@ export class Player {
     this.mode = mode;
     if (mode === 0) this.flying = false;
   }
+
+  setFov(v) { this.baseFov = v; this.camera.fov = v; this.fov = v; this.camera.updateProjectionMatrix(); }
+  setSensitivity(mult) { this.sens = 0.0022 * mult; }
 
   _bindInput() {
     document.addEventListener('keydown', (e) => {
@@ -74,7 +79,7 @@ export class Player {
     document.addEventListener('keyup', (e) => this.keys.delete(e.code));
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.dom) return;
-      const s = 0.0022;
+      const s = this.sens;
       this.yaw -= e.movementX * s;
       this.pitch -= e.movementY * s;
       const lim = Math.PI / 2 - 0.001;
@@ -222,8 +227,8 @@ export class Player {
     const bobY = Math.sin(this.bobTime * 2) * 0.055 * this.bobAmount;
     const bobX = Math.cos(this.bobTime) * 0.045 * this.bobAmount;
 
-    // Sprint FOV
-    const targetFov = sprinting ? SPRINT_FOV : BASE_FOV;
+    // Sprint FOV (relative to the configurable base FOV)
+    const targetFov = sprinting ? this.baseFov + (SPRINT_FOV - BASE_FOV) : this.baseFov;
     if (Math.abs(this.fov - targetFov) > 0.05) {
       this.fov += (targetFov - this.fov) * Math.min(1, 10 * dt);
       this.camera.fov = this.fov;

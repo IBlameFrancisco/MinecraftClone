@@ -222,11 +222,14 @@ let menuAngle = Math.random() * Math.PI * 2;
 // Cinematic orbit used as the live menu / loading background.
 function menuCamera(dt) {
   menuAngle += dt * 0.06;
+  const t = performance.now() * 0.001;
   const ty = world.surfaceHeight(Math.floor(SPAWN.x), Math.floor(SPAWN.z));
-  const r = 24, cx = SPAWN.x, cz = SPAWN.z;
-  camera.position.set(cx + Math.cos(menuAngle) * r, ty + 13, cz + Math.sin(menuAngle) * r);
+  const r = 24 + Math.sin(t * 0.13) * 5;          // slow dolly in/out
+  const h = 13 + Math.sin(t * 0.09) * 3.5;        // gentle rise/fall
+  const cx = SPAWN.x, cz = SPAWN.z;
+  camera.position.set(cx + Math.cos(menuAngle) * r, ty + h, cz + Math.sin(menuAngle) * r);
   camera.up.set(0, 1, 0);
-  camera.lookAt(cx, ty + 1, cz);
+  camera.lookAt(cx, ty + 1 + Math.sin(t * 0.07) * 1.5, cz);
 }
 function hideViewModel() {
   if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); viewModel = null; viewGunId = -1; }
@@ -297,6 +300,30 @@ modeSurvBtn.addEventListener('click', () => { menuMode = SURVIVAL; refreshModePi
 modeCreaBtn.addEventListener('click', () => { menuMode = CREATIVE; refreshModePicker(); });
 document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
 refreshModePicker();
+
+// ---------- Settings (FOV / sensitivity / render distance, persisted) ----------
+const SETTINGS_KEY = 'guncraft.settings';
+let settings;
+try { settings = Object.assign({ fov: 75, sens: 1.0, rd: 7 }, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); }
+catch { settings = { fov: 75, sens: 1.0, rd: 7 }; }
+const fovRange = document.getElementById('fovRange');
+const sensRange = document.getElementById('sensRange');
+const rdRange = document.getElementById('rdRange');
+const setText = (id, v) => { document.getElementById(id).textContent = v; };
+function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
+function applySettings() {
+  player.setFov(settings.fov); player.setSensitivity(settings.sens); world.renderDistance = settings.rd;
+  fovRange.value = settings.fov; setText('fovVal', settings.fov);
+  sensRange.value = Math.round(settings.sens * 100); setText('sensVal', settings.sens.toFixed(2));
+  rdRange.value = settings.rd; setText('rdVal', settings.rd);
+}
+applySettings();
+fovRange.addEventListener('input', () => { settings.fov = +fovRange.value; setText('fovVal', settings.fov); player.setFov(settings.fov); saveSettings(); });
+sensRange.addEventListener('input', () => { settings.sens = +sensRange.value / 100; setText('sensVal', settings.sens.toFixed(2)); player.setSensitivity(settings.sens); saveSettings(); });
+rdRange.addEventListener('input', () => { settings.rd = +rdRange.value; setText('rdVal', settings.rd); world.renderDistance = settings.rd; saveSettings(); });
+const settingsEl = document.getElementById('settings');
+document.getElementById('settingsBtn').addEventListener('click', () => settingsEl.classList.remove('hidden'));
+document.getElementById('settingsDone').addEventListener('click', () => settingsEl.classList.add('hidden'));
 
 // ---------- Multiplayer (P2P co-op) ----------
 const mpStatusEl = document.getElementById('mpStatus');

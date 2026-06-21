@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
-// On GitHub Pages the site is served from https://<user>.github.io/MinecraftClone/,
-// so production builds need that base path. Local dev stays at root.
+// Use relative asset paths in production so the site works at ANY GitHub Pages
+// subpath (i.e. regardless of the repository name) — rename-proof. Dev stays at root.
 export default defineConfig(({ command }) => ({
-  base: command === 'build' ? '/MinecraftClone/' : '/',
+  base: command === 'build' ? './' : '/',
 }));

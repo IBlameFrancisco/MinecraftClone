@@ -6,7 +6,9 @@ with per-vertex ambient occlusion, a runtime texture atlas, biomes, caves,
 day/night, cinematic post-processing, **guns**, and **peer-to-peer co-op**. No
 art or audio assets: every texture and sound is generated at runtime.
 
-**Live:** https://iblamefrancisco.github.io/MinecraftClone/
+**Live:** https://iblamefrancisco.github.io/GunCraft/ (after the repo rename; the
+old `/MinecraftClone/` URL redirects). Builds use relative asset paths so Pages
+works regardless of the repository name.
 
 ## Highlights
 

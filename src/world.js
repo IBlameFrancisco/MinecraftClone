@@ -19,6 +19,7 @@ export class World {
     this.genQueue = [];          // chunks awaiting terrain generation
     this.pcx = 0;
     this.pcz = 0;
+    this.renderDistance = RENDER_DISTANCE;  // runtime-adjustable (settings)
   }
 
   key(cx, cz) { return cx + ',' + cz; }
@@ -105,7 +106,7 @@ export class World {
   update(playerX, playerZ) {
     this.pcx = Math.floor(playerX / CHUNK_SIZE);
     this.pcz = Math.floor(playerZ / CHUNK_SIZE);
-    const genR = RENDER_DISTANCE + 1;
+    const genR = this.renderDistance + 1;
 
     // Schedule any missing chunk in range for generation.
     for (let dz = -genR; dz <= genR; dz++) {
@@ -159,7 +160,7 @@ export class World {
       let best = null, bestD = Infinity;
       for (const c of this.chunks.values()) {
         if (!c.dirty || !c.generated) continue;
-        if (this.dist2(c) > (RENDER_DISTANCE + 0.5) ** 2) continue;
+        if (this.dist2(c) > (this.renderDistance + 0.5) ** 2) continue;
         if (!this.neighboursGenerated(c.cx, c.cz)) continue;
         const d = this.dist2(c);
         if (d < bestD) { bestD = d; best = c; }
