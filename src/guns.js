@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows.
@@ -345,6 +345,89 @@ export class BlackHoles {
   }
 }
 
+// ---------------- Chakra jutsu (Rasengan / Rasenshuriken) ----------------
+// A 4-bladed pinwheel shuriken on transparent — the spinning chakra disc.
+function shurikenTexture() {
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'); g.translate(S / 2, S / 2);
+  for (let i = 0; i < 4; i++) {
+    g.rotate(Math.PI / 2);
+    const grad = g.createLinearGradient(0, 0, S * 0.5, 0);
+    grad.addColorStop(0, 'rgba(255,255,255,0.95)'); grad.addColorStop(0.6, 'rgba(150,215,255,0.85)'); grad.addColorStop(1, 'rgba(110,200,255,0)');
+    g.fillStyle = grad;
+    g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(S * 0.3, -S * 0.16, S * 0.5, 0); g.quadraticCurveTo(S * 0.3, S * 0.06, 0, 0); g.fill();
+  }
+  const cg = g.createRadialGradient(0, 0, 0, 0, 0, S * 0.18); cg.addColorStop(0, '#fff'); cg.addColorStop(1, 'rgba(140,210,255,0)');
+  g.fillStyle = cg; g.beginPath(); g.arc(0, 0, S * 0.18, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const SHURIKEN_TEX = shurikenTexture();
+
+// Rasengan + Rasenshuriken effects: the flying shuriken projectile, plus transient
+// chakra bursts (the Rasengan grind-flash and the Rasenshuriken wind-blade dome).
+export class ChakraFx {
+  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.proj = []; this.fx = []; }
+
+  // Throw a spinning Rasenshuriken; on impact it detonates the dome and calls onImpact.
+  throw(pos, dir, gun, ownerId, onImpact) {
+    const g = new THREE.Group(); g.position.copy(pos);
+    const orient = new THREE.Group(); orient.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    const disc = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4),
+      new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xbfe9ff, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    orient.add(disc);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x6fc8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); glow.scale.setScalar(2.6);
+    g.add(orient, core, glow);
+    this.group.add(g);
+    this.proj.push({ g, disc, pos: pos.clone(), vel: dir.clone().normalize().multiplyScalar(gun.speed), gun, ownerId, onImpact, travelled: 0 });
+  }
+
+  // A chakra burst: an expanding additive sphere; `needles` adds the radiating
+  // wind-blade urchin of the Rasenshuriken dome.
+  burst(pos, radius, color, needles) {
+    const g = new THREE.Group(); g.position.copy(pos);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); flash.scale.setScalar(radius * 0.7);
+    g.add(dome, flash);
+    let lines = null;
+    if (needles) {
+      const N = 90, arr = new Float32Array(N * 6);
+      for (let i = 0; i < N; i++) { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize(); arr.set([v.x * 0.15, v.y * 0.15, v.z * 0.15, v.x, v.y, v.z], i * 6); }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+      lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xdff2ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      g.add(lines);
+    }
+    this.group.add(g);
+    this.fx.push({ g, dome, flash, lines, t: 0, max: needles ? 0.75 : 0.35, radius });
+  }
+
+  update(dt, world, hooks) {
+    for (let i = this.proj.length - 1; i >= 0; i--) {
+      const p = this.proj[i];
+      const step = p.vel.clone().multiplyScalar(dt); p.pos.add(step); p.travelled += step.length();
+      p.g.position.copy(p.pos);
+      p.disc.rotation.z += dt * 42;
+      const solid = isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
+      if (solid || p.travelled > p.gun.range || (hooks && hooks.anchorAt && hooks.anchorAt(p.pos))) {
+        this.burst(p.pos.clone(), p.gun.radius, 0xbfe9ff, true);
+        if (p.onImpact) p.onImpact(p.pos.clone(), p.gun);
+        this._dispose(this.group, p.g); this.proj.splice(i, 1);
+      }
+    }
+    for (let i = this.fx.length - 1; i >= 0; i--) {
+      const f = this.fx[i]; f.t += dt; const k = Math.min(1, f.t / f.max);
+      const ex = 1 - Math.pow(1 - Math.min(1, k * 1.7), 3);      // expand fast, ease out
+      f.g.scale.setScalar(Math.max(0.01, f.radius * ex));
+      f.dome.material.opacity = 0.5 * (1 - k);
+      f.flash.material.opacity = Math.max(0, 1 - k * 3);
+      if (f.lines) f.lines.material.opacity = 0.9 * (1 - k * k);
+      f.g.rotation.y += dt * 2.2; f.g.rotation.x += dt * 1.4;
+      if (f.t >= f.max) { this._dispose(this.group, f.g); this.fx.splice(i, 1); }
+    }
+  }
+  _dispose(parent, g) { parent.remove(g); g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
+}
+
 // ---------------- Portals ----------------
 export class Portals {
   constructor(scene) {
@@ -557,6 +640,21 @@ export function makeViewModel(id) {
     const e1 = box(0.04, 0.04, 0.5, 0x9b6bff, 0.12, 0.07, -0.26); e1.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
     const e2 = box(0.04, 0.04, 0.5, 0x9b6bff, -0.12, 0.07, -0.26); e2.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
     box(0.1, 0.2, 0.14, 0x1c1430, 0, -0.16, 0.04);         // grip
+  } else if (id === RASENGAN) {
+    // A spinning chakra orb cupped in the hand (no gun body).
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 16), new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.95, fog: false }));
+    core.position.set(0, 0.02, -0.42); g.add(core);
+    const swirl = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0x6fc8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    swirl.position.copy(core.position); swirl.userData.spinRate = 16; g.add(swirl);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x4aa3ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    glow.scale.setScalar(0.7); glow.position.copy(core.position); g.add(glow);
+    box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.12, -0.34);        // a cupped hand below it
+  } else if (id === RASENSHURIKEN) {
+    const disc = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xbfe9ff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false, fog: false }));
+    disc.position.set(0, 0.02, -0.5); disc.userData.spinRate = 22; g.add(disc);
+    const core2 = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, fog: false }));
+    core2.position.copy(disc.position); g.add(core2);
+    box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.14, -0.36);        // hand
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xd6d6d6, 0, 0, -0.2);
     box(0.06, 0.06, 0.12, 0xff8c2b, 0.05, 0, -0.48);

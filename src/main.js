@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY } from './worldgen.js';
 import { Player } from './player.js';
@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -158,6 +158,7 @@ const plasmas = new Plasmas(scene);
 const rockets = new Rockets(scene);
 const grenades = new Grenades(scene);
 const blackholes = new BlackHoles(scene);
+const chakra = new ChakraFx(scene);
 const portals = new Portals(scene);
 const botMgr = new BotManager(scene);
 const damageNumbers = new DamageNumbers(scene);
@@ -1435,6 +1436,7 @@ function animateViewModel(dt) {
 
   viewModel.position.set(px, py, pz);
   viewModel.rotation.set(rx, ry, rz);
+  viewModel.traverse((o) => { if (o.userData.spinRate) o.rotation.z += o.userData.spinRate * dt; });  // spin chakra orbs/discs
 }
 
 // Sniper scope: narrow the FOV, swap the crosshair for the scope overlay, and
@@ -1475,6 +1477,8 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); }
   else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); }
   else if (gun.kind === 'blackhole') { blackholes.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.blackhole(); }
+  else if (gun.kind === 'rasengan') fireRasengan(gun);
+  else if (gun.kind === 'rasenshuriken') { chakra.throw(muzzle, _dir.clone(), gun, mp.myId || 'me', rasenshurikenImpact); sfx.rasenshuriken(); addShake(0.18); }
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
 }
 
@@ -1630,6 +1634,51 @@ function rocketImpact(pos, gun) {
   explodeDamage(pos, gun.radius, gun.splash, 0.45);
   blastCover(pos, 2);
 }
+
+// ---- Rasengan: a point-blank chakra grind — heavy single burst + hard knockback. ----
+function fireRasengan(gun) {
+  const block = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  const enemy = raycastEnemies(_eye, _dir, gun.range);
+  const mobHit = mobs.raycast(_eye, _dir, gun.range);
+  const blockDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
+  const dist = Math.min(blockDist, enemy ? enemy.dist : Infinity, mobHit ? mobHit.dist : Infinity, gun.range);
+  const end = _eye.clone().addScaledVector(_dir, dist);
+  const R = 2.6, KB = gun.knockback || 14;
+  let struck = false;
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    if (Math.hypot(b.pos.x - end.x, b.pos.y + 1 - end.y, b.pos.z - end.z) > R) continue;
+    botHurt(b.id, gun.damage, myName(), false);
+    const dx = b.pos.x - player.pos.x, dz = b.pos.z - player.pos.z, dl = Math.hypot(dx, dz) || 1;
+    b.vel.x += (dx / dl) * KB; b.vel.z += (dz / dl) * KB; b.vel.y += KB * 0.45; struck = true;
+  }
+  for (const m of mobs.list) {
+    if (Math.hypot(m.pos.x - end.x, m.pos.y + m.height * 0.5 - end.y, m.pos.z - end.z) > R) continue;
+    m.hurt(gun.damage, player.pos.x, player.pos.z); struck = true;
+  }
+  if (mp.online) for (const { id } of mp.playersNear(end, R)) { if (friendly(id)) continue; mp.sendHit(id, gun.damage); struck = true; }
+  if (struck) hud.hitMarker(false);
+  chakra.burst(end.clone(), 2.5, 0x4aa3ff, false);
+  particles.burst(end.x, end.y, end.z, [120, 195, 255], 38);
+  addShake(0.22); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
+}
+function rasenshurikenImpact(pos, gun) {
+  particles.burst(pos.x, pos.y, pos.z, [210, 240, 255], 60);
+  particles.burst(pos.x, pos.y, pos.z, [150, 210, 255], 30);
+  sfx.explosionAt(pos.x, pos.y, pos.z);
+  addShake(Math.max(0, 0.8 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 28)));
+  explodeDamage(pos, gun.radius, gun.splash, 0.35);
+  blastCover(pos, 3);
+}
+// The shuriken detonates on contact with any combatant (else on a block / its range).
+const chakraHooks = {
+  anchorAt: (pos) => {
+    for (const m of mobs.list) if (Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z) < 1.8) return true;
+    if (isAuthority()) for (const b of botMgr.bots) if (b.alive && Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z) < 1.8) return true;
+    if (mp.online && mp.playersNear(pos, 1.8).length) return true;
+    return false;
+  },
+};
 
 // ---- Black hole bomb ----
 // The singularity's gravity well. Stability matters: the pull ramps to zero inside
@@ -1951,6 +2000,7 @@ function frame() {
   plasmas.update(sdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
   rockets.update(sdt, world, mobs, enemyBots, mp, portals, rocketImpact);
   blackholes.update(sdt, world, blackHoleHooks);
+  chakra.update(sdt, world, chakraHooks);
   grenades.update(sdt, world);
   grenadeCD -= dt;
   portals.update(dt, portalBodies());
@@ -1981,7 +2031,7 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, blackholes, blackHoleHooks, portals,
+  world, player, sky, scene, renderer, camera, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, blackholes, blackHoleHooks, chakra, chakraHooks, rasenshurikenImpact, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },
@@ -1990,5 +2040,6 @@ window.__game = {
   get arena() { return arena; },
   get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead, arena }; },
   get battleState() { return { gameMode, matchWinner, myTeam, warSide, warTickets, warTimer, warCapture, matchOverTimer, eliminated, invuln, flying: player.flying, mode }; },
+  __testFire: (id) => fireGun(gunOf(id)),
   __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
 };
