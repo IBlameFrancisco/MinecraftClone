@@ -13,6 +13,7 @@ import {
 export const BIOME_PLAINS = 0;
 export const BIOME_DESERT = 1;
 export const BIOME_SNOW = 2;
+export const BIOME_FOREST = 3;
 
 function hash2(x, z) {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263);
@@ -33,15 +34,17 @@ export class WorldGen {
   }
 
   climate(wx, wz) {
-    const t = this.temp.fbm2D(wx * 0.0016, wz * 0.0016, 3);
-    const h = this.humid.fbm2D(wx * 0.0016 + 41.7, wz * 0.0016 - 19.3, 3);
+    // Higher frequency => smaller biomes you can actually walk between.
+    const t = this.temp.fbm2D(wx * 0.0042, wz * 0.0042, 3);
+    const h = this.humid.fbm2D(wx * 0.0042 + 41.7, wz * 0.0042 - 19.3, 3);
     return [t, h];
   }
 
   biomeAt(wx, wz) {
     const [t, h] = this.climate(wx, wz);
-    if (t > 0.32 && h < 0.05) return BIOME_DESERT;
-    if (t < -0.32) return BIOME_SNOW;
+    if (t > 0.35 && h < 0.0) return BIOME_DESERT;
+    if (t < -0.3) return BIOME_SNOW;
+    if (h > 0.25) return BIOME_FOREST;
     return BIOME_PLAINS;
   }
 
@@ -145,9 +148,11 @@ export class WorldGen {
         const surfaceY = this.heightAt(wx, wz);
         if (surfaceY <= SEA_LEVEL) continue; // no trees in water
 
-        if (biome === BIOME_PLAINS && r < 0.018) {
+        if (biome === BIOME_FOREST && r < 0.055) {
           this.stampTree(chunk, lx, lz, surfaceY, false);
-        } else if (biome === BIOME_SNOW && r < 0.012) {
+        } else if (biome === BIOME_PLAINS && r < 0.016) {
+          this.stampTree(chunk, lx, lz, surfaceY, false);
+        } else if (biome === BIOME_SNOW && r < 0.02) {
           this.stampTree(chunk, lx, lz, surfaceY, true);
         } else if (biome === BIOME_DESERT && r < 0.010) {
           this.stampCactus(chunk, lx, lz, surfaceY);

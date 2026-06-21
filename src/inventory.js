@@ -158,6 +158,22 @@ export class Inventory {
       const slot = e.target.closest('.islot');
       if (slot) this._clickSlot(slot);
     });
+    wrap.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const slot = e.target.closest('.islot');
+      if (slot) this._rightClickSlot(slot);
+    });
+  }
+
+  // Resolve get/set accessors for a slot in the current screen context.
+  _access(type, index) {
+    if (this.chestSlots) {
+      const arr = type === 'chest' ? this.chestSlots : type === 'hotbar' ? this.sHotbar : this.sMain;
+      return [() => arr[index], (v) => { arr[index] = v; }];
+    }
+    if (type === 'craft') return [() => this.craft[index], (v) => { this.craft[index] = v; }];
+    const arr = type === 'hotbar' ? this.sHotbar : this.sMain;
+    return [() => arr[index], (v) => { arr[index] = v; }];
   }
 
   _makeSlot(type, index, stack) {
@@ -249,6 +265,34 @@ export class Inventory {
       else { put(this.cursor); this.cursor = here; }
     } else if (here) { this.cursor = here; put(null); }
 
+    this.renderHotbar(); this.renderScreen(); this.select(this.selected); this._paintCursor();
+  }
+
+  // Right-click: grab HALF an unheld stack, or place ONE from the held cursor.
+  _rightClickSlot(el) {
+    const type = el.dataset.type;
+    const index = parseInt(el.dataset.index, 10);
+    if (type === 'result') { this._craftOnce(); return; }
+    if (this.creative) {
+      if (type === 'palette') {
+        if (!this.cursor) this.cursor = { id: index, count: 1 };
+        else if (this.cursor.id === index) this.cursor.count++;
+        this._paintCursor();
+      }
+      return;
+    }
+    const [get, set] = this._access(type, index);
+    const here = get();
+    if (this.cursor) {
+      if (!here) { set({ id: this.cursor.id, count: 1 }); this.cursor.count--; }
+      else if (here.id === this.cursor.id && here.count < STACK) { here.count++; this.cursor.count--; }
+      if (this.cursor && this.cursor.count <= 0) this.cursor = null;
+    } else if (here) {
+      const half = Math.ceil(here.count / 2);
+      this.cursor = { id: here.id, count: half };
+      here.count -= half;
+      if (here.count <= 0) set(null);
+    }
     this.renderHotbar(); this.renderScreen(); this.select(this.selected); this._paintCursor();
   }
 

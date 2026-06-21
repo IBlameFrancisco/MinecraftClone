@@ -290,6 +290,13 @@ export class Mobs {
     this.group.add(a.mesh);
   }
 
+  clearAll() {
+    for (const m of this.list) { this.group.remove(m.mesh); m.mesh.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); }
+    this.list.length = 0;
+    for (const a of this.arrows) { this.group.remove(a.mesh); a.mesh.geometry.dispose(); a.mesh.material.dispose(); }
+    this.arrows.length = 0;
+  }
+
   countKind(hostile) { return this.list.filter((m) => m.hostile === hostile).length; }
 
   spawn(kind, x, y, z) {

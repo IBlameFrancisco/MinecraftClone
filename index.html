@@ -64,7 +64,22 @@
       #overlay .card { background: rgba(0,0,0,0.45); padding: 30px 42px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.12); }
       #overlay h1 { font-size: 34px; letter-spacing: 1px; margin-bottom: 6px; }
       #overlay p { opacity: 0.85; font-size: 15px; margin-top: 6px; }
-      #overlay .play { margin-top: 16px; font-size: 18px; color: #ffe27a; }
+      #overlay .seedrow { margin-top: 18px; display: flex; align-items: center; gap: 8px; justify-content: center; }
+      #overlay .seedrow label { font-size: 13px; opacity: 0.8; }
+      #overlay #seedInput {
+        width: 180px; padding: 8px 10px; font-size: 14px; border-radius: 8px;
+        border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.35); color: #fff; outline: none;
+      }
+      #overlay #seedInput:focus { border-color: #ffe27a; }
+      #overlay .btnrow { margin-top: 16px; display: flex; gap: 10px; justify-content: center; }
+      #overlay button {
+        font: inherit; cursor: pointer; padding: 10px 18px; border-radius: 9px;
+        border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.10); color: #fff;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      #overlay button:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.45); }
+      #overlay #diceBtn { padding: 8px 11px; }
+      #overlay .play { font-size: 17px; color: #ffe27a; font-weight: 700; }
 
       #stats-wrap { position: absolute; right: 8px; bottom: 8px; transform: scale(1.1); transform-origin: bottom right; }
       #stats-wrap .stats-js-panel { opacity: 0.9; }
@@ -91,7 +106,15 @@
       <div class="card">
         <h1>VOXELCRAFT</h1>
         <p>A procedural voxel world — built with three.js</p>
-        <p class="play">▶ Click to play</p>
+        <div class="seedrow">
+          <label for="seedInput">Seed</label>
+          <input id="seedInput" type="text" autocomplete="off" spellcheck="false" />
+          <button id="diceBtn" title="Random seed">🎲</button>
+        </div>
+        <div class="btnrow">
+          <button id="playBtn" class="play">▶ Play</button>
+          <button id="newWorldBtn" class="newworld">↻ New World</button>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

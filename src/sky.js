@@ -68,8 +68,8 @@ export class Sky {
           vec3 col = mix(horizonColor, topColor, t);
           // slight darkening below the horizon
           col = mix(col, horizonColor * 0.55, clamp(-h * 1.5, 0.0, 1.0));
+          // colour is consumed by the post pipeline (OutputPass) in linear space
           gl_FragColor = vec4(col, 1.0);
-          #include <colorspace_fragment>
         }`,
     });
     this.dome = new THREE.Mesh(geo, mat);
@@ -93,6 +93,16 @@ export class Sky {
     }));
     this.moon.scale.setScalar(40);
     scene.add(this.sun, this.moon);
+
+    // Drifting cloud layer.
+    this.clouds = new THREE.Mesh(
+      new THREE.PlaneGeometry(3200, 3200),
+      new THREE.MeshBasicMaterial({ map: cloudTexture(), transparent: true, depthWrite: false, fog: false, opacity: 0.8 }),
+    );
+    this.clouds.rotation.x = -Math.PI / 2;
+    this.clouds.position.y = 145;
+    this.clouds.renderOrder = -1;
+    scene.add(this.clouds);
 
     this._tmpTop = new THREE.Color();
     this._tmpHorizon = new THREE.Color();
@@ -146,6 +156,14 @@ export class Sky {
     this.sun.material.opacity = THREE.MathUtils.clamp(e * 4 + 0.4, 0, 1);
     this.moon.material.opacity = THREE.MathUtils.clamp(-e * 4 + 0.2, 0, 1);
 
+    // Clouds drift and follow the camera; tinted by the day/night light.
+    this.clouds.position.x = cam.x;
+    this.clouds.position.z = cam.z;
+    this.clouds.material.map.offset.x += dt * 0.004;
+    this.clouds.material.map.offset.y += dt * 0.0016;
+    this.clouds.material.color.copy(this._tmpLight);
+    this.clouds.material.opacity = 0.8 * THREE.MathUtils.clamp(e * 3 + 0.5, 0.25, 1);
+
     return this.time;
   }
 
@@ -157,6 +175,27 @@ export class Sky {
     const isDay = this.time > 0.0 && this.time < 0.5;
     return `${isDay ? '☀' : '☾'} ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
+}
+
+function cloudTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 256);
+  for (let i = 0; i < 110; i++) {
+    const x = Math.random() * 256, y = Math.random() * 256, r = 8 + Math.random() * 42;
+    const a = 0.06 + Math.random() * 0.16;
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, `rgba(255,255,255,${a})`);
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(4, 4);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 function smooth(a, b, x) {
