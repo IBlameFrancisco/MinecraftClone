@@ -684,6 +684,8 @@ function setupMatch() {
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
+  health = 20; hud.setHealth(20); invuln = 1.5; dead = false;   // clean slate (also clears 999 invuln left by a BR elimination)
+  hud.hideScoreboard();
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   botMgr.clear();
   computeCoverPoints();
