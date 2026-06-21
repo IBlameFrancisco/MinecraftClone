@@ -158,6 +158,7 @@ world.applyEditsToChunk = (c) => {
 
 let mode = SURVIVAL;            // start in survival with an empty inventory
 let difficulty = NORMAL;
+let menuMode = SURVIVAL, menuDiff = NORMAL;   // chosen on the start screen
 let health = 20, hunger = 20, dead = false;
 let invuln = 0, regenTimer = 0, hungerTimer = 0, starveTimer = 0;
 
@@ -215,6 +216,22 @@ function pickSpawn() {
 }
 const SPAWN = new THREE.Vector3();
 let loaded = false;
+let everPlayed = false;
+let menuAngle = Math.random() * Math.PI * 2;
+
+// Cinematic orbit used as the live menu / loading background.
+function menuCamera(dt) {
+  menuAngle += dt * 0.06;
+  const ty = world.surfaceHeight(Math.floor(SPAWN.x), Math.floor(SPAWN.z));
+  const r = 24, cx = SPAWN.x, cz = SPAWN.z;
+  camera.position.set(cx + Math.cos(menuAngle) * r, ty + 13, cz + Math.sin(menuAngle) * r);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(cx, ty + 1, cz);
+}
+function hideViewModel() {
+  if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); viewModel = null; viewGunId = -1; }
+}
+
 function startWorld() {
   const [sx, sz] = pickSpawn();
   SPAWN.set(sx, 130, sz);
@@ -263,9 +280,23 @@ function refreshOverlays() {
 refreshOverlays();
 const seedInput = document.getElementById('seedInput');
 seedInput.value = currentSeedStr;
-document.getElementById('playBtn').addEventListener('click', () => { if (!dead) { renderer.domElement.requestPointerLock(); sfx.ensure(); } });
+document.getElementById('playBtn').addEventListener('click', () => { if (!dead) { if (!everPlayed) applyMenuChoice(); renderer.domElement.requestPointerLock(); sfx.ensure(); } });
 document.getElementById('diceBtn').addEventListener('click', () => { seedInput.value = randomSeedStr(); });
-document.getElementById('newWorldBtn').addEventListener('click', () => { newWorld(seedInput.value); renderer.domElement.requestPointerLock(); sfx.ensure(); });
+document.getElementById('newWorldBtn').addEventListener('click', () => { applyMenuChoice(); newWorld(seedInput.value); renderer.domElement.requestPointerLock(); sfx.ensure(); });
+
+// Mode + difficulty pickers
+const modeSurvBtn = document.getElementById('modeSurvival');
+const modeCreaBtn = document.getElementById('modeCreative');
+const diffRow = document.getElementById('diffrow');
+function refreshModePicker() {
+  modeSurvBtn.classList.toggle('active', menuMode === SURVIVAL);
+  modeCreaBtn.classList.toggle('active', menuMode === CREATIVE);
+  diffRow.style.visibility = menuMode === SURVIVAL ? 'visible' : 'hidden';
+}
+modeSurvBtn.addEventListener('click', () => { menuMode = SURVIVAL; refreshModePicker(); });
+modeCreaBtn.addEventListener('click', () => { menuMode = CREATIVE; refreshModePicker(); });
+document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
+refreshModePicker();
 
 // ---------- Multiplayer (P2P co-op) ----------
 const mpStatusEl = document.getElementById('mpStatus');
@@ -304,7 +335,10 @@ document.getElementById('joinBtn').addEventListener('click', () => {
   setMpStatus('Connecting…');
   mp.join(code, playerName(), mpHandlers);
 });
-document.addEventListener('pointerlockchange', refreshOverlays);
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement === renderer.domElement) everPlayed = true;
+  refreshOverlays();
+});
 deathEl.querySelector('#respawn').addEventListener('click', () => respawn());
 
 // ---------- Modes / damage / death ----------
@@ -319,7 +353,7 @@ function toggleMode() {
 }
 
 function damagePlayer(dmg, srcX, srcZ) {
-  if (mode !== SURVIVAL || dead || invuln > 0) return;
+  if (mode !== SURVIVAL || dead || invuln > 0 || !player.locked) return;
   health -= dmg; invuln = 0.5;
   hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.break();
   if (srcX !== undefined) {
@@ -351,6 +385,9 @@ function applyDifficulty() {
   hud.setDifficulty(DIFF_NAMES[difficulty]);
   hud.showName('Difficulty: ' + DIFF_NAMES[difficulty]);
 }
+function setModeDirect(m) { if (mode !== m) toggleMode(); }
+function setDifficultyDirect(d) { difficulty = d; hud.setDifficulty(DIFF_NAMES[d]); }
+function applyMenuChoice() { setModeDirect(menuMode); setDifficultyDirect(menuDiff); }
 
 // ---------- Keyboard (E inventory, G mode, B difficulty) ----------
 window.addEventListener('keydown', (e) => {
@@ -368,7 +405,7 @@ window.addEventListener('keydown', (e) => {
     const g2 = gunOf(inventory.selectedId());
     if (g2 && g2.mag && player.locked && !dead) startReload(g2, inventory.selectedId());
   } else if (e.code === 'KeyT' || e.code === 'Enter') {
-    if (player.locked && !inventory.open && !dead && !hud.isChatOpen()) { e.preventDefault(); hud.openChat(); }
+    if (player.locked && !inventory.open && !dead && !hud.isChatOpen()) { e.preventDefault(); player.keys.clear(); hud.openChat(); }
   }
 });
 
@@ -608,37 +645,36 @@ function frame() {
   stats.begin();
   const dt = Math.min(clock.getDelta(), 0.1);
 
-  world.update(player.pos.x, player.pos.z);
+  // In the menu / loading screen the camera slowly orbits the spawn as a live
+  // cinematic background; while playing it follows the player.
+  const menuView = !loaded || (!everPlayed && !player.locked);
+  world.update(menuView ? SPAWN.x : player.pos.x, menuView ? SPAWN.z : player.pos.z);
   world.processQueues(loaded ? 6 : 16);
+  if (!loaded) updateLoading();
 
-  // Still loading: animate the loading screen, render the world behind it.
-  if (!loaded) {
-    updateLoading();
-    sky.update(dt);
-    waterTime.value += dt;
-    composer.render();
-    stats.end();
-    return;
-  }
+  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen();
 
-  const active = player.locked && !inventory.open && !dead && !hud.isChatOpen();
-
-  if (active) {
+  if (loaded && player.locked && !dead) {
     player.update(dt);
     if (player.fallImpact > 0) { damagePlayer(Math.ceil(player.fallImpact * 0.6)); player.fallImpact = 0; }
-    if (player.onGround && Math.hypot(player.vel.x, player.vel.z) > 1.4) {
+    if (active && player.onGround && Math.hypot(player.vel.x, player.vel.z) > 1.4) {
       const fb = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z));
       sfx.step(stepCategory(fb));
     }
+    // Recoil (player camera only)
+    recoilPitch *= Math.max(0, 1 - 14 * dt);
+    recoilKick *= Math.max(0, 1 - 12 * dt);
+    camera.rotation.x -= recoilPitch;
+    if (viewModel) viewModel.position.z = -0.85 + recoilKick;
+    updateViewModel();
+  } else if (menuView) {
+    menuCamera(dt);
+    hideViewModel();
   } else {
-    player.update(0);
+    player.update(0);   // paused (inventory / death) after playing
+    updateViewModel();
   }
 
-  // Recoil decay + apply (after the player set the camera transform); reload timer.
-  recoilPitch *= Math.max(0, 1 - 14 * dt);
-  recoilKick *= Math.max(0, 1 - 12 * dt);
-  camera.rotation.x -= recoilPitch;
-  if (viewModel) viewModel.position.z = -0.85 + recoilKick;
   if (reloadingGun >= 0) { reloadTimer -= dt; if (reloadTimer <= 0) { const rg = gunOf(reloadingGun); if (rg) ammo[reloadingGun] = rg.mag; reloadingGun = -1; sfx.place(); } }
 
   sky.update(dt);
@@ -650,7 +686,7 @@ function frame() {
   sun.color.copy(sky.dirColor); sun.intensity = sky.dirIntensity;
   ambient.color.copy(sky.dirColor); ambient.intensity = sky.ambIntensity;
 
-  mobs.update(dead ? 0 : dt, player, sky.isNight, {
+  mobs.update(loaded && !dead ? dt : 0, player, sky.isNight, {
     damagePlayer, onKill, explode, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
   });
 
@@ -694,7 +730,6 @@ function frame() {
   } else hud.setAmmo(null);
 
   // Guns / projectiles / portals / co-op
-  updateViewModel();
   muzzle.update(dt);
   tracers.update(dt);
   plasmas.update(dt, world, mobs, plasmaImpact);
