@@ -493,7 +493,10 @@ buildSkinPicker();
 const mpStatusEl = document.getElementById('mpStatus');
 const setMpStatus = (s) => { if (mpStatusEl) mpStatusEl.textContent = s; };
 const randomRoom = () => Math.random().toString(36).slice(2, 7).toUpperCase();
-const playerName = () => (document.getElementById('nameInput').value.trim() || 'Player' + Math.floor(Math.random() * 1000));
+// Stable fallback so the name doesn't re-randomise every call — kill attribution,
+// gun-game progression, killstreaks and the scoreboard all compare names.
+const _nameFallback = 'Player' + Math.floor(Math.random() * 1000);
+const playerName = () => (document.getElementById('nameInput').value.trim() || _nameFallback);
 const mpHandlers = {
   getInit: () => ({
     seed: hashSeed(currentSeedStr),
@@ -1712,11 +1715,11 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, mobs, inventory, mp, tracers, plasmas, rockets, portals,
+  world, player, sky, scene, renderer, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },
-  damagePlayer, hud,
+  damagePlayer, hud, myName,
   get loaded() { return loaded; },
   get arena() { return arena; },
   get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead, arena }; },
