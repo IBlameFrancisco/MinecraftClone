@@ -20,6 +20,7 @@ export class Chunk {
 
     this.generated = false;
     this.dirty = true;          // needs (re)meshing
+    this.meshed = false;        // has been through buildMesh at least once
     this.mesh = null;           // opaque THREE.Mesh
     this.waterMesh = null;      // transparent THREE.Mesh
   }

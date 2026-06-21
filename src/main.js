@@ -548,7 +548,7 @@ const mpHandlers = {
     hud.setPlayers(mp.playerList()); if (mode === BATTLE && isAuthority()) { rebuildBoard(); broadcastBoard(); }
   },
   // PvP: someone hit me — apply the damage locally and remember who, for the kill feed.
-  onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg); },
+  onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg, undefined, undefined, true); },
   onKillFeed: (victim, killer) => { hud.addKill(victim, killer); if (killer === myName()) announceKill(false); },
   onBotHit: (botId, dmg, fromName, head) => botHurt(botId, dmg, fromName, head),
   onDeathAuthority: (by, id) => registerKill(by, id),
@@ -608,9 +608,13 @@ function toggleMode() {
   hud.showName(mode === CREATIVE ? 'Creative Mode' : 'Survival Mode');
 }
 
-function damagePlayer(dmg, srcX, srcZ) {
-  if ((mode !== SURVIVAL && mode !== BATTLE) || dead || invuln > 0 || !player.locked) return;
-  health -= dmg; invuln = 0.5;
+// `pvp` = incoming networked player/bot fire: every bullet should land, so it
+// bypasses the 0.5s i-frames (which exist to throttle melee/mob/explosion contact)
+// and doesn't grant them either — otherwise a shotgun's pellets all collapse to one.
+function damagePlayer(dmg, srcX, srcZ, pvp) {
+  if ((mode !== SURVIVAL && mode !== BATTLE) || dead || !player.locked) return;
+  if (!pvp && invuln > 0) return;
+  health -= dmg; if (!pvp) invuln = 0.5;
   hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.hurt(); addShake(0.12 + dmg * 0.004);
   if (srcX !== undefined) {
     const dx = srcX - player.pos.x, dz = srcZ - player.pos.z, d = Math.hypot(dx, dz) || 1;
@@ -998,7 +1002,7 @@ function botBullet(bot, dir, range, dmg, pierce) {
     const d = h.head ? Math.round(dmg * 1.5) : dmg;
     if (h.kind === 'local') { lastHitBy = bot.name; lastHitTime = performance.now() / 1000; damagePlayer(d, bot.pos.x, bot.pos.z); }
     else if (h.kind === 'bot') botHurt(h.id, d, bot.name, h.head);
-    else if (h.kind === 'remote') mp.sendHit(h.id, d, h.head);
+    else if (h.kind === 'remote') mp.sendHit(h.id, d, h.head, bot.name);   // credit the bot, not the host
     else if (h.kind === 'mob') h.mob.hurt(d, bot.pos.x, bot.pos.z);
     if (!pierce) break;
   }
