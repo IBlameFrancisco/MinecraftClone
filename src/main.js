@@ -32,6 +32,7 @@ import { rayAABB } from './physics.js';
 import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
+import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
 import { Tracers, Plasmas, Rockets, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
@@ -176,6 +177,19 @@ let health = 20, hunger = 20, dead = false;
 let invuln = 0, regenTimer = 0, hungerTimer = 0, starveTimer = 0;
 let arena = false;                 // is the current world the battle arena?
 let lastHitBy = null, lastHitTime = -100;   // for PvP kill attribution
+let shakeAmt = 0;                  // screen-shake magnitude
+let combo = 0, comboTimer = 0, firstBlood = true;   // announcer multikill tracking
+function addShake(a) { shakeAmt = Math.min(0.6, shakeAmt + a); }
+function announceKill(head) {
+  comboTimer = 3.2; combo++;
+  let txt = null, snd = 'first';
+  if (firstBlood) { firstBlood = false; txt = 'FIRST BLOOD'; }
+  else if (combo >= 4) { txt = `${combo}× MULTI KILL!`; snd = 'multi'; }
+  else if (combo === 3) { txt = 'TRIPLE KILL'; snd = 'multi'; }
+  else if (combo === 2) { txt = 'DOUBLE KILL'; snd = 'multi'; }
+  else if (head) { txt = 'HEADSHOT'; }
+  if (txt) { hud.announce(txt, combo >= 2 ? '#ff8f3a' : '#ffe27a'); sfx.announce(snd); }
+}
 
 player.setMode(SURVIVAL);
 inventory.setMode(false);
@@ -410,6 +424,49 @@ const settingsEl = document.getElementById('settings');
 document.getElementById('settingsBtn').addEventListener('click', () => settingsEl.classList.remove('hidden'));
 document.getElementById('settingsDone').addEventListener('click', () => settingsEl.classList.add('hidden'));
 
+// ---------- Character skin picker ----------
+const SKIN_KEY = 'guncraft.skin';
+let currentSkin = localStorage.getItem(SKIN_KEY) || DEFAULT_SKIN;
+function hx(n) { return '#' + n.toString(16).padStart(6, '0'); }
+// A small 2D portrait of a skin for the menu chips.
+function drawFace(ctx, s, S) {
+  ctx.clearRect(0, 0, S, S);
+  const u = S / 16;
+  ctx.fillStyle = hx(s.skin); ctx.fillRect(3 * u, 3 * u, 10 * u, 11 * u);     // face
+  ctx.fillStyle = hx(s.eye);
+  ctx.fillRect(5 * u, 7 * u, 2 * u, 2 * u); ctx.fillRect(9 * u, 7 * u, 2 * u, 2 * u); // eyes
+  if (s.mustache) { ctx.fillStyle = '#241a10'; ctx.fillRect(5 * u, 11 * u, 6 * u, 1.4 * u); }
+  // hair
+  ctx.fillStyle = hx(s.hair);
+  if (s.hairStyle === 'long') { ctx.fillRect(2 * u, 2 * u, 12 * u, 4 * u); ctx.fillRect(2 * u, 2 * u, 2 * u, 11 * u); ctx.fillRect(12 * u, 2 * u, 2 * u, 11 * u); }
+  else if (s.hairStyle === 'short') ctx.fillRect(3 * u, 2 * u, 10 * u, 3 * u);
+  // hat
+  if (s.hat === 'sombrero') { ctx.fillStyle = '#d9b25a'; ctx.fillRect(0, 2.5 * u, 16 * u, 2 * u); ctx.fillStyle = '#c99a3e'; ctx.fillRect(5 * u, 0, 6 * u, 3 * u); }
+  else if (s.hat === 'cap') { ctx.fillStyle = hx(s.hatColor || 0x303030); ctx.fillRect(3 * u, 2 * u, 10 * u, 2.4 * u); ctx.fillRect(2 * u, 3.6 * u, 6 * u, 1.2 * u); }
+  else if (s.hat === 'beanie') { ctx.fillStyle = hx(s.hatColor || 0x884444); ctx.fillRect(3 * u, 1.5 * u, 10 * u, 3.2 * u); }
+}
+function buildSkinPicker() {
+  const wrap = document.getElementById('skinpicker');
+  wrap.innerHTML = '';
+  for (const s of SKINS) {
+    const chip = document.createElement('button');
+    chip.className = 'skinchip' + (s.id === currentSkin ? ' active' : '');
+    chip.dataset.id = s.id;
+    const c = document.createElement('canvas'); c.width = c.height = 40;
+    drawFace(c.getContext('2d'), s, 40);
+    const label = document.createElement('span'); label.textContent = s.name;
+    chip.appendChild(c); chip.appendChild(label);
+    chip.addEventListener('click', () => {
+      currentSkin = s.id; mp.setSkin(s.id);
+      try { localStorage.setItem(SKIN_KEY, s.id); } catch {}
+      [...wrap.children].forEach((el) => el.classList.toggle('active', el.dataset.id === s.id));
+    });
+    wrap.appendChild(chip);
+  }
+}
+mp.setSkin(currentSkin);
+buildSkinPicker();
+
 // ---------- Multiplayer (P2P co-op) ----------
 const mpStatusEl = document.getElementById('mpStatus');
 const setMpStatus = (s) => { if (mpStatusEl) mpStatusEl.textContent = s; };
@@ -443,10 +500,10 @@ const mpHandlers = {
   onRoster: () => { hud.setPlayers(mp.playerList()); if (mode === BATTLE && isAuthority()) { rebuildBoard(); broadcastBoard(); } },
   // PvP: someone hit me — apply the damage locally and remember who, for the kill feed.
   onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg); },
-  onKillFeed: (victim, killer) => hud.addKill(victim, killer),
-  onBotHit: (botId, dmg, fromName) => botHurt(botId, dmg, fromName),
+  onKillFeed: (victim, killer) => { hud.addKill(victim, killer); if (killer === myName()) announceKill(false); },
+  onBotHit: (botId, dmg, fromName, head) => botHurt(botId, dmg, fromName, head),
   onDeathAuthority: (by, id) => registerKill(by, id),
-  onBotFire: (d) => shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color),
+  onBotFire: (d) => { shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color); sfx.gunAt(d.kind === 'rail' ? 'rail' : d.kind === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z); },
   onBoard: (d) => {
     board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
     const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
@@ -457,6 +514,7 @@ const mpHandlers = {
   botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
+hud.onHitSound = (head) => sfx.hitmark(head);
 document.getElementById('hostBtn').addEventListener('click', () => {
   const code = randomRoom();
   mp.host(code, playerName(), mpHandlers);
@@ -503,10 +561,13 @@ function toggleMode() {
 function damagePlayer(dmg, srcX, srcZ) {
   if ((mode !== SURVIVAL && mode !== BATTLE) || dead || invuln > 0 || !player.locked) return;
   health -= dmg; invuln = 0.5;
-  hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.hurt();
+  hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.hurt(); addShake(0.12 + dmg * 0.004);
   if (srcX !== undefined) {
-    const dx = player.pos.x - srcX, dz = player.pos.z - srcZ, d = Math.hypot(dx, dz) || 1;
-    player.vel.x += (dx / d) * 6; player.vel.z += (dz / d) * 6; player.vel.y = 5;
+    const dx = srcX - player.pos.x, dz = srcZ - player.pos.z, d = Math.hypot(dx, dz) || 1;
+    player.vel.x -= (dx / d) * 6; player.vel.z -= (dz / d) * 6; player.vel.y = 5;
+    // Directional damage indicator (angle relative to where we're facing).
+    const fX = -Math.sin(player.yaw), fZ = -Math.cos(player.yaw), rX = Math.cos(player.yaw), rZ = -Math.sin(player.yaw);
+    hud.showDamageDir(Math.atan2((dx / d) * rX + (dz / d) * rZ, (dx / d) * fX + (dz / d) * fZ));
   }
   if (health <= 0) die();
 }
@@ -574,6 +635,7 @@ function setupMatch() {
   teamMode = battleCfg.team; scoreLimit = battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
   matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
+  combo = 0; comboTimer = 0; firstBlood = true;
   botMgr.clear();
   computeCoverPoints();
 
@@ -645,10 +707,11 @@ function checkWin() {
 function endMatch(winner) {
   matchWinner = winner; matchOverTimer = 7;
   if (mp.isHost) mp.broadcast({ t: 'roundover', winner });
-  hud.showRoundOver(winner);
+  hud.showRoundOver(winner); hud.announce(`${winner} wins!`, '#ffd86b'); sfx.announce('win');
 }
 function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
+  combo = 0; comboTimer = 0; firstBlood = true;
   for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); }
   matchWinner = null; hud.hideRoundOver();
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
@@ -658,15 +721,16 @@ function resetMatch() {
 }
 
 // Damage a bot locally (authority); death is finalised in manageBots().
-function botHurt(botId, dmg, fromName) {
+function botHurt(botId, dmg, fromName, head) {
   const b = botMgr.get(botId); if (!b || !b.alive) return;
-  b.lastHitByName = fromName; b.lastHitTime = performance.now() / 1000;
+  b.lastHitByName = fromName; b.lastHitTime = performance.now() / 1000; b.lastHeadshot = !!head;
   b.hurt(dmg);
 }
 function onBotKilled(b) {
   particles.burst(b.pos.x, b.pos.y + 1, b.pos.z, [255, 120, 120], 24);
   const killer = (performance.now() / 1000 - (b.lastHitTime || 0) < 10) ? b.lastHitByName : null;
   hud.addKill(b.name, killer);
+  if (killer === myName()) announceKill(b.lastHeadshot);
   if (mp.isHost) mp.broadcast({ t: 'death', id: b.id, name: b.name, by: killer });
   registerKill(killer, b.id);
   b.mesh.visible = false; b.respawnIn = 2.5;
@@ -747,9 +811,9 @@ function botBullet(bot, dir, range, dmg, pierce) {
   hits.sort((a, b) => a.dist - b.dist);
   for (const h of hits) {
     const d = h.head ? Math.round(dmg * 1.5) : dmg;
-    if (h.kind === 'local') { lastHitBy = bot.name; lastHitTime = performance.now() / 1000; damagePlayer(d); }
-    else if (h.kind === 'bot') botHurt(h.id, d, bot.name);
-    else if (h.kind === 'remote') mp.sendHit(h.id, d);
+    if (h.kind === 'local') { lastHitBy = bot.name; lastHitTime = performance.now() / 1000; damagePlayer(d, bot.pos.x, bot.pos.z); }
+    else if (h.kind === 'bot') botHurt(h.id, d, bot.name, h.head);
+    else if (h.kind === 'remote') mp.sendHit(h.id, d, h.head);
     else if (h.kind === 'mob') h.mob.hurt(d, bot.pos.x, bot.pos.z);
     if (!pierce) break;
   }
@@ -776,11 +840,12 @@ function botFire(bot, dir) {
     const pd = gun.spread ? spreadDir(dir, gun.spread) : dir;
     botBullet(bot, pd, gun.range, gun.damage, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
   }
+  sfx.gunAt(gun.kind === 'rail' ? 'rail' : gun.kind === 'shotgun' ? 'shotgun' : gun.zoom ? 'sniper' : 'handgun', muzzle.x, muzzle.y, muzzle.z);
   if (mp.isHost) mp.broadcast({ t: 'bfire', kind: gun.kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z, range: gun.range, color });
 }
 let botBroadcastT = 0;
 function broadcastBotPositions() {
-  mp.broadcast({ t: 'bpos', bots: botMgr.bots.map((b) => ({ id: b.id, name: b.name, team: b.team, x: b.pos.x, y: b.pos.y, z: b.pos.z, yaw: b.yaw, alive: b.alive })) });
+  mp.broadcast({ t: 'bpos', bots: botMgr.bots.map((b) => ({ id: b.id, name: b.name, skin: b.skinId, team: b.team, x: b.pos.x, y: b.pos.y, z: b.pos.z, yaw: b.yaw, alive: b.alive })) });
 }
 function respawn() {
   if (difficulty === HARDCORE) return;
@@ -832,7 +897,7 @@ window.addEventListener('mouseup', (e) => {
 });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
 
-const _dir = new THREE.Vector3(), _eye = new THREE.Vector3();
+const _dir = new THREE.Vector3(), _eye = new THREE.Vector3(), _camFwd = new THREE.Vector3();
 function castFromEye() {
   player.eyePosition(_eye);
   camera.getWorldDirection(_dir);
@@ -903,8 +968,9 @@ function explode(cx, cy, cz) {
   }
   mp.sendEdits(batch);
   particles.burst(cx, cy, cz, [70, 64, 58], 50);
-  sfx.break();
+  sfx.explosionAt(cx, cy, cz);
   const d = Math.hypot(player.pos.x - cx, player.pos.y + 0.9 - cy, player.pos.z - cz);
+  addShake(Math.max(0, 0.45 * (1 - d / 16)));
   if (d < r + 2) { const dmg = Math.round((1 - d / (r + 2)) * 16); if (dmg > 0) damagePlayer(dmg, cx, cz); }
 }
 
@@ -1049,7 +1115,7 @@ function castBullet(dir, range, damage) {
     const end = _eye.clone().addScaledVector(dir, enemyDist);
     if (!friendly(enemy.id)) {
       const dmg = enemy.head ? Math.round(damage * 1.7) : damage;
-      if (enemy.bot) botHurt(enemy.id, dmg, myName()); else mp.sendHit(enemy.id, dmg);
+      if (enemy.bot) botHurt(enemy.id, dmg, myName(), enemy.head); else mp.sendHit(enemy.id, dmg, enemy.head);
       particles.burst(end.x, end.y, end.z, enemy.head ? [255, 220, 60] : [255, 70, 70], enemy.head ? 16 : 10);
       if (!_suppressDmgNum) damageNumbers.spawn(end, dmg, enemy.head);
       hud.hitMarker(enemy.head);
@@ -1105,7 +1171,7 @@ function fireRail(gun, muzzle) {
   for (const e of enemies) {
     if (friendly(e.id)) continue;
     const dmg = e.head ? Math.round(gun.damage * 1.4) : gun.damage;
-    if (e.bot) botHurt(e.id, dmg, myName()); else mp.sendHit(e.id, dmg);
+    if (e.bot) botHurt(e.id, dmg, myName(), e.head); else mp.sendHit(e.id, dmg, e.head);
     hud.hitMarker(e.head);
   }
   const end = _eye.clone().addScaledVector(_dir, wallDist);
@@ -1136,7 +1202,9 @@ function firePortal(slot, gun) {
 function rocketImpact(pos, gun) {
   particles.burst(pos.x, pos.y, pos.z, [255, 150, 60], 44);
   particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 22);
-  sfx.explosion();
+  sfx.explosionAt(pos.x, pos.y, pos.z);
+  const pd = Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z);
+  addShake(Math.max(0, 0.5 * (1 - pd / 24)));
   const R = gun.radius;
   for (const m of mobs.list) {
     const d = Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z);
@@ -1235,6 +1303,12 @@ function frame() {
     recoilKick *= Math.max(0, 1 - 12 * dt);
     camera.rotation.x -= recoilPitch;
     camera.rotation.y += recoilYaw;
+    if (shakeAmt > 0.001) {
+      camera.position.x += (Math.random() - 0.5) * shakeAmt;
+      camera.position.y += (Math.random() - 0.5) * shakeAmt;
+      camera.position.z += (Math.random() - 0.5) * shakeAmt * 0.5;
+      camera.rotation.z += (Math.random() - 0.5) * shakeAmt * 0.6;
+    }
     if (viewModel) viewModel.position.z = -0.85 + recoilKick;
     updateViewModel();
   } else if (menuView) {
@@ -1303,6 +1377,7 @@ function frame() {
         recoilPitch += rc;
         recoilYaw += (Math.random() - 0.5) * rc * 0.9;
         recoilKick += Math.min(0.16, rc * 1.6 + 0.03);
+        addShake(Math.min(0.1, rc * 0.9));
         fireCD = gun.rate;
         if (!gun.auto) triggerConsumed = true;
       }
@@ -1336,6 +1411,12 @@ function frame() {
   portals.update(dt, portalBodies());
   mp.update(dt);
   if (active) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw });
+
+  // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
+  shakeAmt *= Math.max(0, 1 - 9 * dt);
+  if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+  camera.getWorldDirection(_camFwd);
+  sfx.setListener(camera.position.x, camera.position.y, camera.position.z, _camFwd.x, _camFwd.z);
 
   particles.update(dt);
   damageNumbers.update(dt);
