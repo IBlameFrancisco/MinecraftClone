@@ -351,7 +351,7 @@ refreshOverlays();
 
 // Resume from the pause menu; Main Menu drops back to the home/start screen.
 function resumeGame() { if (loaded && !dead) renderer.domElement.requestPointerLock(); }
-function quitToMenu() { atMenu = true; document.exitPointerLock(); refreshOverlays(); }
+function quitToMenu() { atMenu = true; leaveBattleCleanup(); document.exitPointerLock(); refreshOverlays(); }
 pauseEl.addEventListener('click', (e) => { if (e.target === pauseEl) resumeGame(); });
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('pauseMenuBtn').addEventListener('click', quitToMenu);
@@ -534,7 +534,7 @@ const playerName = () => (document.getElementById('nameInput').value.trim() || _
 const mpHandlers = {
   getInit: () => ({
     seed: hashSeed(currentSeedStr),
-    arena, battleMap, battle: mode === BATTLE, team: teamMode, scoreLimit,
+    arena, battleMap, battle: mode === BATTLE, team: teamMode, scoreLimit, gameMode,
     edits: [...edits.entries()].map(([k, v]) => { const [x, y, z] = k.split(',').map(Number); return [x, y, z, v]; }),
   }),
   onInit: (d) => {
@@ -547,8 +547,10 @@ const mpHandlers = {
     edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
     for (const e of d.edits) recordEdit(e[0], e[1], e[2], e[3]);
     if (d.battle) {
-      setGameMode(BATTLE); inventory.setLoadout(BATTLE_LOADOUT); health = 20; hud.setHealth(20);
+      gameMode = d.gameMode || 'dm';
+      setGameMode(BATTLE); inventory.setLoadout(gameMode === 'war' ? WAR_LOADOUT : BATTLE_LOADOUT); health = 20; hud.setHealth(20);
       teamMode = !!d.team; scoreLimit = d.scoreLimit || 20; computeCoverPoints();
+      sky.setHorror(gameMode !== 'war'); sky.setWar(gameMode === 'war');
     }
     startWorld();
     setMpStatus(`Joined ${d.hostName || 'host'}'s ${d.battle ? 'battle arena' : 'world'}!`);
@@ -573,7 +575,7 @@ const mpHandlers = {
   onBoard: (d) => {
     board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
     const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
-    hud.setScoreboard(board, teamMode, scoreLimit, myTeam); mp.recolorBots(colorForBot);
+    hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo()); mp.recolorBots(colorForBot);
   },
   onRoundOver: (winner) => { hud.showRoundOver(winner); hud.showScoreboard(); },
   onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
@@ -600,7 +602,7 @@ deathEl.querySelector('#respawn').addEventListener('click', () => respawn());
 
 // Hold Tab for the battle scoreboard.
 window.addEventListener('keydown', (e) => { if (e.code === 'Tab' && mode === BATTLE && !isTyping()) { e.preventDefault(); hud.showScoreboard(); } });
-window.addEventListener('keyup', (e) => { if (e.code === 'Tab') hud.hideScoreboard(); });
+window.addEventListener('keyup', (e) => { if (e.code === 'Tab' && !matchWinner) hud.hideScoreboard(); });  // keep the round-over board up
 
 // ---------- Modes / damage / death ----------
 const myName = () => (mp.online ? mp.name : playerName());
@@ -614,10 +616,18 @@ function setGameMode(m) {
   if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }  // atmosphere set in setupMatch
   else {
     sky.setHorror(false); sky.setWar(false);
+    leaveBattleCleanup();
     hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear(); hud.setGrenades(0);
     if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
   }
   resetBreak();
+}
+// Tear down any leftover battle state so it can't leak into survival/creative (or a
+// resumed/quit match): spectate flags, god-mode i-frames, and battle-only HUD cards.
+function leaveBattleCleanup() {
+  eliminated = false; player.flying = false; invuln = 0;
+  matchWinner = null; matchOverTimer = 0;
+  hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
 }
 function toggleMode() {
   if (mode === BATTLE) return;                      // locked while in the arena
@@ -1872,8 +1882,9 @@ function frame() {
     else if (gameMode === 'wave') info = `Wave ${waveNum}/${WAVE_TARGET} · ${botMgr.bots.filter((b) => b.alive).length} left`;
     else if (gameMode === 'war') {
       const role = myTeam === WAR_ALLIED ? '🪖 Allied' : '🛡 Axis';
-      const mm = Math.max(0, Math.floor(warTimer / 60)), ss = Math.max(0, Math.floor(warTimer % 60));
+      const t = Math.max(0, warTimer), mm = Math.floor(t / 60), ss = Math.floor(t % 60);
       info = `D-Day · ${role} · Beachhead ${Math.floor(warCapture)}% · ${mm}:${String(ss).padStart(2, '0')} · Reinf ${Math.max(0, warTickets)}`;
+      hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo());   // keep the scoreboard title's clock live while Tab is held
     }
     else info = `Deathmatch · first to ${scoreLimit}`;
     hud.setModeInfo(info);
@@ -1978,6 +1989,6 @@ window.__game = {
   get loaded() { return loaded; },
   get arena() { return arena; },
   get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead, arena }; },
-  get battleState() { return { gameMode, matchWinner, myTeam, warSide, warTickets, warTimer, warCapture, matchOverTimer }; },
+  get battleState() { return { gameMode, matchWinner, myTeam, warSide, warTickets, warTimer, warCapture, matchOverTimer, eliminated, invuln, flying: player.flying, mode }; },
   __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
 };
