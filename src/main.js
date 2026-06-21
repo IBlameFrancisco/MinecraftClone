@@ -305,6 +305,7 @@ function loadWorld(seedStr, asArena) {
   arena = asArena;
   world.regenerate(hashSeed(currentSeedStr), asArena);
   edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll(); botMgr.clear();
+  setupHill(false); setupZone(false);
   if (!asArena && mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
   dead = false; resetBreak(); startWorld();
 }
@@ -373,27 +374,38 @@ modeCreaBtn.addEventListener('click', () => { menuMode = CREATIVE; refreshModePi
 modeBattleBtn.addEventListener('click', () => { menuMode = BATTLE; refreshModePicker(); });
 document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
 
-// ---------- Battle setup (FFA/Teams, size, bot difficulty, score limit) ----------
-const battleCfg = { team: false, size: 6, botDiff: 'normal', scoreLimit: 20 };
+// ---------- Battle setup (game mode, FFA/Teams, size, bot difficulty, score) ----------
+const battleCfg = { mode: 'dm', team: false, size: 6, botDiff: 'normal', scoreLimit: 20 };
+const bsGameMode = document.getElementById('bsGameMode');
+const bsTeamRow = document.getElementById('bsTeamRow');
 const bsFFA = document.getElementById('bsModeFFA');
 const bsTeam = document.getElementById('bsModeTeam');
 const bsSize = document.getElementById('bsSize');
 const bsSizeLabel = document.getElementById('bsSizeLabel');
 const bsBotDiff = document.getElementById('bsBotDiff');
 const bsScore = document.getElementById('bsScore');
+const bsScoreRow = bsScore.closest('.bsrow');
+// Modes that force free-for-all / co-op rather than letting you pick teams.
+const FORCES_FFA = { gungame: true, br: true };
+const FORCES_COOP = { wave: true };
 function fillSizeOptions() {
-  const team = battleCfg.team;
-  bsSizeLabel.textContent = team ? 'Team size' : 'Combatants';
-  const lo = team ? 1 : 2, hi = team ? 4 : 8, def = team ? 2 : 6;
+  const teamSel = battleCfg.team && !FORCES_FFA[battleCfg.mode] && !FORCES_COOP[battleCfg.mode];
+  const wave = battleCfg.mode === 'wave';
+  bsSizeLabel.textContent = wave ? 'Wave size' : teamSel ? 'Team size' : 'Combatants';
+  const lo = teamSel ? 1 : 2, hi = teamSel ? 4 : 8, def = teamSel ? 2 : 6;
   bsSize.innerHTML = '';
-  for (let n = lo; n <= hi; n++) { const o = document.createElement('option'); o.value = n; o.textContent = team ? `${n} v ${n}` : n; bsSize.appendChild(o); }
+  for (let n = lo; n <= hi; n++) { const o = document.createElement('option'); o.value = n; o.textContent = teamSel ? `${n} v ${n}` : n; bsSize.appendChild(o); }
   battleCfg.size = Math.min(hi, Math.max(lo, def));
   bsSize.value = battleCfg.size;
 }
 function refreshBattleSetup() {
+  const m = battleCfg.mode;
+  bsTeamRow.style.display = (FORCES_FFA[m] || FORCES_COOP[m]) ? 'none' : 'flex';
+  bsScoreRow.style.display = (m === 'gungame' || m === 'br') ? 'none' : 'flex';   // auto win conditions
   bsFFA.classList.toggle('active', !battleCfg.team);
   bsTeam.classList.toggle('active', battleCfg.team);
 }
+bsGameMode.addEventListener('change', (e) => { battleCfg.mode = e.target.value; fillSizeOptions(); refreshBattleSetup(); });
 bsFFA.addEventListener('click', () => { battleCfg.team = false; fillSizeOptions(); refreshBattleSetup(); });
 bsTeam.addEventListener('click', () => { battleCfg.team = true; fillSizeOptions(); refreshBattleSetup(); });
 bsSize.addEventListener('change', (e) => { battleCfg.size = parseInt(e.target.value, 10); });
@@ -583,7 +595,7 @@ function die() {
   refreshOverlays();
 }
 
-// Battle: no permadeath — credit the kill, then respawn at a (team) spawn point.
+// Battle: credit the kill. Most modes respawn; Battle Royale eliminates you.
 function battleDeath() {
   const now = performance.now() / 1000;
   const killer = (now - lastHitTime < 10) ? lastHitBy : null;
@@ -591,16 +603,34 @@ function battleDeath() {
   if (mp.online) mp.sendDeath(killer);
   if (isAuthority()) registerKill(killer, selfId(), myName());
   particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 80, 80], 30);
-  sfx.gun('sniper');
+  sfx.gun('sniper'); lastHitBy = null;
+  if (gameMode === 'br') {
+    eliminated = true;
+    player.pos.set(0.5, ARENA.FLOOR + 24, 0.5); player.vel.set(0, 0, 0);
+    health = 20; hud.setHealth(20); invuln = 999;
+    hud.announce('Eliminated', '#ff5b5b'); hud.flashHurt();
+    return;
+  }
   const sp = teamSpawnPoint(myTeam);
   player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
-  health = 20; hud.setHealth(20); invuln = 1.6; lastHitBy = null;
+  health = 20; hud.setHealth(20); invuln = 1.6;
+  if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
   hud.flashHurt();
 }
 
 // ---------- Battle match: teams, bots, scoreboard, rounds ----------
 const TEAM_NONE = -1, TEAM_RED = 0, TEAM_BLUE = 1;
 let teamMode = false, myTeam = TEAM_NONE, scoreLimit = 20;
+// Game-mode state (dm / gungame / koth / br / wave).
+let gameMode = 'dm';
+let gunLevelShown = -1;          // gun game: which ladder weapon we're holding
+let hillTimer = 0;               // koth scoring tick
+let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
+let waveNum = 0, waveBreak = 0;  // wave survival
+const GUNGAME_LADDER = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, PLASMA_GUN, SNIPER, RAILGUN, ROCKET_LAUNCHER];
+const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
+const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
+let hillMesh = null, zoneMesh = null;
 let myKills = 0, myDeaths = 0;
 const humanScore = new Map();   // remote human id -> { k, d }
 const teamAssign = new Map();   // combatant id -> team
@@ -634,18 +664,28 @@ function computeCoverPoints() {
 
 // Build the match (authority spawns bots; everyone rebuilds the board).
 function setupMatch() {
-  teamMode = battleCfg.team; scoreLimit = battleCfg.scoreLimit;
+  gameMode = battleCfg.mode;
+  teamMode = battleCfg.team;
+  if (gameMode === 'gungame' || gameMode === 'br') teamMode = false;
+  if (gameMode === 'wave') teamMode = true;                 // all humans vs the bots
+  scoreLimit = gameMode === 'gungame' ? GUNGAME_LADDER.length : battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
   matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
+  gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
+  zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   botMgr.clear();
   computeCoverPoints();
+  setupHill(gameMode === 'koth');
+  setupZone(gameMode === 'br');
 
   const humans = [selfId()];
   if (mp.online) for (const id of mp.roster.keys()) humans.push(id);
 
   let botTeams = [];
-  if (teamMode) {
+  if (gameMode === 'wave') {
+    myTeam = TEAM_RED; for (const id of humans) teamAssign.set(id, TEAM_RED);   // bots arrive in waves
+  } else if (teamMode) {
     myTeam = TEAM_RED; teamAssign.set(selfId(), TEAM_RED);
     let r = 1, b = 0;
     for (const id of humans) { if (id === selfId()) continue; if (r <= b) { teamAssign.set(id, TEAM_RED); r++; } else { teamAssign.set(id, TEAM_BLUE); b++; } }
@@ -658,7 +698,98 @@ function setupMatch() {
     botTeams = new Array(Math.max(0, battleCfg.size - humans.length)).fill(TEAM_NONE);
   }
   if (isAuthority() && botTeams.length) botMgr.spawn(botTeams.length, botTeams, battleCfg.botDiff, teamSpawnPoint, colorForBot);
+  if (gameMode === 'gungame') applyGunGameLevel(true);
+  if (gameMode === 'wave' && isAuthority()) startWave(1);
   rebuildBoard(); broadcastBoard();
+}
+
+// ---- Mode helpers ----
+function setupHill(on) {
+  if (hillMesh) { scene.remove(hillMesh); hillMesh.geometry.dispose(); hillMesh.material.dispose(); hillMesh = null; }
+  if (on) {
+    hillMesh = new THREE.Mesh(new THREE.CylinderGeometry(HILL_R, HILL_R, 0.25, 36),
+      new THREE.MeshBasicMaterial({ color: 0xffd86b, transparent: true, opacity: 0.18, depthWrite: false }));
+    hillMesh.position.set(0, ARENA.FLOOR + 1.15, 0);
+    scene.add(hillMesh);
+  }
+}
+function setupZone(on) {
+  if (zoneMesh) { scene.remove(zoneMesh); zoneMesh.geometry.dispose(); zoneMesh.material.dispose(); zoneMesh = null; }
+  if (on) {
+    zoneMesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 14, 48, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x4aa3ff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+    zoneMesh.position.set(0, ARENA.FLOOR + 7, 0);
+    scene.add(zoneMesh);
+  }
+}
+function applyGunGameLevel(force, killsOverride) {
+  const kills = killsOverride != null ? killsOverride : myKills;
+  const lvl = Math.min(kills, GUNGAME_LADDER.length - 1);
+  if (force || lvl !== gunLevelShown) { gunLevelShown = lvl; inventory.setLoadout([GUNGAME_LADDER[lvl]]); }
+}
+function myBoardKills() { const e = board.find((x) => x.id === selfId()); return e ? e.kills : 0; }
+// KOTH/objective: give one point to a combatant (frags double as the score).
+function awardScore(id) {
+  if (!id) return;
+  if (id === selfId()) myKills++;
+  else { const b = botMgr.get(id); if (b) b.kills++; else { const s = humanScore.get(id) || { k: 0, d: 0 }; s.k++; humanScore.set(id, s); } }
+  checkWin(); rebuildBoard(); broadcastBoard();
+}
+function kothAward() {
+  const inHill = (x, z) => (x * x + z * z) < HILL_R * HILL_R;
+  if (teamMode) {
+    let red = 0, blue = 0, repRed = null, repBlue = null;
+    if (!eliminated && health > 0 && inHill(player.pos.x, player.pos.z)) { myTeam === TEAM_RED ? (red++, repRed = selfId()) : (blue++, repBlue = selfId()); }
+    for (const b of botMgr.bots) if (b.alive && inHill(b.pos.x, b.pos.z)) { if (b.team === TEAM_RED) { red++; repRed = repRed || b.id; } else { blue++; repBlue = repBlue || b.id; } }
+    if (red > 0 && blue === 0) awardScore(repRed);
+    else if (blue > 0 && red === 0) awardScore(repBlue);
+  } else {
+    let occ = null, count = 0;
+    if (!eliminated && health > 0 && inHill(player.pos.x, player.pos.z)) { count++; occ = selfId(); }
+    for (const b of botMgr.bots) if (b.alive && inHill(b.pos.x, b.pos.z)) { count++; occ = b.id; }
+    if (count === 1) awardScore(occ);
+  }
+}
+function brTick(dt) {
+  zoneRadius = Math.max(5, zoneRadius - 0.5 * dt);
+  if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
+  stormTimer -= dt;
+  if (stormTimer <= 0) {
+    stormTimer = 1.0;
+    const out = (x, z) => (x * x + z * z) > zoneRadius * zoneRadius;
+    if (!eliminated && health > 0 && out(player.pos.x, player.pos.z)) damagePlayer(6);
+    for (const b of botMgr.bots) if (b.alive && out(b.pos.x, b.pos.z)) b.hurt(8);
+  }
+  const aliveBots = botMgr.bots.filter((b) => b.alive).length;
+  const meAlive = (!eliminated && health > 0) ? 1 : 0;
+  if (aliveBots + meAlive <= 1 && !matchWinner) {
+    endMatch(meAlive ? myName() : (botMgr.bots.find((b) => b.alive)?.name || 'Nobody'));
+  }
+}
+function startWave(n) {
+  waveNum = n; waveBreak = 0;
+  botMgr.clear();
+  const count = 3 + n * 2;
+  botMgr.spawn(count, new Array(count).fill(TEAM_BLUE), battleCfg.botDiff, teamSpawnPoint, colorForBot);
+  hud.announce(`Wave ${n}`, '#ff8f3a'); sfx.announce('multi');
+  rebuildBoard(); broadcastBoard();
+}
+function waveTick(dt) {
+  const aliveBots = botMgr.bots.filter((b) => b.alive).length;
+  if (aliveBots > 0) return;
+  if (waveBreak <= 0) { waveBreak = 4; hud.announce(`Wave ${waveNum} cleared`, '#57d977'); sfx.announce('win'); }
+  else { waveBreak -= dt; if (waveBreak <= 0) { if (waveNum >= WAVE_TARGET) endMatch('Survivors'); else startWave(waveNum + 1); } }
+}
+// Per-frame mode logic (authority).
+function modeTick(dt) {
+  if (gameMode === 'gungame') {
+    for (const b of botMgr.bots) {
+      const want = GUNGAME_LADDER[Math.min(b.kills, GUNGAME_LADDER.length - 1)];
+      if (b.gunId !== want) { b.gunId = want; b.gun = gunOf(want); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0; }
+    }
+  } else if (gameMode === 'koth') { hillTimer -= dt; if (hillTimer <= 0) { hillTimer = 1.0; kothAward(); } }
+  else if (gameMode === 'br') brTick(dt);
+  else if (gameMode === 'wave') waveTick(dt);
 }
 
 function rebuildBoard() {
@@ -689,7 +820,7 @@ function registerKill(killerName, victimId) {
   checkWin(); rebuildBoard(); broadcastBoard();
 }
 function checkWin() {
-  if (matchWinner) return;
+  if (matchWinner || gameMode === 'br' || gameMode === 'wave') return;   // those have their own win logic
   if (teamMode) {
     let red = 0, blue = 0;
     (myTeam === TEAM_RED ? red += myKills : blue += myKills);
@@ -714,10 +845,14 @@ function endMatch(winner) {
 function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
-  for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); }
+  gunLevelShown = -1; eliminated = false; stormTimer = 0;
+  zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   matchWinner = null; hud.hideRoundOver();
+  if (gameMode === 'wave') { if (isAuthority()) startWave(1); }
+  else { for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); } }
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   health = 20; hud.setHealth(20); invuln = 1.5; lastHitBy = null;
+  if (gameMode === 'gungame') applyGunGameLevel(true);
   if (mp.isHost) mp.broadcast({ t: 'roundreset' });
   rebuildBoard(); broadcastBoard();
 }
@@ -743,9 +878,10 @@ function respawnBot(b) {
   b._chooseGun(); b.mesh.visible = true;
 }
 function manageBots(dt) {
+  const respawns = gameMode !== 'br' && gameMode !== 'wave';   // BR eliminates; waves replace
   for (const b of botMgr.bots) {
     if (!b.alive && !b.deathProcessed) { b.deathProcessed = true; onBotKilled(b); }
-    else if (!b.alive && b.respawnIn > 0) { b.respawnIn -= dt; if (b.respawnIn <= 0) respawnBot(b); }
+    else if (respawns && !b.alive && b.respawnIn > 0) { b.respawnIn -= dt; if (b.respawnIn <= 0) respawnBot(b); }
   }
 }
 
@@ -1335,7 +1471,7 @@ function frame() {
   world.processQueues(loaded ? 6 : 16);
   if (!loaded) updateLoading();
 
-  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen();
+  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated;
 
   if (loaded && player.locked && !dead) {
     player.update(dt);
@@ -1385,8 +1521,12 @@ function frame() {
     if (isAuthority()) {
       botMgr.update(matchWinner ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
       manageBots(dt);
+      if (!matchWinner) modeTick(dt);
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
     }
+    // Gun Game weapon follows your level on every client (host kills are local,
+    // guests read their kill count off the synced scoreboard).
+    if (gameMode === 'gungame') applyGunGameLevel(false, isAuthority() ? myKills : myBoardKills());
     if (matchOverTimer > 0) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
     pickups.update(dt, player.pos, active ? applyPickup : () => false);
 
@@ -1402,7 +1542,16 @@ function frame() {
     for (const [id, r] of mp.remotes) addBlip(r.group.position, teamOf(id), r.group.visible);
     if (isAuthority()) for (const b of botMgr.bots) addBlip(b.pos, b.team, b.alive);
     hud.drawRadar(blips);
-  }
+
+    // Objective readout.
+    let info;
+    if (gameMode === 'gungame') info = `Gun Game · Level ${Math.min((isAuthority() ? myKills : myBoardKills()), GUNGAME_LADDER.length - 1) + 1}/${GUNGAME_LADDER.length}`;
+    else if (gameMode === 'koth') info = `King of the Hill · ${scoreLimit} to win`;
+    else if (gameMode === 'br') { const a = botMgr.bots.filter((b) => b.alive).length + (!eliminated && health > 0 ? 1 : 0); info = eliminated ? `Spectating · ${a} alive` : `Battle Royale · ${a} alive · zone ${Math.round(zoneRadius)}m`; }
+    else if (gameMode === 'wave') info = `Wave ${waveNum}/${WAVE_TARGET} · ${botMgr.bots.filter((b) => b.alive).length} left`;
+    else info = `Deathmatch · first to ${scoreLimit}`;
+    hud.setModeInfo(info);
+  } else hud.setModeInfo(null);
 
   // Interaction
   invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt; fireCD -= dt; fire2CD -= dt;
