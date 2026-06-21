@@ -107,6 +107,15 @@
       .gclogo .g2 { background-image: linear-gradient(180deg, #c6ef8e 8%, #4f9a2f 92%); }
       #overlay .gclogo { font-size: 58px; margin-bottom: 6px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.55)); }
       #overlay .tagline { opacity: 0.62; font-size: 13px; letter-spacing: 0.4px; margin-top: 0; margin-bottom: 4px; }
+      #overlay .skinrow { margin-top: 16px; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+      #overlay .skinlabel { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.6; }
+      #overlay .skinpick { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; max-width: 420px; }
+      #overlay .skinchip { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 6px 3px;
+        border-radius: 10px; border: 2px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.05); cursor: pointer; transition: all 0.13s; }
+      #overlay .skinchip:hover { background: rgba(255,255,255,0.14); }
+      #overlay .skinchip.active { border-color: #ffe27a; background: rgba(255,226,122,0.16); box-shadow: 0 0 0 1px rgba(255,226,122,0.4); }
+      #overlay .skinchip canvas { width: 40px; height: 40px; image-rendering: pixelated; border-radius: 6px; }
+      #overlay .skinchip span { font-size: 11px; opacity: 0.85; }
       #overlay .seedrow { margin-top: 18px; display: flex; align-items: center; gap: 8px; justify-content: center; }
       #overlay .seedrow label { font-size: 13px; opacity: 0.8; }
       #overlay #seedInput {
@@ -272,6 +281,10 @@
               <option value="50">50</option>
             </select>
           </div>
+        </div>
+        <div class="skinrow">
+          <span class="skinlabel">Character</span>
+          <div class="skinpick" id="skinpicker"></div>
         </div>
         <div class="seedrow">
           <label for="seedInput">Seed</label>

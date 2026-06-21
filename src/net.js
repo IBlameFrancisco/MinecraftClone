@@ -6,6 +6,7 @@
 import { Peer } from 'peerjs';
 import * as THREE from 'three';
 import { rayAABB } from './physics.js';
+import { getSkin, DEFAULT_SKIN } from './skins.js';
 
 const PREFIX = 'guncraft-';
 
@@ -30,23 +31,52 @@ function nameSprite(name) {
   return spr;
 }
 
-// Tint an avatar's body/limbs (mesh 2 is the head — keep its skin tone).
+// Re-tint only the team-coloured meshes (shirt / sleeves / pants) of an avatar,
+// leaving skin, hair, eyes and hats alone.
 function tintAvatarColor(group, color) {
-  let i = 0;
-  group.traverse((o) => { if (o.isMesh && o.material && o.material.color) { i++; if (i !== 2) o.material.color.setHex(color); } });
+  group.traverse((o) => { if (o.isMesh && o.userData.tintable && o.material && o.material.color) o.material.color.setHex(color); });
+}
+function darken(hex, f = 0.7) {
+  const c = new THREE.Color(hex); c.multiplyScalar(f); return c.getHex();
 }
 
-export function makeAvatar(name, color) {
+// Build a blocky avatar from a skin descriptor. `shirtOverride` (a colour) forces
+// the shirt/sleeves/pants — used to team-colour bots while keeping their features.
+export function makeAvatar(name, skin, shirtOverride) {
+  if (typeof skin === 'number') skin = { skin: 0xe8b89a, hair: 0x4a3526, hairStyle: 'short', eye: 0x303030, shirt: skin, pants: darken(skin, 0.6) };
+  else if (!skin) skin = getSkin();
+  const shirt = shirtOverride != null ? shirtOverride : skin.shirt;
+  const pants = shirtOverride != null ? darken(shirtOverride, 0.7) : skin.pants;
+
   const g = new THREE.Group();
   const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
-  const box = (w, h, d, c, y) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c)); m.position.y = y; g.add(m); return m; };
-  box(0.6, 0.7, 0.35, color, 1.15);        // body
-  box(0.5, 0.5, 0.5, 0xe8b89a, 1.75);      // head
-  box(0.22, 0.75, 0.25, color, 1.5).position.x = -0.4;
-  box(0.22, 0.75, 0.25, color, 1.5).position.x = 0.4;
-  box(0.24, 0.8, 0.26, 0x2c3e8c, 0.4).position.x = -0.16;
-  box(0.24, 0.8, 0.26, 0x2c3e8c, 0.4).position.x = 0.16;
+  const add = (w, h, d, c, x, y, z, tint) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c));
+    m.position.set(x, y, z); if (tint) m.userData.tintable = true; g.add(m); return m;
+  };
+  add(0.6, 0.7, 0.35, shirt, 0, 1.15, 0, true);            // torso
+  add(0.5, 0.5, 0.5, skin.skin, 0, 1.75, 0);               // head
+  // eyes (front +z)
+  for (const ex of [-0.12, 0.12]) { add(0.1, 0.1, 0.04, 0xffffff, ex, 1.8, 0.25); add(0.055, 0.07, 0.05, skin.eye, ex, 1.79, 0.27); }
+  // hair
+  if (skin.hairStyle === 'long') {
+    add(0.56, 0.16, 0.56, skin.hair, 0, 2.0, 0); add(0.5, 0.5, 0.12, skin.hair, 0, 1.72, -0.24);
+    add(0.12, 0.55, 0.5, skin.hair, -0.3, 1.6, 0); add(0.12, 0.55, 0.5, skin.hair, 0.3, 1.6, 0);
+  } else if (skin.hairStyle === 'short') {
+    add(0.54, 0.14, 0.54, skin.hair, 0, 2.0, 0); add(0.54, 0.26, 0.12, skin.hair, 0, 1.84, -0.22);
+  }
+  if (skin.mustache) add(0.28, 0.07, 0.05, 0x241a10, 0, 1.66, 0.25);
+  if (skin.hat === 'sombrero') { add(1.15, 0.07, 1.15, 0xd9b25a, 0, 2.06, 0); add(0.52, 0.36, 0.52, 0xc99a3e, 0, 2.26, 0); }
+  else if (skin.hat === 'cap') { add(0.55, 0.18, 0.55, skin.hatColor || 0x303030, 0, 2.02, 0); add(0.42, 0.07, 0.3, skin.hatColor || 0x303030, 0, 1.99, 0.34); }
+  else if (skin.hat === 'beanie') { add(0.57, 0.28, 0.57, skin.hatColor || 0x884444, 0, 2.03, 0); }
+  add(0.22, 0.62, 0.25, shirt, -0.41, 1.56, 0, true);      // arms (sleeves)
+  add(0.22, 0.62, 0.25, shirt, 0.41, 1.56, 0, true);
+  add(0.22, 0.16, 0.25, skin.skin, -0.41, 1.17, 0);        // hands
+  add(0.22, 0.16, 0.25, skin.skin, 0.41, 1.17, 0);
+  add(0.24, 0.8, 0.26, pants, -0.16, 0.4, 0, true);        // legs
+  add(0.24, 0.8, 0.26, pants, 0.16, 0.4, 0, true);
   g.add(nameSprite(name));
+  if (skin.scale && skin.scale !== 1) g.scale.setScalar(skin.scale);
   return g;
 }
 
@@ -61,6 +91,7 @@ export class Multiplayer {
     this.online = false;
     this.myId = null;
     this.name = 'Player';
+    this.skin = DEFAULT_SKIN;
     this.handlers = {};
     this.group = new THREE.Group();
     scene.add(this.group);
@@ -158,12 +189,13 @@ export class Multiplayer {
   _relay(from, d) { for (const [pid, c] of this.conns) if (pid !== from) c.send(d); }
   broadcast(d) { for (const c of this.conns.values()) c.send(d); }
 
+  setSkin(id) { this.skin = id; }
   sendPos(p) {
     if (!this.online) return;
     const now = performance.now();
     if (now - this._lastPos < 50) return;          // ~20 Hz
     this._lastPos = now;
-    this.broadcast({ t: 'pos', id: this.myId, name: this.name, x: p.x, y: p.y, z: p.z, yaw: p.yaw });
+    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw });
   }
   sendEdit(x, y, z, id) { if (this.online) this.broadcast({ t: 'edit', x, y, z, id }); }
   sendEdits(list) { if (this.online && list.length) this.broadcast({ t: 'edits', list }); }
@@ -224,7 +256,7 @@ export class Multiplayer {
   _updateRemote(id, d) {
     if (!id || id === this.myId) return;
     let r = this.remotes.get(id);
-    if (!r) { r = { group: makeAvatar(d.name || 'Player', 0x3a86ff) }; this.group.add(r.group); this.remotes.set(id, r); }
+    if (!r) { r = { group: makeAvatar(d.name || 'Player', getSkin(d.skin)) }; this.group.add(r.group); this.remotes.set(id, r); }
     r.target = { x: d.x, y: d.y, z: d.z, yaw: d.yaw };
   }
 
@@ -233,7 +265,7 @@ export class Multiplayer {
     let r = this.remotes.get(d.id);
     if (!r) {
       const color = this.handlers.botColor ? this.handlers.botColor(d.team) : 0xff5b5b;
-      r = { group: makeAvatar(d.name, color), bot: true, team: d.team };
+      r = { group: makeAvatar(d.name, getSkin(d.skin), color), bot: true, team: d.team };
       this.group.add(r.group); this.remotes.set(d.id, r);
     }
     r.target = { x: d.x, y: d.y, z: d.z, yaw: d.yaw };

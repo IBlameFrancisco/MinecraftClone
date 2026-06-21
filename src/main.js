@@ -32,6 +32,7 @@ import { rayAABB } from './physics.js';
 import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
+import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
 import { Tracers, Plasmas, Rockets, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
@@ -423,6 +424,49 @@ const settingsEl = document.getElementById('settings');
 document.getElementById('settingsBtn').addEventListener('click', () => settingsEl.classList.remove('hidden'));
 document.getElementById('settingsDone').addEventListener('click', () => settingsEl.classList.add('hidden'));
 
+// ---------- Character skin picker ----------
+const SKIN_KEY = 'guncraft.skin';
+let currentSkin = localStorage.getItem(SKIN_KEY) || DEFAULT_SKIN;
+function hx(n) { return '#' + n.toString(16).padStart(6, '0'); }
+// A small 2D portrait of a skin for the menu chips.
+function drawFace(ctx, s, S) {
+  ctx.clearRect(0, 0, S, S);
+  const u = S / 16;
+  ctx.fillStyle = hx(s.skin); ctx.fillRect(3 * u, 3 * u, 10 * u, 11 * u);     // face
+  ctx.fillStyle = hx(s.eye);
+  ctx.fillRect(5 * u, 7 * u, 2 * u, 2 * u); ctx.fillRect(9 * u, 7 * u, 2 * u, 2 * u); // eyes
+  if (s.mustache) { ctx.fillStyle = '#241a10'; ctx.fillRect(5 * u, 11 * u, 6 * u, 1.4 * u); }
+  // hair
+  ctx.fillStyle = hx(s.hair);
+  if (s.hairStyle === 'long') { ctx.fillRect(2 * u, 2 * u, 12 * u, 4 * u); ctx.fillRect(2 * u, 2 * u, 2 * u, 11 * u); ctx.fillRect(12 * u, 2 * u, 2 * u, 11 * u); }
+  else if (s.hairStyle === 'short') ctx.fillRect(3 * u, 2 * u, 10 * u, 3 * u);
+  // hat
+  if (s.hat === 'sombrero') { ctx.fillStyle = '#d9b25a'; ctx.fillRect(0, 2.5 * u, 16 * u, 2 * u); ctx.fillStyle = '#c99a3e'; ctx.fillRect(5 * u, 0, 6 * u, 3 * u); }
+  else if (s.hat === 'cap') { ctx.fillStyle = hx(s.hatColor || 0x303030); ctx.fillRect(3 * u, 2 * u, 10 * u, 2.4 * u); ctx.fillRect(2 * u, 3.6 * u, 6 * u, 1.2 * u); }
+  else if (s.hat === 'beanie') { ctx.fillStyle = hx(s.hatColor || 0x884444); ctx.fillRect(3 * u, 1.5 * u, 10 * u, 3.2 * u); }
+}
+function buildSkinPicker() {
+  const wrap = document.getElementById('skinpicker');
+  wrap.innerHTML = '';
+  for (const s of SKINS) {
+    const chip = document.createElement('button');
+    chip.className = 'skinchip' + (s.id === currentSkin ? ' active' : '');
+    chip.dataset.id = s.id;
+    const c = document.createElement('canvas'); c.width = c.height = 40;
+    drawFace(c.getContext('2d'), s, 40);
+    const label = document.createElement('span'); label.textContent = s.name;
+    chip.appendChild(c); chip.appendChild(label);
+    chip.addEventListener('click', () => {
+      currentSkin = s.id; mp.setSkin(s.id);
+      try { localStorage.setItem(SKIN_KEY, s.id); } catch {}
+      [...wrap.children].forEach((el) => el.classList.toggle('active', el.dataset.id === s.id));
+    });
+    wrap.appendChild(chip);
+  }
+}
+mp.setSkin(currentSkin);
+buildSkinPicker();
+
 // ---------- Multiplayer (P2P co-op) ----------
 const mpStatusEl = document.getElementById('mpStatus');
 const setMpStatus = (s) => { if (mpStatusEl) mpStatusEl.textContent = s; };
@@ -801,7 +845,7 @@ function botFire(bot, dir) {
 }
 let botBroadcastT = 0;
 function broadcastBotPositions() {
-  mp.broadcast({ t: 'bpos', bots: botMgr.bots.map((b) => ({ id: b.id, name: b.name, team: b.team, x: b.pos.x, y: b.pos.y, z: b.pos.z, yaw: b.yaw, alive: b.alive })) });
+  mp.broadcast({ t: 'bpos', bots: botMgr.bots.map((b) => ({ id: b.id, name: b.name, skin: b.skinId, team: b.team, x: b.pos.x, y: b.pos.y, z: b.pos.z, yaw: b.yaw, alive: b.alive })) });
 }
 function respawn() {
   if (difficulty === HARDCORE) return;

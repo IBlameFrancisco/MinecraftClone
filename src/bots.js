@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { moveEntity } from './physics.js';
 import { makeAvatar } from './net.js';
+import { getSkin, randomBotSkin } from './skins.js';
 import {
   HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, gunOf,
 } from './items.js';
@@ -65,6 +66,7 @@ class Bot {
     this.coverGoal = null;
     this.coverTimer = 0;
     this.kills = 0; this.deaths = 0;
+    this.skinId = randomBotSkin();
     this.mesh = null;            // avatar group, created by the manager
     this._chooseGun();
   }
@@ -117,7 +119,7 @@ export class BotManager {
       const b = new Bot(nm, team, difficulty);
       const sp = spawnFor(team);
       b.pos.set(sp.x, sp.y, sp.z);
-      b.mesh = makeAvatar(b.name, colorFor(team));
+      b.mesh = makeAvatar(b.name, getSkin(b.skinId), colorFor(team));
       b.mesh.position.copy(b.pos);
       this.group.add(b.mesh);
       this.bots.push(b);
