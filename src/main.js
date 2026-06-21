@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -154,6 +154,7 @@ const mp = new Multiplayer(scene);
 const tracers = new Tracers(scene);
 const plasmas = new Plasmas(scene);
 const rockets = new Rockets(scene);
+const grenades = new Grenades(scene);
 const portals = new Portals(scene);
 const botMgr = new BotManager(scene);
 const damageNumbers = new DamageNumbers(scene);
@@ -181,7 +182,7 @@ let shakeAmt = 0;                  // screen-shake magnitude
 let combo = 0, comboTimer = 0, firstBlood = true;   // announcer multikill tracking
 function addShake(a) { shakeAmt = Math.min(0.6, shakeAmt + a); }
 function announceKill(head) {
-  comboTimer = 3.2; combo++;
+  comboTimer = 3.2; combo++; streak++;
   let txt = null, snd = 'first';
   if (firstBlood) { firstBlood = false; txt = 'FIRST BLOOD'; }
   else if (combo >= 4) { txt = `${combo}× MULTI KILL!`; snd = 'multi'; }
@@ -189,6 +190,12 @@ function announceKill(head) {
   else if (combo === 2) { txt = 'DOUBLE KILL'; snd = 'multi'; }
   else if (head) { txt = 'HEADSHOT'; }
   if (txt) { hud.announce(txt, combo >= 2 ? '#ff8f3a' : '#ffe27a'); sfx.announce(snd); }
+  // Killstreak rewards (heal + a louder callout, no death in between).
+  const streaks = { 3: 'KILLING SPREE', 5: 'RAMPAGE', 7: 'UNSTOPPABLE', 10: 'GODLIKE' };
+  if (streaks[streak]) {
+    hud.announce(streaks[streak], '#ff5b6e'); sfx.announce('multi');
+    if (mode === BATTLE) { health = 20; hud.setHealth(20); grenadeCount = Math.min(3, grenadeCount + 1); hud.setGrenades(grenadeCount); }
+  }
 }
 
 player.setMode(SURVIVAL);
@@ -224,6 +231,7 @@ scene.add(crackMesh);
 let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
 let triggerConsumed = false;   // for semi-auto guns: one shot per click
+let grenadeCount = 0, grenadeCD = 0, streak = 0;   // grenades + killstreaks
 const ammo = {};
 let reloadingGun = -1, reloadTimer = 0, reloadDur = 1, recoilPitch = 0, recoilYaw = 0, vmRecoil = 0;
 // Viewmodel animation + aim-down-sights state.
@@ -523,8 +531,8 @@ const mpHandlers = {
     const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
     hud.setScoreboard(board, teamMode, scoreLimit, myTeam); mp.recolorBots(colorForBot);
   },
-  onRoundOver: (winner) => hud.showRoundOver(winner),
-  onRoundReset: () => { hud.hideRoundOver(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
+  onRoundOver: (winner) => { hud.showRoundOver(winner); hud.showScoreboard(); },
+  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
   botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
@@ -561,7 +569,7 @@ function setGameMode(m) {
   inventory.setMode(m === CREATIVE || m === BATTLE); // battle uses the infinite (creative) set
   if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }
   else {
-    hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear();
+    hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear(); hud.setGrenades(0);
     if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
   }
   resetBreak();
@@ -603,7 +611,7 @@ function battleDeath() {
   if (mp.online) mp.sendDeath(killer);
   if (isAuthority()) registerKill(killer, selfId(), myName());
   particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 80, 80], 30);
-  sfx.gun('sniper'); lastHitBy = null;
+  sfx.gun('sniper'); lastHitBy = null; streak = 0;
   if (gameMode === 'br') {
     eliminated = true;
     player.pos.set(0.5, ARENA.FLOOR + 24, 0.5); player.vel.set(0, 0, 0);
@@ -614,6 +622,7 @@ function battleDeath() {
   const sp = teamSpawnPoint(myTeam);
   player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   health = 20; hud.setHealth(20); invuln = 1.6;
+  grenadeCount = 2; hud.setGrenades(2);
   if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
   hud.flashHurt();
 }
@@ -673,6 +682,7 @@ function setupMatch() {
   matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
+  streak = 0; grenadeCount = 2; hud.setGrenades(2);
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   botMgr.clear();
   computeCoverPoints();
@@ -841,17 +851,19 @@ function endMatch(winner) {
   matchWinner = winner; matchOverTimer = 7;
   if (mp.isHost) mp.broadcast({ t: 'roundover', winner });
   hud.showRoundOver(winner); hud.announce(`${winner} wins!`, '#ffd86b'); sfx.announce('win');
+  hud.showScoreboard();   // final standings during the round-over
 }
 function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
-  matchWinner = null; hud.hideRoundOver();
+  matchWinner = null; hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'wave') { if (isAuthority()) startWave(1); }
   else { for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); } }
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   health = 20; hud.setHealth(20); invuln = 1.5; lastHitBy = null;
+  streak = 0; grenadeCount = 2; hud.setGrenades(2);
   if (gameMode === 'gungame') applyGunGameLevel(true);
   if (mp.isHost) mp.broadcast({ t: 'roundreset' });
   rebuildBoard(); broadcastBoard();
@@ -901,6 +913,7 @@ function applyPickup(kind) {
   }
   let refilled = false;
   for (const id of BATTLE_LOADOUT) { const g = gunOf(id); if (g && g.mag && (ammo[id] === undefined || ammo[id] < g.mag)) { ammo[id] = g.mag; refilled = true; } }
+  if (grenadeCount < 3) { grenadeCount = 3; hud.setGrenades(3); refilled = true; }
   if (refilled) {
     if (reloadingGun >= 0) reloadingGun = -1;
     sfx.place(); particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [240, 200, 80], 16);
@@ -1011,7 +1024,10 @@ window.addEventListener('keydown', (e) => {
   } else if (e.code === 'Escape' && inventory.open) {
     inventory.close(); refreshOverlays();
   } else if (e.code === 'KeyG') {
-    if (!dead && !inventory.open) toggleMode();
+    if (mode === BATTLE) throwGrenade();              // grenade in battle
+    else if (!dead && !inventory.open) toggleMode();  // creative/survival toggle otherwise
+  } else if (e.code === 'KeyV') {
+    if (!dead && !inventory.open) quickMelee();
   } else if (e.code === 'KeyB') {
     if (!dead && !inventory.open && mode !== BATTLE) applyDifficulty();
   } else if (e.code === 'KeyR') {
@@ -1382,34 +1398,81 @@ function firePortal(slot, gun) {
   sfx.portal();
 }
 
-// Rocket explosion: AoE damage (mobs / remote players / self with knockback) plus
-// destruction of soft cover (wool/planks/glass/leaves) — never the floor or walls.
-function rocketImpact(pos, gun) {
-  particles.burst(pos.x, pos.y, pos.z, [255, 150, 60], 44);
-  particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 22);
-  sfx.explosionAt(pos.x, pos.y, pos.z);
-  const pd = Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z);
-  addShake(Math.max(0, 0.5 * (1 - pd / 24)));
-  const R = gun.radius;
+// Shared area-of-effect damage with falloff — hits mobs, bots, remote players and
+// the local player (self-splash). Respects team friendly-fire. `self` scales the
+// damage you take from your own blast.
+function explodeDamage(pos, radius, maxDmg, self = 0.5) {
+  let hit = false;
   for (const m of mobs.list) {
     const d = Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z);
-    if (d < R) m.hurt(Math.round(gun.splash * (1 - d / R)), pos.x, pos.z);
+    if (d < radius) { m.hurt(Math.round(maxDmg * (1 - d / radius)), pos.x, pos.z); hit = true; }
   }
-  if (mp.online) for (const { id, dist } of mp.playersNear(pos, R)) {
-    mp.sendHit(id, Math.round(gun.splash * (1 - dist / R))); hud.hitMarker(false);
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    const d = Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z);
+    if (d < radius) { botHurt(b.id, Math.round(maxDmg * (1 - d / radius)), myName(), false); hit = true; }
   }
-  // Self splash (rocket-jump): less damage, full knockback via damagePlayer.
+  if (mp.online) for (const { id, dist } of mp.playersNear(pos, radius)) {
+    if (friendly(id)) continue;
+    mp.sendHit(id, Math.round(maxDmg * (1 - dist / radius))); hit = true;
+  }
   const ds = Math.hypot(player.pos.x - pos.x, player.pos.y + 0.9 - pos.y, player.pos.z - pos.z);
-  if (ds < R) damagePlayer(Math.round(gun.splash * (1 - ds / R) * 0.45), pos.x, pos.z);
-  // Blow apart soft cover only.
-  const fx = Math.floor(pos.x), fy = Math.floor(pos.y), fz = Math.floor(pos.z);
-  const batch = [];
-  for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
-    if (dx * dx + dy * dy + dz * dz > 5) continue;
+  if (ds < radius && self > 0) damagePlayer(Math.round(maxDmg * (1 - ds / radius) * self), pos.x, pos.z);
+  if (hit) hud.hitMarker(false);
+}
+
+// Destroy soft cover (wool/planks/glass/leaves) in a small radius — never floor/walls.
+function blastCover(pos, r) {
+  const fx = Math.floor(pos.x), fy = Math.floor(pos.y), fz = Math.floor(pos.z), batch = [];
+  for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
+    if (dx * dx + dy * dy + dz * dz > r * r + 1) continue;
     const x = fx + dx, y = fy + dy, z = fz + dz, b = world.getBlock(x, y, z);
     if (b === WOOL || b === PLANK || b === GLASS || b === LEAVES) { recordEdit(x, y, z, AIR); batch.push([x, y, z, AIR]); }
   }
   mp.sendEdits(batch);
+}
+
+function rocketImpact(pos, gun) {
+  particles.burst(pos.x, pos.y, pos.z, [255, 150, 60], 44);
+  particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 22);
+  sfx.explosionAt(pos.x, pos.y, pos.z);
+  addShake(Math.max(0, 0.5 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 24)));
+  explodeDamage(pos, gun.radius, gun.splash, 0.45);
+  blastCover(pos, 2);
+}
+
+// Thrown frag explosion.
+function grenadeExplode(pos) {
+  particles.burst(pos.x, pos.y, pos.z, [255, 170, 70], 40);
+  particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 18);
+  sfx.explosionAt(pos.x, pos.y, pos.z);
+  addShake(Math.max(0, 0.45 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 20)));
+  explodeDamage(pos, 4.5, 46, 0.5);
+  blastCover(pos, 2);
+}
+function throwGrenade() {
+  if (grenadeCount <= 0 || grenadeCD > 0 || !player.locked) return;
+  grenadeCount--; grenadeCD = 0.5; hud.setGrenades(grenadeCount);
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const vel = _dir.clone().multiplyScalar(17); vel.y += 3.5;
+  grenades.spawn(_eye.clone().addScaledVector(_dir, 0.5), vel, 1.6, grenadeExplode);
+  sfx.place();
+}
+
+// Quick melee: a fast knife strike with whatever you're holding.
+function quickMelee() {
+  if (!player.locked || attackCD > 0) return;
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const enemy = raycastEnemies(_eye, _dir, MELEE_REACH);
+  const mobHit = mobs.raycast(_eye, _dir, MELEE_REACH);
+  if (enemy && (!mobHit || enemy.dist <= mobHit.dist) && !friendly(enemy.id)) {
+    if (enemy.bot) botHurt(enemy.id, 20, myName(), false); else mp.sendHit(enemy.id, 20);
+    const e = _eye.clone().addScaledVector(_dir, enemy.dist);
+    particles.burst(e.x, e.y, e.z, [255, 60, 60], 8); hud.hitMarker(false);
+  } else if (mobHit) {
+    mobHit.mob.hurt(12, player.pos.x, player.pos.z); hud.hitMarker(false);
+  }
+  vmRecoil = Math.min(1, vmRecoil + 0.4); attackCD = 0.45; sfx.gun('handgun');
 }
 
 function plasmaImpact(pos, dmg, hitPlayer) {
@@ -1612,6 +1675,8 @@ function frame() {
   tracers.update(dt);
   plasmas.update(dt, world, mobs, mp, portals, plasmaImpact);
   rockets.update(dt, world, mobs, mp, portals, rocketImpact);
+  grenades.update(dt, world);
+  grenadeCD -= dt;
   portals.update(dt, portalBodies());
   mp.update(dt);
   if (active) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw });
