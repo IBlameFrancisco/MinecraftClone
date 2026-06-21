@@ -65,8 +65,8 @@ export class HUD {
     ctx.beginPath(); ctx.moveTo(R, R - 6); ctx.lineTo(R - 4, R + 4); ctx.lineTo(R + 4, R + 4); ctx.closePath(); ctx.fill();
   }
 
-  setScoreboard(board, teamMode, scoreLimit, myTeam) {
-    this._board = board; this._teamMode = teamMode; this._scoreLimit = scoreLimit; this._myTeam = myTeam;
+  setScoreboard(board, teamMode, scoreLimit, myTeam, teamInfo) {
+    this._board = board; this._teamMode = teamMode; this._scoreLimit = scoreLimit; this._myTeam = myTeam; this._teamInfo = teamInfo || null;
     if (this.sbEl.style.display === 'block') this._renderScoreboard();
   }
   showScoreboard() { this.sbEl.style.display = 'block'; this._renderScoreboard(); }
@@ -77,9 +77,10 @@ export class HUD {
     if (this._teamMode) {
       const red = b.filter((e) => e.team === 0), blue = b.filter((e) => e.team === 1);
       const sum = (a) => a.reduce((s, e) => s + e.kills, 0);
-      html += `<div class="sbtitle">Teams · ${this._scoreLimit} to win</div>`;
-      html += this._teamBlock('Red Team', red, sum(red), '#ff6b6b');
-      html += this._teamBlock('Blue Team', blue, sum(blue), '#6b9cff');
+      const ti = this._teamInfo;
+      html += `<div class="sbtitle">${ti ? ti.title : `Teams · ${this._scoreLimit} to win`}</div>`;
+      html += this._teamBlock(ti ? ti.red : 'Red Team', red, sum(red), ti ? ti.redColor : '#ff6b6b');
+      html += this._teamBlock(ti ? ti.blue : 'Blue Team', blue, sum(blue), ti ? ti.blueColor : '#6b9cff');
     } else {
       const sorted = [...b].sort((a, c) => c.kills - a.kills);
       html += `<div class="sbtitle">Free-for-all · ${this._scoreLimit} kills to win</div>`;
