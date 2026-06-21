@@ -7,13 +7,30 @@ import { SimplexNoise } from './noise.js';
 import { CHUNK_SIZE, CHUNK_HEIGHT, SEA_LEVEL, WORLD_SEED } from './constants.js';
 import {
   AIR, GRASS, DIRT, STONE, SAND, LOG, LEAVES, WATER, SNOW,
-  COAL_ORE, IRON_ORE, BEDROCK, GRAVEL, CACTUS,
+  COAL_ORE, IRON_ORE, BEDROCK, GRAVEL, CACTUS, COBBLE, PLANK, WOOL, GLOWSTONE,
 } from './blocks.js';
 
 export const BIOME_PLAINS = 0;
 export const BIOME_DESERT = 1;
 export const BIOME_SNOW = 2;
 export const BIOME_FOREST = 3;
+
+// ---- Battle arena (a fixed, symmetric PvP map) ----
+// Generated deterministically instead of terrain when `gen.arena` is set, so it
+// streams + tiles like any other world and never needs to sync as block edits.
+export const ARENA = { FLOOR: 50, HALF: 38, WALL_H: 7 };
+
+// Cover pieces defined in folded (|x|,|z|) quadrant coords so each one is
+// mirrored into all four quadrants — fair for free-for-all. y is above the floor.
+const ARENA_COVER = [
+  { x0: 0,  x1: 3,  z0: 0,  z1: 3,  y0: 1, y1: 1, mat: WOOL },                  // raised centre dais
+  { x0: 11, x1: 12, z0: 11, z1: 12, y0: 1, y1: 4, mat: COBBLE, cap: GLOWSTONE },// inner lit pillars
+  { x0: 17, x1: 22, z0: 6,  z1: 7,  y0: 1, y1: 2, mat: PLANK },                 // low cover walls
+  { x0: 6,  x1: 7,  z0: 17, z1: 22, y0: 1, y1: 2, mat: PLANK },
+  { x0: 26, x1: 31, z0: 26, z1: 27, y0: 1, y1: 3, mat: COBBLE },               // corner bunkers (L)
+  { x0: 26, x1: 27, z0: 26, z1: 31, y0: 1, y1: 3, mat: COBBLE },
+  { x0: 20, x1: 21, z0: 20, z1: 21, y0: 1, y1: 5, mat: WOOL, cap: GLOWSTONE },  // tall accent towers
+];
 
 function hash2(x, z) {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263);
@@ -31,6 +48,7 @@ export class WorldGen {
     this.cave = new SimplexNoise(seed + 23);
     this.ore = new SimplexNoise(seed + 31);
     this._hCache = new Map();
+    this.arena = false;          // when true, generate() builds the PvP arena
   }
 
   climate(wx, wz) {
@@ -50,6 +68,12 @@ export class WorldGen {
 
   // Terrain surface height (top solid y), cached per column.
   heightAt(wx, wz) {
+    if (this.arena) {
+      const m = Math.max(Math.abs(wx), Math.abs(wz));
+      if (m > ARENA.HALF) return 0;
+      if (m >= ARENA.HALF - 1) return ARENA.FLOOR + ARENA.WALL_H;
+      return ARENA.FLOOR + 2;
+    }
     const key = wx + ',' + wz;
     const cached = this._hCache.get(key);
     if (cached !== undefined) return cached;
@@ -84,6 +108,7 @@ export class WorldGen {
 
   // Fill one chunk: terrain, caves, ores, water, then decorations (trees/cacti).
   generate(chunk) {
+    if (this.arena) return this.generateArena(chunk);
     const ox = chunk.cx * CHUNK_SIZE;
     const oz = chunk.cz * CHUNK_SIZE;
 
@@ -191,5 +216,41 @@ export class WorldGen {
     const wx = chunk.cx * CHUNK_SIZE + lx, wz = chunk.cz * CHUNK_SIZE + lz;
     const h = 2 + Math.floor(hash2(wx - 1, wz + 4) * 3);
     for (let y = 1; y <= h; y++) chunk.setLocal(lx, surfaceY + y, lz, CACTUS);
+  }
+
+  // The PvP arena: a bounded, four-fold-symmetric map — checkered floor, a lit
+  // perimeter wall, a raised central beacon, pillars and cover. Outside the
+  // bounds is void, so the wall keeps everyone in the fight.
+  generateArena(chunk) {
+    const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
+    const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const wx = ox + lx, wz = oz + lz;
+        const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az);
+        if (m > HALF) continue;                         // void beyond the arena
+        chunk.setLocal(lx, F - 2, lz, BEDROCK);
+        chunk.setLocal(lx, F - 1, lz, STONE);
+        chunk.setLocal(lx, F, lz, (((wx >> 2) + (wz >> 2)) & 1) ? STONE : COBBLE); // checkered floor
+
+        if (m >= HALF - 1) {                            // perimeter wall
+          for (let y = 1; y <= WH; y++) chunk.setLocal(lx, F + y, lz, COBBLE);
+          if (((ax + az) & 3) === 0) chunk.setLocal(lx, F + WH, lz, GLOWSTONE); // top lights
+          continue;
+        }
+        for (const c of ARENA_COVER) {                  // mirrored cover
+          if (ax >= c.x0 && ax <= c.x1 && az >= c.z0 && az <= c.z1) {
+            for (let y = c.y0; y <= c.y1; y++) chunk.setLocal(lx, F + y, lz, c.mat);
+            if (c.cap) chunk.setLocal(lx, F + c.y1, lz, c.cap);
+          }
+        }
+        if (ax === 0 && az === 0) {                     // central glowing beacon
+          chunk.setLocal(lx, F + 1, lz, GLOWSTONE);
+          chunk.setLocal(lx, F + 2, lz, GLOWSTONE);
+        }
+      }
+    }
+    chunk.recomputeHeightMap();
+    chunk.generated = true;
   }
 }

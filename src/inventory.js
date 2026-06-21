@@ -99,6 +99,14 @@ export class Inventory {
     this.select(this.selected);
   }
 
+  // Replace the (creative-set) hotbar with a fixed loadout — used for Battle mode.
+  setLoadout(ids) {
+    this.cHotbar = ids.map((id) => ({ id, count: 1 }));
+    this.renderHotbar();
+    if (this.open) this.renderScreen();
+    this.select(0);
+  }
+
   // ---------- hotbar DOM ----------
   _buildHotbar() {
     this.hotbarEl = document.getElementById('hotbar');

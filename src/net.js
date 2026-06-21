@@ -5,8 +5,13 @@
 
 import { Peer } from 'peerjs';
 import * as THREE from 'three';
+import { rayAABB } from './physics.js';
 
 const PREFIX = 'guncraft-';
+
+// Remote-avatar hitbox (relative to the avatar group origin, which sits at the
+// player's feet). Used for PvP ray/AoE tests.
+const AV_HALF = 0.42, AV_TOP = 2.05, AV_MID = 1.05;
 
 function nameSprite(name) {
   const c = document.createElement('canvas');
@@ -114,6 +119,8 @@ export class Multiplayer {
       case 'edit': this.handlers.onEdit(d.x, d.y, d.z, d.id); if (this.isHost) this._relay(conn.peer, d); break;
       case 'edits': for (const e of d.list) this.handlers.onEdit(e[0], e[1], e[2], e[3]); if (this.isHost) this._relay(conn.peer, d); break;
       case 'chat': this.handlers.onChat?.(d.name, d.text); if (this.isHost) this._relay(conn.peer, d); break;
+      case 'hit': if (d.target === this.myId) this.handlers.onHit?.(d.dmg, d.fromName); if (this.isHost) this._relay(conn.peer, d); break;
+      case 'death': this.handlers.onKillFeed?.(d.name, d.by); if (this.isHost) this._relay(conn.peer, d); break;
       case 'leave': this._roster(d.id, null); this._removeRemote(d.id); if (this.isHost) this._relay(conn.peer, d); break;
     }
   }
@@ -142,6 +149,38 @@ export class Multiplayer {
   }
   sendEdit(x, y, z, id) { if (this.online) this.broadcast({ t: 'edit', x, y, z, id }); }
   sendEdits(list) { if (this.online && list.length) this.broadcast({ t: 'edits', list }); }
+
+  // PvP: tell a peer it took damage (each client owns its own health). Routed via
+  // the host relay, so it works whether shooter and target are host or guests.
+  sendHit(target, dmg) {
+    if (this.online && dmg > 0) this.broadcast({ t: 'hit', target, dmg, from: this.myId, fromName: this.name });
+  }
+  sendDeath(by) { if (this.online) this.broadcast({ t: 'death', name: this.name, by: by || null }); }
+
+  // Nearest remote player hit by a ray → { id, name, dist }, or null.
+  raycast(origin, dir, maxDist) {
+    let best = null, bestT = maxDist;
+    for (const [id, r] of this.remotes) {
+      const g = r.group;
+      const t = rayAABB(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z,
+        g.position.x - AV_HALF, g.position.y, g.position.z - AV_HALF,
+        g.position.x + AV_HALF, g.position.y + AV_TOP, g.position.z + AV_HALF);
+      if (t < bestT) { bestT = t; best = id; }
+    }
+    return best ? { id: best, name: this.roster.get(best) || 'Player', dist: bestT } : null;
+  }
+
+  // Remote players within `radius` of a world point (for splash damage) →
+  // [{ id, dist }]. Torso-centred.
+  playersNear(point, radius) {
+    const out = [];
+    for (const [id, r] of this.remotes) {
+      const g = r.group;
+      const d = Math.hypot(g.position.x - point.x, g.position.y + AV_MID - point.y, g.position.z - point.z);
+      if (d < radius) out.push({ id, dist: d });
+    }
+    return out;
+  }
 
   _updateRemote(id, d) {
     if (!id || id === this.myId) return;

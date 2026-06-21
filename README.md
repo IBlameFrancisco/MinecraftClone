@@ -13,8 +13,9 @@ works regardless of the repository name.
 ## Highlights
 
 - **Cinematic rendering:** ACES tone-mapping, bloom, vignette/grade, FXAA, drifting clouds, shader water.
-- **Guns:** handgun + sniper (hitscan, sniper zooms), plasma gun (AoE bolts), portal gun (two portals, teleport). First-person viewmodels.
-- **Co-op (P2P / WebRTC):** host a room, share the code; world seed + block edits + player avatars sync. No server needed.
+- **Guns:** handgun + sniper (hitscan; the sniper has a real scope overlay), plasma gun (glowing AoE bolts), portal gun (two portals, teleport). Bright bloom-lit tracers, muzzle flash and recoil, first-person viewmodels.
+- **Battle mode (PvP):** a fixed, symmetric **arena** — checkered floor, lit perimeter wall, central beacon, pillars + cover. Spawn with the full gun loadout, fight other players, respawn on death, and watch the **kill feed**.
+- **Co-op (P2P / WebRTC):** host a room, share the code; world seed + block edits + player avatars sync — and players can damage each other. No server needed.
 - **Seeds:** enter a seed (or 🎲) and generate a fresh world; `?seed=` URL param.
 - **Survival/Creative + difficulties** (Peaceful→Hardcore), tools, crafting (2×2 + crafting table), chests, mobs (pig/cow/sheep, zombie/skeleton/creeper), surface-aware footsteps, and a dynamic loading screen.
 
@@ -48,8 +49,12 @@ bundle in `dist/`.
 
 ## Gameplay
 
-- **Modes:** Survival (health + hunger, timed mining, drops, death/respawn) and
-  Creative (fly, instant break, infinite block palette). Toggle with `G`.
+- **Modes:** Survival (health + hunger, timed mining, drops, death/respawn),
+  Creative (fly, instant break, infinite block palette), and **Battle** — pick
+  one on the start menu. Toggle Survival↔Creative in-world with `G`.
+- **Battle arena:** choose ⚔ Battle on the menu to load the PvP arena. You spawn
+  with all four guns; damage other players (co-op), respawn at a spawn point on
+  death, and the kill feed tracks frags. Right-click the sniper to scope in.
 - **Difficulty** (`B`): Peaceful · Easy · Normal · Hard · Hardcore (permanent death).
 - **Mobs:** passive pig/cow/sheep and hostile zombie / skeleton (shoots arrows) /
   creeper (explodes). Mobs drop loot; leaves drop apples; all blocks drop on break.
@@ -132,17 +137,6 @@ src/
   audio.js      synthesized SFX
   ui.js         hotbar, selection, clock
   constants.js  shared tuning
-```
-
-## Dev verification
-
-`verify.mjs` is a Playwright smoke test that loads the running dev server,
-asserts zero console errors, reports draw calls / chunk counts, and saves a
-screenshot:
-
-```bash
-npm run dev &           # in one shell
-node verify.mjs http://localhost:5173/ shot.png
 ```
 
 ## Skipped / partial stretch goals
