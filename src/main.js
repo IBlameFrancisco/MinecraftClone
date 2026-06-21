@@ -703,7 +703,8 @@ let warSide = 'allied';          // the local player's faction
 let warTickets = 0;              // Allied reinforcements left (respawns)
 let warTimer = 0;                // countdown — Axis win if it runs out
 let warCapture = 0;             // Allied capture progress on the objective (0..100)
-const WAR_TIME = 270, WAR_TICKETS = 28;
+let warFinalAnnounced = false;   // announced "reinforcements exhausted" yet
+const WAR_TIME = 180, WAR_TICKETS = 18;
 const GUNGAME_LADDER = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, PLASMA_GUN, SNIPER, RAILGUN, ROCKET_LAUNCHER];
 const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
 const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
@@ -816,8 +817,10 @@ function setupWar(humans) {
   warSide = battleCfg.side === 'axis' ? 'axis' : 'allied';
   myTeam = warSide === 'axis' ? WAR_AXIS : WAR_ALLIED;
   for (const id of humans) teamAssign.set(id, myTeam);
-  warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0;
+  warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
   inventory.setLoadout(WAR_LOADOUT);
+  if (warSide === 'allied') hud.announce('Storm the beach — take the bunker!', '#9ad36b');
+  else hud.announce('Hold the line — repel the assault!', '#ff9a6b');
   if (!isAuthority()) return;
 
   const hN = humans.length;
@@ -946,6 +949,11 @@ function warTick(dt) {
   if (allied > 0 && axis === 0) warCapture = Math.min(100, warCapture + dt * (100 / 14));      // ~14s uncontested to take it
   else if (axis > 0 && allied === 0) warCapture = Math.max(0, warCapture - dt * (100 / 22));   // Axis retake it slower
   if (matchWinner) return;
+  // Tell the players the assault is on its last legs (so killing the rest = a win).
+  if (warTickets <= 0 && !warFinalAnnounced) {
+    warFinalAnnounced = true;
+    hud.announce(myTeam === WAR_AXIS ? 'Allied reinforcements spent — repel the last men!' : 'No reinforcements left — this is your last push!', '#ffd86b');
+  }
   if (warCapture >= 100) { endMatch('Allied — beachhead secured'); return; }
   if (warTimer <= 0) { endMatch('Axis — the line held'); return; }
   const alliedAlive = (myTeam === WAR_ALLIED && !eliminated && health > 0 ? 1 : 0) + botMgr.bots.filter((b) => b.alive && b.team === WAR_ALLIED).length;
@@ -959,7 +967,12 @@ function rebuildBoard() {
     board.push({ id, name, team: teamAssign.get(id) ?? TEAM_NONE, kills: s.k, deaths: s.d, bot: false });
   }
   for (const bt of botMgr.bots) board.push({ id: bt.id, name: bt.name, team: bt.team, kills: bt.kills, deaths: bt.deaths, bot: true });
-  hud.setScoreboard(board, teamMode, scoreLimit, myTeam);
+  hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo());
+}
+function warTeamInfo() {
+  if (gameMode !== 'war') return undefined;
+  return { red: '🪖 Allied', blue: '🛡 Axis', redColor: '#9ad36b', blueColor: '#cfcfb0',
+    title: `D-Day · Beachhead ${Math.floor(warCapture)}% · ${Math.max(0, Math.ceil(warTimer))}s left` };
 }
 function broadcastBoard() { if (mp.isHost) mp.broadcast({ t: 'board', board, team: teamMode, scoreLimit }); }
 
@@ -1009,6 +1022,9 @@ function resetMatch() {
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   matchWinner = null; hud.hideRoundOver(); hud.hideScoreboard();
+  if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
+    warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
+  }
   if (gameMode === 'wave') { if (isAuthority()) startWave(1); }
   else { for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); } }
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
@@ -1037,7 +1053,11 @@ function onBotKilled(b) {
 function respawnBot(b) {
   b.alive = true; b.deathProcessed = false; b.health = 20;
   const sp = teamSpawnPoint(b.team); b.pos.set(sp.x, sp.y, sp.z); b.vel.set(0, 0, 0);
-  b._chooseGun(); b.mesh.visible = true;
+  if (sp.yaw !== undefined) b.yaw = sp.yaw;
+  // War: keep the bot's faction weapon (defenders stay on the MG) instead of re-rolling.
+  if (gameMode === 'war' && (b.defend || b.advance) && b.gunId !== undefined) { b.gun = gunOf(b.gunId); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0; }
+  else b._chooseGun();
+  b.mesh.visible = true;
 }
 function manageBots(dt) {
   const respawns = gameMode !== 'br' && gameMode !== 'wave';   // BR eliminates; waves replace
@@ -1958,4 +1978,6 @@ window.__game = {
   get loaded() { return loaded; },
   get arena() { return arena; },
   get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead, arena }; },
+  get battleState() { return { gameMode, matchWinner, myTeam, warSide, warTickets, warTimer, warCapture, matchOverTimer }; },
+  __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
 };
