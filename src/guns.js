@@ -87,7 +87,7 @@ export class Plasmas {
     s.scale.setScalar(0.5); s.position.copy(pos);
     this.group.add(s); this.trail.push({ s, life: 0.25, max: 0.25 });
   }
-  update(dt, world, mobs, mp, portals, onImpact) {
+  update(dt, world, mobs, bots, mp, portals, onImpact) {
     for (let i = this.trail.length - 1; i >= 0; i--) {
       const tr = this.trail[i]; tr.life -= dt;
       if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
@@ -107,6 +107,12 @@ export class Plasmas {
       if (!hit) {
         for (const mob of mobs.list) {
           if (Math.hypot(mob.pos.x - p.pos.x, mob.pos.y + mob.height * 0.5 - p.pos.y, mob.pos.z - p.pos.z) < 0.9) { hit = true; break; }
+        }
+      }
+      if (!hit && bots) {                          // arena bots
+        for (const b of bots) {
+          if (!b.alive) continue;
+          if (Math.hypot(b.pos.x - p.pos.x, b.pos.y + 1 - p.pos.y, b.pos.z - p.pos.z) < 0.9) { hit = true; break; }
         }
       }
       if (!hit && mp && mp.online) {
@@ -148,7 +154,7 @@ export class Rockets {
     s.scale.setScalar(0.4); s.position.copy(pos);
     this.group.add(s); this.trail.push({ s, life: 0.3, max: 0.3 });
   }
-  update(dt, world, mobs, mp, portals, onImpact) {
+  update(dt, world, mobs, bots, mp, portals, onImpact) {
     for (let i = this.trail.length - 1; i >= 0; i--) {
       const tr = this.trail[i]; tr.life -= dt;
       if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
@@ -165,6 +171,12 @@ export class Rockets {
       if (!hit) {
         for (const mob of mobs.list) {
           if (Math.hypot(mob.pos.x - p.pos.x, mob.pos.y + mob.height * 0.5 - p.pos.y, mob.pos.z - p.pos.z) < 0.9) { hit = true; break; }
+        }
+      }
+      if (!hit && bots) {                          // arena bots — detonate on contact
+        for (const b of bots) {
+          if (!b.alive) continue;
+          if (Math.hypot(b.pos.x - p.pos.x, b.pos.y + 1 - p.pos.y, b.pos.z - p.pos.z) < 0.95) { hit = true; break; }
         }
       }
       if (!hit && mp && mp.online) {

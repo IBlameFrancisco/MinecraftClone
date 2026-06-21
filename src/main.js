@@ -775,12 +775,14 @@ function kothAward() {
     let red = 0, blue = 0, repRed = null, repBlue = null;
     if (!eliminated && health > 0 && inHill(player.pos.x, player.pos.z)) { myTeam === TEAM_RED ? (red++, repRed = selfId()) : (blue++, repBlue = selfId()); }
     for (const b of botMgr.bots) if (b.alive && inHill(b.pos.x, b.pos.z)) { if (b.team === TEAM_RED) { red++; repRed = repRed || b.id; } else { blue++; repBlue = repBlue || b.id; } }
+    if (mp.online) for (const [id, r] of mp.remotes) if (r.group.visible && inHill(r.group.position.x, r.group.position.z)) { if (teamOf(id) === TEAM_RED) { red++; repRed = repRed || id; } else { blue++; repBlue = repBlue || id; } }
     if (red > 0 && blue === 0) awardScore(repRed);
     else if (blue > 0 && red === 0) awardScore(repBlue);
   } else {
     let occ = null, count = 0;
     if (!eliminated && health > 0 && inHill(player.pos.x, player.pos.z)) { count++; occ = selfId(); }
     for (const b of botMgr.bots) if (b.alive && inHill(b.pos.x, b.pos.z)) { count++; occ = b.id; }
+    if (mp.online) for (const [id, r] of mp.remotes) if (r.group.visible && inHill(r.group.position.x, r.group.position.z)) { count++; occ = id; }
     if (count === 1) awardScore(occ);
   }
 }
@@ -793,6 +795,7 @@ function brTick(dt) {
     const out = (x, z) => (x * x + z * z) > zoneRadius * zoneRadius;
     if (!eliminated && health > 0 && out(player.pos.x, player.pos.z)) damagePlayer(6);
     for (const b of botMgr.bots) if (b.alive && out(b.pos.x, b.pos.z)) b.hurt(8);
+    if (mp.online) for (const [id, r] of mp.remotes) if (r.group.visible && out(r.group.position.x, r.group.position.z)) mp.sendHit(id, 6);
   }
   const aliveBots = botMgr.bots.filter((b) => b.alive).length;
   const meAlive = (!eliminated && health > 0) ? 1 : 0;
@@ -1502,9 +1505,17 @@ function quickMelee() {
 
 function plasmaImpact(pos, dmg, hitPlayer) {
   particles.burst(pos.x, pos.y, pos.z, [140, 255, 235], 26);
+  let struck = false;
   for (const m of mobs.list) {
-    if (Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z) < 2.3) m.hurt(dmg, pos.x, pos.z);
+    if (Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z) < 2.3) { m.hurt(dmg, pos.x, pos.z); struck = true; }
   }
+  // Arena bots: a direct hit (the bolt detonates on them) plus light splash falloff.
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    const d = Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z);
+    if (d < 2.3) { botHurt(b.id, Math.max(1, Math.round(dmg * (1 - 0.45 * d / 2.3))), myName(), false); struck = true; }
+  }
+  if (struck) hud.hitMarker(false);
   if (mp.online) {
     if (hitPlayer) { mp.sendHit(hitPlayer, dmg); hud.hitMarker(); }
     for (const { id } of mp.playersNear(pos, 2.6)) {       // splash damage
@@ -1704,8 +1715,9 @@ function frame() {
   // Guns / projectiles / portals / co-op
   muzzle.update(dt);
   tracers.update(dt);
-  plasmas.update(sdt, world, mobs, mp, portals, plasmaImpact);
-  rockets.update(sdt, world, mobs, mp, portals, rocketImpact);
+  const enemyBots = isAuthority() ? botMgr.bots : null;   // bolts/rockets collide with arena bots
+  plasmas.update(sdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
+  rockets.update(sdt, world, mobs, enemyBots, mp, portals, rocketImpact);
   grenades.update(sdt, world);
   grenadeCD -= dt;
   portals.update(dt, portalBodies());
@@ -1740,7 +1752,7 @@ window.__game = {
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },
-  damagePlayer, hud, myName,
+  damagePlayer, hud, myName, plasmaImpact, rocketImpact, explodeDamage,
   get loaded() { return loaded; },
   get arena() { return arena; },
   get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead, arena }; },
