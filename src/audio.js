@@ -11,9 +11,12 @@ export class SFX {
   }
 
   ensure() {
-    if (this.ctx) return;
+    // Browsers create/leave the context suspended until a user gesture, and may
+    // auto-suspend it when backgrounded — always try to resume so SFX aren't muted.
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
+    if (this.ctx.state === 'suspended') this.ctx.resume();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(this.ctx.destination);

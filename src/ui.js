@@ -276,7 +276,7 @@ export class HUD {
       const v = cur - i * 2;     // 2 full, 1 half, <=0 empty
       this._icon(ctx, x, y, '#3a0d10', type);                       // empty background
       if (v >= 2) this._icon(ctx, x, y, type === 'heart' ? '#ff2d3a' : '#e9a23b', type);
-      else if (v === 1) { ctx.save(); ctx.beginPath(); ctx.rect(x - 8, 0, 8, 18); ctx.clip();
+      else if (v >= 1) { ctx.save(); ctx.beginPath(); ctx.rect(x - 8, 0, 8, 18); ctx.clip();
         this._icon(ctx, x, y, type === 'heart' ? '#ff2d3a' : '#e9a23b', type); ctx.restore(); }
     }
   }

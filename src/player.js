@@ -79,6 +79,8 @@ export class Player {
     document.addEventListener('keyup', (e) => this.keys.delete(e.code));
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== this.dom) return;
+      const ae = document.activeElement;   // don't swing the view while typing in chat
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
       const s = this.sens;
       this.yaw -= e.movementX * s;
       this.pitch -= e.movementY * s;

@@ -215,7 +215,6 @@ export class BotManager {
 
       // Fire when roughly on-target, in LoS, off cooldown, has ammo and reaction met.
       const aimErrAngle = Math.abs(angleDiff(b.yaw, wantYaw));
-      if (b.reactTimer <= -0) { /* reaction handled below */ }
       if (hasLoS && b.reloadTimer <= 0 && b.fireCD <= 0 && aimErrAngle < 0.16 && dist < b.gun.range) {
         if (b.reactTimer <= 0) {
           ctx.fire(b, this._aimDir(b, aimX, aimY, aimZ));
@@ -227,7 +226,9 @@ export class BotManager {
         b.reactTimer = b.D.react;          // reset reaction when target breaks
       }
     } else {
-      // No target: drift toward arena centre / wander.
+      // No target: drift toward arena centre / wander. Keep the reaction delay primed so
+      // the next time we spot an enemy we don't fire on the very first frame (difficulty react).
+      b.reactTimer = b.D.react;
       if (b.strafeTimer <= 0) { b.strafeTimer = 1.5 + Math.random() * 2; const a = Math.random() * TWO_PI; b.wx = Math.cos(a); b.wz = Math.sin(a); }
       desiredX = (b.wx || 0) - b.pos.x * 0.002; desiredZ = (b.wz || 0) - b.pos.z * 0.002;
       speed = b.D.speed * 0.5;
