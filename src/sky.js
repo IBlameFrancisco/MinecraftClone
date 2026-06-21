@@ -197,7 +197,8 @@ export class Sky {
     this._flickT += dt;
     // mostly steady, with a slow breathe + occasional sharp dips (a guttering flame)
     const breathe = 0.92 + 0.08 * Math.sin(this._flickT * 2.7);
-    const dip = (Math.random() < 0.035) ? 0.55 + Math.random() * 0.25 : 1.0;
+    // Rate-based (≈2 dips/sec) so the guttering looks the same at any frame rate.
+    const dip = (Math.random() < 1 - Math.exp(-2.0 * dt)) ? 0.55 + Math.random() * 0.25 : 1.0;
     this._flick += (breathe * dip - this._flick) * Math.min(1, 11 * dt);
     const f = this._flick;
 

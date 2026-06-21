@@ -539,7 +539,13 @@ const mpHandlers = {
   onStatus: setMpStatus,
   onChat: (name, text) => hud.addChat(name, text, false),
   onSystem: (msg) => { hud.addChat(null, msg, true); hud.setPlayers(mp.playerList()); },
-  onRoster: () => { hud.setPlayers(mp.playerList()); if (mode === BATTLE && isAuthority()) { rebuildBoard(); broadcastBoard(); } },
+  onRoster: () => {
+    // Drop score/team state for remote players who have disconnected (else their kills keep
+    // counting toward the team win). Keep our own entry (selfId is never in the roster).
+    for (const id of [...humanScore.keys()]) if (!mp.roster.has(id)) humanScore.delete(id);
+    for (const id of [...teamAssign.keys()]) if (id !== selfId() && !mp.roster.has(id)) teamAssign.delete(id);
+    hud.setPlayers(mp.playerList()); if (mode === BATTLE && isAuthority()) { rebuildBoard(); broadcastBoard(); }
+  },
   // PvP: someone hit me — apply the damage locally and remember who, for the kill feed.
   onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg); },
   onKillFeed: (victim, killer) => { hud.addKill(victim, killer); if (killer === myName()) announceKill(false); },
@@ -950,7 +956,7 @@ function applyPickup(kind) {
 
 // Build the combatant target list bots reason about (players + bots).
 function buildTargets() {
-  const list = [{ id: selfId(), team: myTeam, pos: player.pos, vel: player.vel, alive: health > 0 }];
+  const list = [{ id: selfId(), team: myTeam, pos: player.pos, vel: player.vel, alive: !eliminated && health > 0 }];
   if (mp.online) for (const [id, r] of mp.remotes) { if (botMgr.get(id)) continue; list.push({ id, team: teamOf(id), pos: r.group.position, alive: true }); }
   for (const b of botMgr.bots) list.push({ id: b.id, team: b.team, pos: b.pos, vel: b.vel, alive: b.alive });
   return list;
@@ -1048,16 +1054,16 @@ window.addEventListener('keydown', (e) => {
   if (isTyping()) return; // don't trigger game keys while typing in chat/menu
   if (e.code === 'KeyE') {
     if (dead) return;
-    if (inventory.open) closeInventory(); else openInventory(2);
+    if (inventory.open) closeInventory(); else if (player.locked) openInventory(2);  // not from pause/menu
   } else if (e.code === 'Escape' && inventory.open) {
     inventory.close(); refreshOverlays();
   } else if (e.code === 'KeyG') {
-    if (mode === BATTLE) throwGrenade();              // grenade in battle
-    else if (!dead && !inventory.open) toggleMode();  // creative/survival toggle otherwise
+    if (mode === BATTLE) throwGrenade();                            // grenade in battle (self-guards on lock)
+    else if (!dead && !inventory.open && player.locked) toggleMode();  // creative/survival toggle otherwise
   } else if (e.code === 'KeyV') {
-    if (!dead && !inventory.open) quickMelee();
+    if (!dead && !inventory.open) quickMelee();                     // self-guards on lock
   } else if (e.code === 'KeyB') {
-    if (!dead && !inventory.open && mode !== BATTLE) applyDifficulty();
+    if (!dead && !inventory.open && mode !== BATTLE && player.locked) applyDifficulty();
   } else if (e.code === 'KeyR') {
     const g2 = gunOf(inventory.selectedId());
     if (g2 && g2.mag && player.locked && !dead) startReload(g2, inventory.selectedId());
@@ -1517,9 +1523,9 @@ function plasmaImpact(pos, dmg, hitPlayer) {
   }
   if (struck) hud.hitMarker(false);
   if (mp.online) {
-    if (hitPlayer) { mp.sendHit(hitPlayer, dmg); hud.hitMarker(); }
-    for (const { id } of mp.playersNear(pos, 2.6)) {       // splash damage
-      if (id === hitPlayer) continue;
+    if (hitPlayer && !friendly(hitPlayer)) { mp.sendHit(hitPlayer, dmg); hud.hitMarker(); }
+    for (const { id } of mp.playersNear(pos, 2.6)) {       // splash damage (skip teammates)
+      if (id === hitPlayer || friendly(id)) continue;
       mp.sendHit(id, Math.round(dmg * 0.6)); hud.hitMarker();
     }
   }

@@ -5,10 +5,9 @@
 
 import { HOTBAR, PLACEABLE, BLOCKS, AIR } from './blocks.js';
 import { drawBlockIcon } from './textures.js';
-import { isItem, isBlockId, itemName, drawItemIcon, GUNS } from './items.js';
+import { isItem, isBlockId, itemName, drawItemIcon, GUNS, maxStack } from './items.js';
 import { matchRecipe } from './crafting.js';
 
-const STACK = 64;
 const ICON = 40;
 
 function iconCanvas(id) {
@@ -75,10 +74,10 @@ export class Inventory {
     const set = (i, v) => { if (i < 9) this.sHotbar[i] = v; else this.sMain[i - 9] = v; };
     for (let i = 0; i < 36 && count > 0; i++) {
       const s = ref(i);
-      if (s && s.id === id && s.count < STACK) { const a = Math.min(STACK - s.count, count); s.count += a; count -= a; }
+      if (s && s.id === id && s.count < maxStack(id)) { const a = Math.min(maxStack(id) - s.count, count); s.count += a; count -= a; }
     }
     for (let i = 0; i < 36 && count > 0; i++) {
-      if (!ref(i)) { const a = Math.min(STACK, count); set(i, { id, count: a }); count -= a; }
+      if (!ref(i)) { const a = Math.min(maxStack(id), count); set(i, { id, count: a }); count -= a; }
     }
     this.renderHotbar();
     if (this.open) this.renderScreen();
@@ -249,7 +248,7 @@ export class Inventory {
       const here = arr[index];
       if (this.cursor) {
         if (!here) { arr[index] = this.cursor; this.cursor = null; }
-        else if (here.id === this.cursor.id) { const a = Math.min(STACK - here.count, this.cursor.count); here.count += a; this.cursor.count -= a; if (this.cursor.count <= 0) this.cursor = null; }
+        else if (here.id === this.cursor.id) { const a = Math.min(maxStack(here.id) - here.count, this.cursor.count); here.count += a; this.cursor.count -= a; if (this.cursor.count <= 0) this.cursor = null; }
         else { arr[index] = this.cursor; this.cursor = here; }
       } else if (here) { this.cursor = here; arr[index] = null; }
       this.renderHotbar(); this.renderScreen(); this.select(this.selected); this._paintCursor();
@@ -269,7 +268,7 @@ export class Inventory {
     const here = get();
     if (this.cursor) {
       if (!here) { put(this.cursor); this.cursor = null; }
-      else if (here.id === this.cursor.id) { const a = Math.min(STACK - here.count, this.cursor.count); here.count += a; this.cursor.count -= a; if (this.cursor.count <= 0) this.cursor = null; }
+      else if (here.id === this.cursor.id) { const a = Math.min(maxStack(here.id) - here.count, this.cursor.count); here.count += a; this.cursor.count -= a; if (this.cursor.count <= 0) this.cursor = null; }
       else { put(this.cursor); this.cursor = here; }
     } else if (here) { this.cursor = here; put(null); }
 
@@ -293,7 +292,7 @@ export class Inventory {
     const here = get();
     if (this.cursor) {
       if (!here) { set({ id: this.cursor.id, count: 1 }); this.cursor.count--; }
-      else if (here.id === this.cursor.id && here.count < STACK) { here.count++; this.cursor.count--; }
+      else if (here.id === this.cursor.id && here.count < maxStack(here.id)) { here.count++; this.cursor.count--; }
       if (this.cursor && this.cursor.count <= 0) this.cursor = null;
     } else if (here) {
       const half = Math.ceil(here.count / 2);
@@ -309,7 +308,7 @@ export class Inventory {
     const res = this._result;
     // If holding a cursor stack, it must match and have room.
     if (this.cursor) {
-      if (this.cursor.id !== res.id || this.cursor.count + res.count > STACK) return;
+      if (this.cursor.id !== res.id || this.cursor.count + res.count > maxStack(res.id)) return;
       this.cursor.count += res.count;
     } else {
       this.cursor = { id: res.id, count: res.count };

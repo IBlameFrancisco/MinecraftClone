@@ -160,7 +160,7 @@ class Mob {
         else if (distP > 11) { desiredX = toPx; desiredZ = toPz; }
         speed = this.speed;
         this.shootCD -= dt;
-        if (this.shootCD <= 0 && distP < 16) { this._shoot(ctx); this.shootCD = 1.6 + Math.random() * 0.8; }
+        if (this.shootCD <= 0 && distP < 16 && this._canSee(world, ctx.player)) { this._shoot(ctx); this.shootCD = 1.6 + Math.random() * 0.8; }
       } else if (this.def.bomb) {
         desiredX = toPx; desiredZ = toPz; speed = this.speed * 0.95;
         if (distP < 2.4) { this.fuse += dt; if (this.fuse >= 1.4) { ctx.explode(this.pos.x, this.pos.y + 0.6, this.pos.z); this.dead = true; } }
@@ -230,6 +230,18 @@ class Mob {
     this.mesh.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(er, eg, eb); });
   }
 
+  // Coarse line-of-sight to the player so a skeleton doesn't shoot through walls.
+  _canSee(world, player) {
+    const ex = this.pos.x, ey = this.pos.y + this.height * 0.8, ez = this.pos.z;
+    const p = player.pos;
+    let dx = p.x - ex, dy = (p.y + 1.4) - ey, dz = p.z - ez;
+    const dist = Math.hypot(dx, dy, dz); if (dist < 0.001) return true;
+    dx /= dist; dy /= dist; dz /= dist;
+    for (let t = 0.5; t < dist - 0.5; t += 0.5) {
+      if (isSolid(world.getBlock(Math.floor(ex + dx * t), Math.floor(ey + dy * t), Math.floor(ez + dz * t)))) return false;
+    }
+    return true;
+  }
   _shoot(ctx) {
     const ex = this.pos.x, ey = this.pos.y + this.height * 0.8, ez = this.pos.z;
     const p = ctx.player.pos;
