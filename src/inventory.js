@@ -35,6 +35,7 @@ export class Inventory {
     this.cursor = null;          // {id,count} held by mouse
     this.craft = new Array(9).fill(null);
     this.craftSize = 2;
+    this.chestSlots = null;      // when a chest is open, its 27-slot array
 
     this._injectStyles();
     this._buildHotbar();
@@ -132,6 +133,7 @@ export class Inventory {
     wrap.className = 'hidden';
     wrap.innerHTML = `<div class="panel">
       <h2></h2>
+      <div class="chestgrid"></div><div class="hr chesthr"></div>
       <div class="craftarea"><div class="craftgrid"></div><div class="arrow">➜</div><div class="resultwrap"></div></div>
       <div class="hr crafthr"></div>
       <div class="grid"></div>
@@ -145,6 +147,8 @@ export class Inventory {
     this.resultWrapEl = wrap.querySelector('.resultwrap');
     this.craftAreaEl = wrap.querySelector('.craftarea');
     this.craftHrEl = wrap.querySelector('.crafthr');
+    this.chestGridEl = wrap.querySelector('.chestgrid');
+    this.chestHrEl = wrap.querySelector('.chesthr');
 
     this.cursorEl = document.createElement('div');
     this.cursorEl.id = 'invcursor';
@@ -170,21 +174,30 @@ export class Inventory {
   }
 
   renderScreen() {
-    const showCraft = !this.creative;
+    const chest = !!this.chestSlots;
+    const showCraft = !this.creative && !chest;
     this.craftAreaEl.style.display = showCraft ? 'flex' : 'none';
     this.craftHrEl.style.display = showCraft ? 'block' : 'none';
-    this.titleEl.textContent = this.creative ? 'Creative — pick a block'
+    this.chestGridEl.style.display = chest ? 'grid' : 'none';
+    this.chestHrEl.style.display = chest ? 'block' : 'none';
+    this.titleEl.textContent = chest ? 'Chest'
+      : this.creative ? 'Creative — pick a block'
       : this.craftSize === 3 ? 'Crafting Table' : 'Inventory';
 
     this.gridEl.innerHTML = '';
     this.hbRowEl.innerHTML = '';
-    if (this.creative) {
+    if (chest) {
+      this.chestGridEl.innerHTML = '';
+      this.chestSlots.forEach((s, i) => this.chestGridEl.appendChild(this._makeSlot('chest', i, s)));
+      this.sMain.forEach((s, i) => this.gridEl.appendChild(this._makeSlot('main', i, s)));
+    } else if (this.creative) {
       PLACEABLE.forEach((id) => this.gridEl.appendChild(this._makeSlot('palette', id, { id, count: 1 })));
     } else {
       this.main.forEach((s, i) => this.gridEl.appendChild(this._makeSlot('main', i, s)));
       this._renderCraft();
     }
-    this.hotbar.forEach((s, i) => {
+    const hb = chest ? this.sHotbar : this.hotbar;
+    hb.forEach((s, i) => {
       const el = this._makeSlot('hotbar', i, s);
       if (i === this.selected) el.classList.add('active');
       this.hbRowEl.appendChild(el);
@@ -205,6 +218,19 @@ export class Inventory {
   _clickSlot(el) {
     const type = el.dataset.type;
     const index = parseInt(el.dataset.index, 10);
+
+    // Chest open: pick/place across chest, survival main, and hotbar.
+    if (this.chestSlots) {
+      const arr = type === 'chest' ? this.chestSlots : type === 'hotbar' ? this.sHotbar : this.sMain;
+      const here = arr[index];
+      if (this.cursor) {
+        if (!here) { arr[index] = this.cursor; this.cursor = null; }
+        else if (here.id === this.cursor.id) { const a = Math.min(STACK - here.count, this.cursor.count); here.count += a; this.cursor.count -= a; if (this.cursor.count <= 0) this.cursor = null; }
+        else { arr[index] = this.cursor; this.cursor = here; }
+      } else if (here) { this.cursor = here; arr[index] = null; }
+      this.renderHotbar(); this.renderScreen(); this.select(this.selected); this._paintCursor();
+      return;
+    }
 
     if (this.creative) {
       if (type === 'palette') { this.cHotbar[this.selected] = { id: index, count: 1 }; this.renderHotbar(); this.renderScreen(); this.select(this.selected); }
@@ -251,15 +277,19 @@ export class Inventory {
   }
 
   toggle() { this.open ? this.close() : this.openScreen(); }
-  openScreen(craftSize = 2) { this.craftSize = craftSize; this.open = true; this.renderScreen(); this.screen.classList.remove('hidden'); }
+  openScreen(craftSize = 2) { this.chestSlots = null; this.craftSize = craftSize; this.open = true; this.renderScreen(); this.screen.classList.remove('hidden'); }
+  openChest(slots) { this.chestSlots = slots; this.open = true; this.renderScreen(); this.screen.classList.remove('hidden'); }
   close() {
     this.open = false;
     this.screen.classList.add('hidden');
     // return held cursor + crafting-grid contents to the inventory
     if (this.cursor) { this.add(this.cursor.id, this.cursor.count); this.cursor = null; this._paintCursor(); }
-    for (let i = 0; i < this.craft.length; i++) {
-      if (this.craft[i]) { this.add(this.craft[i].id, this.craft[i].count); this.craft[i] = null; }
+    if (!this.chestSlots) {
+      for (let i = 0; i < this.craft.length; i++) {
+        if (this.craft[i]) { this.add(this.craft[i].id, this.craft[i].count); this.craft[i] = null; }
+      }
     }
+    this.chestSlots = null; // chest contents persist via the passed array reference
   }
 
   _bind() {
@@ -286,6 +316,7 @@ export class Inventory {
       #inventory .panel { background:rgba(28,30,38,0.96); border:2px solid rgba(255,255,255,0.14);
         border-radius:12px; padding:18px 20px; box-shadow:0 18px 60px rgba(0,0,0,0.5); }
       #inventory h2 { font-size:16px; margin-bottom:12px; opacity:0.9; letter-spacing:0.5px; }
+      #inventory .chestgrid { display:grid; grid-template-columns:repeat(9,48px); gap:5px; margin-bottom:4px; }
       #inventory .craftarea { display:flex; align-items:center; gap:14px; margin-bottom:10px; }
       #inventory .craftgrid { display:grid; gap:5px; }
       #inventory .arrow { font-size:22px; opacity:0.7; }

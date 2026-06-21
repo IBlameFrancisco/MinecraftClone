@@ -199,6 +199,27 @@ const generators = {
     }
     return p;
   },
+  torch(x, y) {
+    // dark block with a wooden stem and a glowing flame near the top
+    if (x >= 6 && x <= 9 && y >= 6) return [clamp255(vary(120, 10)), clamp255(vary(80, 8)), clamp255(vary(42, 6)), 255];
+    const d = Math.hypot(x - 7.5, y - 3.5);
+    if (d < 3.2) { const t = 1 - d / 3.2; return [255, clamp255(170 + t * 70), clamp255(30 + t * 130), 255]; }
+    return [clamp255(vary(24, 6)), clamp255(vary(19, 5)), clamp255(vary(14, 4)), 255];
+  },
+  chest_top(x, y) {
+    let r = vary(150, 8), g = vary(104, 7), b = vary(60, 6);
+    if (x === 0 || y === 0 || x === 15 || y === 15) { r -= 40; g -= 34; b -= 24; }
+    if (x === 2 || x === 13) { r -= 30; g -= 26; b -= 18; } // metal bands
+    return [clamp255(r), clamp255(g), clamp255(b), 255];
+  },
+  chest_side(x, y) {
+    let r = vary(146, 8), g = vary(100, 7), b = vary(56, 6);
+    if (x === 0 || y === 0 || x === 15 || y === 15) { r -= 42; g -= 36; b -= 26; }
+    if (x === 2 || x === 13) { r -= 28; g -= 24; b -= 16; }    // bands
+    if (y === 7 || y === 8) { r -= 24; g -= 20; b -= 14; }     // lid seam
+    if (x >= 7 && x <= 8 && y >= 7 && y <= 10) return [70, 66, 58, 255]; // latch
+    return [clamp255(r), clamp255(g), clamp255(b), 255];
+  },
 };
 
 // ---- Build the atlas ----
