@@ -64,11 +64,25 @@ export class SFX {
     this._tone(140, 200, 0.08, 0.16, 'triangle');
   }
 
-  step() {
+  // Surface-dependent footstep. `mat` is a material category.
+  step(mat = 'grass') {
     if (!this.ctx) return;
     const now = performance.now();
     if (now - this.lastStep < 270) return;
     this.lastStep = now;
-    this._noise(0.07, 520 + Math.random() * 180, 0.6, 0.10);
+    const M = {
+      grass:  { freq: 480,  q: 0.7, gain: 0.10, type: 'lowpass',  dur: 0.07 },
+      dirt:   { freq: 360,  q: 0.7, gain: 0.10, type: 'lowpass',  dur: 0.07 },
+      stone:  { freq: 1700, q: 1.2, gain: 0.12, type: 'highpass', dur: 0.05 },
+      sand:   { freq: 1900, q: 0.8, gain: 0.07, type: 'bandpass', dur: 0.08 },
+      wood:   { freq: 430,  q: 2.6, gain: 0.12, type: 'bandpass', dur: 0.09 },
+      snow:   { freq: 1300, q: 0.9, gain: 0.08, type: 'bandpass', dur: 0.05 },
+      gravel: { freq: 880,  q: 2.0, gain: 0.12, type: 'bandpass', dur: 0.07 },
+      glass:  { freq: 2600, q: 1.6, gain: 0.08, type: 'highpass', dur: 0.05 },
+      wool:   { freq: 300,  q: 0.6, gain: 0.06, type: 'lowpass',  dur: 0.08 },
+    };
+    const m = M[mat] || M.grass;
+    this._noise(m.dur, m.freq * (0.85 + Math.random() * 0.3), m.q, m.gain, m.type);
+    if (mat === 'wood') this._tone(165, 95, 0.06, 0.06, 'sine'); // hollow thud
   }
 }

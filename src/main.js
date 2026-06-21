@@ -3,11 +3,18 @@
 
 import * as THREE from 'three';
 import Stats from 'stats.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 
-import { REACH, SEA_LEVEL, WORLD_SEED } from './constants.js';
+import { REACH, SEA_LEVEL } from './constants.js';
 import {
   AIR, WATER, BEDROCK, GRASS, DIRT, STONE, COBBLE, COAL_ORE, IRON_ORE,
-  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, hardness, BLOCK_TOOL, BLOCK_REQUIRES,
+  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, SAND, LOG, PLANK, SNOW, GRAVEL, WOOL,
+  hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage } from './items.js';
 import { World } from './world.js';
@@ -38,25 +45,79 @@ const dropFor = (id) => (DROPS[id] !== undefined ? DROPS[id] : id);
 const chestStore = new Map();
 const chestKey = (x, y, z) => `${x},${y},${z}`;
 
+// Footstep material per block, for surface-dependent step sounds.
+const STEP = {
+  [GRASS]: 'grass', [LEAVES]: 'grass', [DIRT]: 'dirt',
+  [STONE]: 'stone', [COBBLE]: 'stone', [COAL_ORE]: 'stone', [IRON_ORE]: 'stone', [BEDROCK]: 'stone', [GLOWSTONE]: 'stone',
+  [SAND]: 'sand', [GRAVEL]: 'gravel', [SNOW]: 'snow', [GLASS]: 'glass', [WOOL]: 'wool',
+  [LOG]: 'wood', [PLANK]: 'wood', [CRAFTING_TABLE]: 'wood', [CHEST]: 'wood',
+};
+const stepCategory = (id) => STEP[id] || 'grass';
+
 // ---------- Renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.NoToneMapping;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
 renderer.sortObjects = true;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
+// ---------- Cinematic post-processing ----------
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      float vig = smoothstep(0.92, 0.32, length(d));   // soft vignette
+      c.rgb *= mix(0.7, 1.0, vig);
+      c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;              // gentle contrast
+      float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+      c.rgb = mix(vec3(l), c.rgb, 1.16);               // a touch more saturation
+      gl_FragColor = c;
+    }`,
+};
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.5, 0.8);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+composer.addPass(new ShaderPass(GradeShader));
+const fxaaPass = new ShaderPass(FXAAShader);
+composer.addPass(fxaaPass);
+function sizePost() {
+  const w = window.innerWidth, h = window.innerHeight, pr = renderer.getPixelRatio();
+  composer.setSize(w, h);
+  bloomPass.setSize(w, h);
+  fxaaPass.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+}
+sizePost();
+
 // Lights — used only by mob (Lambert) materials; chunks bake their own lighting.
 const ambient = new THREE.AmbientLight(0xffffff, 0.6);
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
 scene.add(ambient, sun);
 
+// ---------- Seeds ----------
+function hashSeed(s) {
+  s = String(s).trim() || 'voxelcraft';
+  if (/^-?\d+$/.test(s)) return (parseInt(s, 10) >>> 0) || 1;
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+const randomSeedStr = () => String(Math.floor(Math.random() * 1e9));
+let currentSeedStr = new URLSearchParams(location.search).get('seed') || randomSeedStr();
+
 // ---------- Systems ----------
-const world = new World(scene, WORLD_SEED);
+const world = new World(scene, hashSeed(currentSeedStr));
 const player = new Player(camera, renderer.domElement, world);
 const sky = new Sky(scene, camera);
 const particles = new Particles(scene);
@@ -114,18 +175,30 @@ function pickSpawn() {
   }
   return [8.5, 8.5];
 }
-const [spawnX, spawnZ] = pickSpawn();
-const SPAWN = new THREE.Vector3(spawnX, 100, spawnZ);
-player.pos.copy(SPAWN);
-
-world.update(spawnX, spawnZ);
-{
+const SPAWN = new THREE.Vector3();
+function placeSpawn() {
+  const [sx, sz] = pickSpawn();
+  SPAWN.set(sx, 100, sz);
+  player.pos.copy(SPAWN);
+  world.update(sx, sz);
   const t0 = performance.now();
-  while (performance.now() - t0 < 500 && !world.isReady(spawnX, spawnZ)) world.processQueues(40);
+  while (performance.now() - t0 < 500 && !world.isReady(sx, sz)) world.processQueues(40);
   for (let i = 0; i < 8; i++) world.processQueues(25);
+  player.pos.y = world.surfaceHeight(Math.floor(sx), Math.floor(sz)) + 2;
+  SPAWN.y = player.pos.y;
 }
-player.pos.y = world.surfaceHeight(Math.floor(spawnX), Math.floor(spawnZ)) + 2;
-SPAWN.y = player.pos.y;
+placeSpawn();
+
+// Regenerate the world from a seed (used by the start-screen "New World" button).
+function newWorld(seedStr) {
+  currentSeedStr = (seedStr && seedStr.trim()) ? seedStr.trim() : randomSeedStr();
+  world.regenerate(hashSeed(currentSeedStr));
+  chestStore.clear();
+  mobs.clearAll();
+  placeSpawn();
+  if (mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
+  dead = false; resetBreak(); refreshOverlays();
+}
 
 // ---------- Overlays (play / death) ----------
 const overlay = document.getElementById('overlay');
@@ -141,7 +214,11 @@ function refreshOverlays() {
   deathEl.style.display = dead ? 'flex' : 'none';
 }
 refreshOverlays();
-overlay.addEventListener('click', () => { if (!dead && !inventory.open) { renderer.domElement.requestPointerLock(); sfx.ensure(); } });
+const seedInput = document.getElementById('seedInput');
+seedInput.value = currentSeedStr;
+document.getElementById('playBtn').addEventListener('click', () => { if (!dead) { renderer.domElement.requestPointerLock(); sfx.ensure(); } });
+document.getElementById('diceBtn').addEventListener('click', () => { seedInput.value = randomSeedStr(); });
+document.getElementById('newWorldBtn').addEventListener('click', () => { newWorld(seedInput.value); renderer.domElement.requestPointerLock(); sfx.ensure(); });
 document.addEventListener('pointerlockchange', refreshOverlays);
 deathEl.querySelector('#respawn').addEventListener('click', () => respawn());
 
@@ -377,6 +454,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  sizePost();
 });
 
 // ---------- Main loop ----------
@@ -390,7 +468,10 @@ function frame() {
   if (active) {
     player.update(dt);
     if (player.fallImpact > 0) { damagePlayer(Math.ceil(player.fallImpact * 0.6)); player.fallImpact = 0; }
-    if (player.onGround && Math.hypot(player.vel.x, player.vel.z) > 1.4) sfx.step();
+    if (player.onGround && Math.hypot(player.vel.x, player.vel.z) > 1.4) {
+      const fb = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z));
+      sfx.step(stepCategory(fb));
+    }
   } else {
     player.update(0);
   }
@@ -424,7 +505,7 @@ function frame() {
   if (hit.hit) highlight.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
 
   particles.update(dt);
-  renderer.render(scene, camera);
+  composer.render();
   stats.end();
 }
 frame();
