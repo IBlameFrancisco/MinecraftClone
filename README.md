@@ -18,18 +18,35 @@ bundle in `dist/`.
 
 ## Controls
 
-| Action            | Input                          |
-| ----------------- | ------------------------------ |
-| Move              | `W` `A` `S` `D` (relative to look) |
-| Look              | Mouse (pointer lock)           |
-| Jump              | `Space`                        |
-| Sprint            | `Shift` (hold, moving forward) |
-| Sneak             | `Ctrl`                         |
-| Break block       | Left click (hold to repeat)    |
-| Place block       | Right click                    |
-| Select block      | `1`–`9` or mouse wheel         |
-| Swim up           | `Space` (in water)             |
-| Release mouse     | `Esc`                          |
+| Action               | Input                              |
+| -------------------- | ---------------------------------- |
+| Move                 | `W` `A` `S` `D` (relative to look) |
+| Look                 | Mouse (pointer lock)               |
+| Jump / swim up       | `Space`                            |
+| Sprint               | `Shift` (hold) or double-tap `W`   |
+| Sneak                | `Ctrl`                             |
+| Fly (creative)       | double-tap `Space`                 |
+| Break / attack       | Left click (hold to repeat)        |
+| Place / eat / use    | Right click                        |
+| Inventory + crafting | `E`                                |
+| Creative ↔ Survival  | `G`                                |
+| Difficulty cycle     | `B`                                |
+| Select hotbar slot   | `1`–`9` or mouse wheel             |
+| Release mouse        | `Esc`                              |
+
+## Gameplay
+
+- **Modes:** Survival (health + hunger, timed mining, drops, death/respawn) and
+  Creative (fly, instant break, infinite block palette). Toggle with `G`.
+- **Difficulty** (`B`): Peaceful · Easy · Normal · Hard · Hardcore (permanent death).
+- **Mobs:** passive pig/cow/sheep and hostile zombie / skeleton (shoots arrows) /
+  creeper (explodes). Mobs drop loot; leaves drop apples; all blocks drop on break.
+- **Tools:** wood + stone pickaxe/axe/shovel/sword — faster mining of the matching
+  block type (and some blocks need the right tool to drop); swords hit harder.
+- **Crafting:** 2×2 grid in the inventory, 3×3 at a placed **crafting table**.
+  Recipes include planks, sticks, table, chest, torches, and all eight tools.
+- **Chests** store items per position; **torches** are placeable light blocks;
+  **eat** food (right-click) to refill hunger.
 
 ## What's implemented
 

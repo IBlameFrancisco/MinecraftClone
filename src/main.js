@@ -7,9 +7,9 @@ import Stats from 'stats.js';
 import { REACH, SEA_LEVEL, WORLD_SEED } from './constants.js';
 import {
   AIR, WATER, BEDROCK, GRASS, DIRT, STONE, COBBLE, COAL_ORE, IRON_ORE,
-  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, hardness,
+  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
-import { isFood, foodValue, APPLE } from './items.js';
+import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage } from './items.js';
 import { World } from './world.js';
 import { Player } from './player.js';
 import { Sky } from './sky.js';
@@ -31,8 +31,12 @@ const DIFF_NAMES = ['Peaceful', 'Easy', 'Normal', 'Hard', 'Hardcore'];
 const DMG_MUL = [0, 0.5, 1, 1.5, 1.6];
 
 // What a broken block drops in survival.
-const DROPS = { [GRASS]: DIRT, [STONE]: COBBLE, [GLASS]: AIR };
+const DROPS = { [GRASS]: DIRT, [STONE]: COBBLE, [GLASS]: AIR, [COAL_ORE]: COAL };
 const dropFor = (id) => (DROPS[id] !== undefined ? DROPS[id] : id);
+
+// Per-position chest storage (27 slots each).
+const chestStore = new Map();
+const chestKey = (x, y, z) => `${x},${y},${z}`;
 
 // ---------- Renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -224,17 +228,27 @@ function aabbHitsPlayer(cx, cy, cz) {
   return cx + 1 > p.x - 0.3 && cx < p.x + 0.3 && cy + 1 > p.y && cy < p.y + 1.8 && cz + 1 > p.z - 0.3 && cz < p.z + 0.3;
 }
 
-function breakBlock(x, y, z) {
+function breakBlock(x, y, z, dropOk = true) {
   const id = world.getBlock(x, y, z);
   if (id === BEDROCK || id === AIR) return;
   if (world.setBlock(x, y, z, AIR)) {
     particles.burst(x + 0.5, y + 0.5, z + 0.5, blockTint(id));
     sfx.break();
-    if (mode === SURVIVAL) {
+    if (id === CHEST) chestStore.delete(chestKey(x, y, z));
+    if (mode === SURVIVAL && dropOk) {
       if (id === LEAVES) { if (Math.random() < 0.06) inventory.add(APPLE, 1); }
       else { const d = dropFor(id); if (d !== AIR) inventory.add(d, 1); }
     }
   }
+}
+
+// Mining effectiveness: matching tool speeds it up; some blocks need a tool to drop.
+function miningInfo(id) {
+  const t = toolOf(inventory.selectedId());
+  const matches = t && BLOCK_TOOL[id] === t.tool;
+  const need = BLOCK_REQUIRES[id];
+  const canDrop = !need || (t && t.tool === need.type && t.tier >= need.tier);
+  return { speed: matches ? t.speed : 1, canDrop };
 }
 
 function handleBreak(hit, dt) {
@@ -245,21 +259,53 @@ function handleBreak(hit, dt) {
   const id = world.getBlock(hit.x, hit.y, hit.z);
   const hard = hardness(id);
   if (!isFinite(hard)) { resetBreak(); return; }
+  const { speed, canDrop } = miningInfo(id);
   const key = `${hit.x},${hit.y},${hit.z}`;
   if (key !== breakKey) { breakKey = key; breakProgress = 0; }
-  breakProgress += dt / hard;
+  breakProgress += dt / (hard / speed);
   const stage = Math.min(9, Math.floor(breakProgress * 10));
   crackMat.map = CRACK_TEXTURES[stage]; crackMat.needsUpdate = true;
   crackMesh.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
   crackMesh.visible = true;
   if (Math.random() < 0.25) particles.burst(hit.x + 0.5, hit.y + 0.6, hit.z + 0.5, blockTint(id), 2);
-  if (breakProgress >= 1) { breakBlock(hit.x, hit.y, hit.z); resetBreak(); }
+  if (breakProgress >= 1) { breakBlock(hit.x, hit.y, hit.z, canDrop); resetBreak(); }
 }
 
-// Right click: open a crafting table, else eat held food, else place a block.
+// Creeper explosion: destroy nearby blocks and damage the player by distance.
+function explode(cx, cy, cz) {
+  const r = 3;
+  const fx = Math.floor(cx), fy = Math.floor(cy), fz = Math.floor(cz);
+  for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
+    if (dx * dx + dy * dy + dz * dz > r * r) continue;
+    const x = fx + dx, y = fy + dy, z = fz + dz;
+    const b = world.getBlock(x, y, z);
+    if (b !== AIR && b !== BEDROCK && b !== WATER) {
+      if (b === CHEST) chestStore.delete(chestKey(x, y, z));
+      world.setBlock(x, y, z, AIR);
+      if (Math.random() < 0.12) particles.burst(x + 0.5, y + 0.5, z + 0.5, blockTint(b), 3);
+    }
+  }
+  particles.burst(cx, cy, cz, [70, 64, 58], 50);
+  sfx.break();
+  const d = Math.hypot(player.pos.x - cx, player.pos.y + 0.9 - cy, player.pos.z - cz);
+  if (d < r + 2) { const dmg = Math.round((1 - d / (r + 2)) * 16); if (dmg > 0) damagePlayer(dmg, cx, cz); }
+}
+
+function openChestAt(x, y, z) {
+  const k = chestKey(x, y, z);
+  let slots = chestStore.get(k);
+  if (!slots) { slots = new Array(27).fill(null); chestStore.set(k, slots); }
+  inventory.openChest(slots); document.exitPointerLock(); refreshOverlays();
+}
+
+// Right click: open a crafting table / chest, else eat held food, else place a block.
 function handleUse() {
   const look = castFromEye();
-  if (look.hit && world.getBlock(look.x, look.y, look.z) === CRAFTING_TABLE) { openInventory(3); return; }
+  if (look.hit) {
+    const b = world.getBlock(look.x, look.y, look.z);
+    if (b === CRAFTING_TABLE) { openInventory(3); return; }
+    if (b === CHEST) { openChestAt(look.x, look.y, look.z); return; }
+  }
 
   const sel = inventory.selectedId();
   if (isFood(sel)) {
@@ -294,7 +340,7 @@ function attackOrBreak(dt) {
   if (mobHit && mobHit.dist < blockDist) {
     resetBreak();
     if (attackCD <= 0) {
-      mobHit.mob.hurt(mode === CREATIVE ? 20 : 5, player.pos.x, player.pos.z);
+      mobHit.mob.hurt(mode === CREATIVE ? 20 : meleeDamage(inventory.selectedId()), player.pos.x, player.pos.z);
       particles.burst(mobHit.mob.pos.x, mobHit.mob.pos.y + mobHit.mob.height * 0.6, mobHit.mob.pos.z, [200, 60, 60], 6);
       sfx.break(); attackCD = 0.4;
     }
@@ -362,7 +408,7 @@ function frame() {
   ambient.color.copy(sky.dirColor); ambient.intensity = sky.ambIntensity;
 
   mobs.update(dead ? 0 : dt, player, sky.isNight, {
-    damagePlayer, onKill, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
+    damagePlayer, onKill, explode, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
   });
 
   // Interaction

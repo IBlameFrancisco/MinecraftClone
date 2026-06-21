@@ -21,6 +21,8 @@ export const GLOWSTONE = 16;
 export const CACTUS = 17;
 export const WOOL = 18;
 export const CRAFTING_TABLE = 19;
+export const TORCH = 20;
+export const CHEST = 21;
 
 // A block is described by:
 //  - solid:   participates in collision
@@ -49,6 +51,20 @@ export const BLOCKS = {
   [CACTUS]:   { name: 'Cactus',     solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'cactus_top', side: 'cactus_side', bottom: 'cactus_top' } },
   [WOOL]:     { name: 'Wool',       solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'wool', side: 'wool', bottom: 'wool' } },
   [CRAFTING_TABLE]: { name: 'Crafting Table', solid: true, opaque: true, transparent: false, light: 0, tiles: { top: 'craft_top', side: 'craft_side', bottom: 'plank' } },
+  [TORCH]:    { name: 'Torch',      solid: true,  opaque: true,  transparent: false, light: 13, tiles: { top: 'torch', side: 'torch', bottom: 'torch' } },
+  [CHEST]:    { name: 'Chest',      solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'chest_top', side: 'chest_side', bottom: 'chest_top' } },
+};
+
+// Which tool type mines a block fastest, and which blocks require the right tool
+// (and minimum tier) to drop anything at all.
+export const BLOCK_TOOL = {
+  [STONE]: 'pickaxe', [COBBLE]: 'pickaxe', [COAL_ORE]: 'pickaxe', [IRON_ORE]: 'pickaxe', [GLOWSTONE]: 'pickaxe',
+  [LOG]: 'axe', [PLANK]: 'axe', [CRAFTING_TABLE]: 'axe', [CHEST]: 'axe',
+  [DIRT]: 'shovel', [GRASS]: 'shovel', [SAND]: 'shovel', [GRAVEL]: 'shovel', [SNOW]: 'shovel',
+};
+export const BLOCK_REQUIRES = {
+  [STONE]: { type: 'pickaxe', tier: 1 }, [COBBLE]: { type: 'pickaxe', tier: 1 },
+  [COAL_ORE]: { type: 'pickaxe', tier: 1 }, [IRON_ORE]: { type: 'pickaxe', tier: 2 },
 };
 
 // How long (seconds) to break each block by hand in survival.
@@ -56,7 +72,7 @@ export const HARDNESS = {
   [GRASS]: 0.6, [DIRT]: 0.6, [SAND]: 0.5, [GRAVEL]: 0.6, [SNOW]: 0.5,
   [STONE]: 1.5, [COBBLE]: 1.8, [COAL_ORE]: 2.2, [IRON_ORE]: 2.6, [BEDROCK]: Infinity,
   [LOG]: 1.4, [LEAVES]: 0.3, [PLANK]: 1.4, [GLASS]: 0.4, [GLOWSTONE]: 0.4,
-  [CACTUS]: 0.5, [WOOL]: 0.7, [CRAFTING_TABLE]: 1.4, [WATER]: Infinity,
+  [CACTUS]: 0.5, [WOOL]: 0.7, [CRAFTING_TABLE]: 1.4, [TORCH]: 0.2, [CHEST]: 1.6, [WATER]: Infinity,
 };
 export function hardness(id) {
   return HARDNESS[id] !== undefined ? HARDNESS[id] : 1.0;
@@ -81,5 +97,5 @@ export const HOTBAR = [GRASS, DIRT, STONE, COBBLE, PLANK, SAND, LOG, LEAVES, GLO
 // Every placeable block, for the creative inventory palette.
 export const PLACEABLE = [
   GRASS, DIRT, STONE, COBBLE, SAND, GRAVEL, SNOW, LOG, PLANK, LEAVES,
-  GLASS, WOOL, COAL_ORE, IRON_ORE, GLOWSTONE, CACTUS, CRAFTING_TABLE, WATER, BEDROCK,
+  GLASS, WOOL, COAL_ORE, IRON_ORE, GLOWSTONE, TORCH, CACTUS, CRAFTING_TABLE, CHEST, WATER, BEDROCK,
 ];
