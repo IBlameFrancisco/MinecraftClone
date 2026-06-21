@@ -103,6 +103,33 @@ export class Portals {
   }
 }
 
+// ---------------- Muzzle flash ----------------
+function flashTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,250,210,1)');
+  grad.addColorStop(0.4, 'rgba(255,200,90,0.7)');
+  grad.addColorStop(1, 'rgba(255,150,40,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+export class MuzzleFlash {
+  constructor(camera) {
+    this.spr = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: flashTexture(), transparent: true, depthTest: false, opacity: 0, fog: false, blending: THREE.AdditiveBlending,
+    }));
+    this.spr.scale.setScalar(0.7);
+    this.spr.position.set(0.42, -0.42, -1.5);
+    this.spr.renderOrder = 1000;
+    camera.add(this.spr);
+    this.life = 0;
+  }
+  flash() { this.life = 0.055; this.spr.material.opacity = 1; this.spr.material.rotation = Math.random() * 6.28; }
+  update(dt) { if (this.life > 0) { this.life -= dt; this.spr.material.opacity = Math.max(0, this.life / 0.055); } }
+}
+
 // ---------------- First-person viewmodels ----------------
 export function makeViewModel(id) {
   const g = new THREE.Group();
