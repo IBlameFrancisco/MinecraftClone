@@ -10,8 +10,8 @@ import { rayAABB } from './physics.js';
 const PREFIX = 'guncraft-';
 
 // Remote-avatar hitbox (relative to the avatar group origin, which sits at the
-// player's feet). Used for PvP ray/AoE tests.
-const AV_HALF = 0.42, AV_TOP = 2.05, AV_MID = 1.05;
+// player's feet). Used for PvP ray/AoE tests. AV_HEAD is the headshot threshold.
+const AV_HALF = 0.42, AV_TOP = 2.05, AV_MID = 1.05, AV_HEAD = 1.5;
 
 function nameSprite(name) {
   const c = document.createElement('canvas');
@@ -157,17 +157,36 @@ export class Multiplayer {
   }
   sendDeath(by) { if (this.online) this.broadcast({ t: 'death', name: this.name, by: by || null }); }
 
-  // Nearest remote player hit by a ray → { id, name, dist }, or null.
+  _rayHitAvatar(origin, dir, g, maxDist) {
+    return rayAABB(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z,
+      g.position.x - AV_HALF, g.position.y, g.position.z - AV_HALF,
+      g.position.x + AV_HALF, g.position.y + AV_TOP, g.position.z + AV_HALF);
+  }
+
+  // Nearest remote player hit by a ray → { id, name, dist, head }, or null.
   raycast(origin, dir, maxDist) {
     let best = null, bestT = maxDist;
     for (const [id, r] of this.remotes) {
-      const g = r.group;
-      const t = rayAABB(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z,
-        g.position.x - AV_HALF, g.position.y, g.position.z - AV_HALF,
-        g.position.x + AV_HALF, g.position.y + AV_TOP, g.position.z + AV_HALF);
+      const t = this._rayHitAvatar(origin, dir, r.group, bestT);
       if (t < bestT) { bestT = t; best = id; }
     }
-    return best ? { id: best, name: this.roster.get(best) || 'Player', dist: bestT } : null;
+    if (!best) return null;
+    const g = this.remotes.get(best).group;
+    const head = (origin.y + dir.y * bestT) >= g.position.y + AV_HEAD;
+    return { id: best, name: this.roster.get(best) || 'Player', dist: bestT, head };
+  }
+
+  // Every remote player a (piercing) ray passes through → [{ id, name, dist, head }].
+  raycastAll(origin, dir, maxDist) {
+    const out = [];
+    for (const [id, r] of this.remotes) {
+      const t = this._rayHitAvatar(origin, dir, r.group, maxDist);
+      if (t <= maxDist) {
+        const head = (origin.y + dir.y * t) >= r.group.position.y + AV_HEAD;
+        out.push({ id, name: this.roster.get(id) || 'Player', dist: t, head });
+      }
+    }
+    return out;
   }
 
   // Remote players within `radius` of a world point (for splash damage) →

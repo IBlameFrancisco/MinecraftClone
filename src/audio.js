@@ -72,12 +72,30 @@ export class SFX {
       this._noise(0.30, 700, 0.9, 0.55, 'lowpass');      // boom tail
       this._tone(260, 45, 0.28, 0.30, 'square');
       this._tone(70, 40, 0.22, 0.22, 'sine');            // sub thump
+    } else if (kind === 'shotgun') {
+      this._noise(0.06, 2400, 0.5, 0.6, 'lowpass');      // big spread blast
+      this._noise(0.22, 900, 0.7, 0.5, 'lowpass');
+      this._tone(150, 50, 0.2, 0.26, 'square');
+      this._tone(60, 38, 0.2, 0.2, 'sine');
+    } else if (kind === 'rail') {
+      this._tone(1400, 240, 0.22, 0.22, 'sawtooth');     // electric zap
+      this._noise(0.08, 3000, 1.6, 0.2, 'bandpass');
+      this._tone(90, 60, 0.18, 0.16, 'sine');
     } else {
       this._noise(0.04, 3200, 0.7, 0.42, 'highpass');    // snap
       this._noise(0.10, 1200, 0.8, 0.30, 'lowpass');
       this._tone(360, 110, 0.07, 0.20, 'square');
       this._tone(90, 50, 0.08, 0.14, 'sine');
     }
+  }
+
+  // Rocket / grenade explosion: a big filtered boom.
+  explosion() {
+    if (!this.ctx) return;
+    this._noise(0.5, 500, 0.7, 0.7, 'lowpass');
+    this._noise(0.25, 1800, 0.5, 0.4, 'lowpass');
+    this._tone(120, 38, 0.45, 0.3, 'square');
+    this._tone(60, 30, 0.5, 0.28, 'sine');
   }
 
   // Player took damage — a short oof.

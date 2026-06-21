@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN } from './items.js';
 import { World } from './world.js';
 import { ARENA } from './worldgen.js';
 import { Player } from './player.js';
@@ -31,13 +31,13 @@ import { voxelRaycast } from './raycast.js';
 import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer } from './net.js';
-import { Tracers, Plasmas, Portals, makeViewModel, MuzzleFlash } from './guns.js';
+import { Tracers, Plasmas, Rockets, Portals, makeViewModel, MuzzleFlash } from './guns.js';
 
 const SURVIVAL = 0, CREATIVE = 1, BATTLE = 2;
 const MELEE_REACH = 4;
 
-// Battle mode: gun loadout + arena spawn points (must sit on clear arena floor).
-const BATTLE_LOADOUT = [HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, WOOL, COBBLE, PLANK, GLASS, GLOWSTONE];
+// Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
+const BATTLE_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, PORTAL_GUN];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
 
 // Difficulty (peaceful → hardcore) controls mob spawns, damage, and respawn.
@@ -149,6 +149,7 @@ const mobs = new Mobs(scene, world);
 const mp = new Multiplayer(scene);
 const tracers = new Tracers(scene);
 const plasmas = new Plasmas(scene);
+const rockets = new Rockets(scene);
 const portals = new Portals(scene);
 scene.add(camera); // so first-person gun viewmodels (camera children) render
 const muzzle = new MuzzleFlash(camera);
@@ -202,6 +203,7 @@ scene.add(crackMesh);
 
 let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
+let triggerConsumed = false;   // for semi-auto guns: one shot per click
 const ammo = {};
 let reloadingGun = -1, reloadTimer = 0, recoilPitch = 0, recoilKick = 0;
 function ammoFor(gun, id) { if (!gun.mag) return Infinity; if (ammo[id] === undefined) ammo[id] = gun.mag; return ammo[id]; }
@@ -517,11 +519,11 @@ window.addEventListener('keydown', (e) => {
 let mouseLeft = false, mouseRight = false;
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== renderer.domElement) return;
-  if (e.button === 0) { mouseLeft = true; breakCD = 0; attackCD = 0; }
+  if (e.button === 0) { mouseLeft = true; breakCD = 0; attackCD = 0; triggerConsumed = false; }
   if (e.button === 2) { mouseRight = true; placeCD = 0; }
 });
 window.addEventListener('mouseup', (e) => {
-  if (e.button === 0) { mouseLeft = false; resetBreak(); }
+  if (e.button === 0) { mouseLeft = false; triggerConsumed = false; resetBreak(); }
   if (e.button === 2) mouseRight = false;
 });
 window.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -696,41 +698,99 @@ function setScoped(on) {
   if (viewModel) viewModel.visible = !on;
 }
 
+// Perturb an aim direction within a cone of `spread` radians (returns a shared
+// temp vector — use it before the next call).
+const _rt = new THREE.Vector3(), _up2 = new THREE.Vector3(), _sd = new THREE.Vector3();
+const _WORLD_UP = new THREE.Vector3(0, 1, 0);
+function spreadDir(dir, spread) {
+  if (!spread) return dir;
+  _rt.crossVectors(dir, _WORLD_UP);
+  if (_rt.lengthSq() < 1e-6) _rt.set(1, 0, 0);
+  _rt.normalize();
+  _up2.crossVectors(_rt, dir).normalize();
+  const ox = (Math.random() + Math.random() - 1) * spread;
+  const oy = (Math.random() + Math.random() - 1) * spread;
+  return _sd.copy(dir).addScaledVector(_rt, ox).addScaledVector(_up2, oy).normalize();
+}
+
 function fireGun(gun, secondary) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
   if (gun.kind === 'hitscan') fireHitscan(gun, muzzle);
+  else if (gun.kind === 'shotgun') fireShotgun(gun, muzzle);
+  else if (gun.kind === 'rail') fireRail(gun, muzzle);
   else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); }
+  else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); }
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
 }
 
-function fireHitscan(gun, muzzle) {
-  const mobHit = mobs.raycast(_eye, _dir, gun.range);
-  const playerHit = mp.online ? mp.raycast(_eye, _dir, gun.range) : null;
-  const blockHit = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+// One hitscan ray (already-perturbed `dir`) resolved against players, mobs and
+// blocks. Returns the world-space endpoint, applying damage to whatever it hits.
+function castBullet(dir, range, damage, color) {
+  const mobHit = mobs.raycast(_eye, dir, range);
+  const playerHit = mp.online ? mp.raycast(_eye, dir, range) : null;
+  const blockHit = voxelRaycast(_eye, dir, range, (x, y, z) => world.getBlock(x, y, z));
   const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - _eye.x, blockHit.y + 0.5 - _eye.y, blockHit.z + 0.5 - _eye.z) : Infinity;
   const mobDist = mobHit ? mobHit.dist : Infinity;
   const playerDist = playerHit ? playerHit.dist : Infinity;
   const nearest = Math.min(blockDist, mobDist, playerDist);
-  let end;
   if (playerHit && playerDist === nearest) {
-    mp.sendHit(playerHit.id, gun.damage);
-    end = _eye.clone().addScaledVector(_dir, playerDist);
-    particles.burst(end.x, end.y, end.z, [255, 70, 70], 12);
-    hud.hitMarker();
-  } else if (mobHit && mobDist === nearest) {
-    mobHit.mob.hurt(gun.damage, player.pos.x, player.pos.z);
-    end = _eye.clone().addScaledVector(_dir, mobDist);
-    particles.burst(end.x, end.y, end.z, [220, 80, 80], 8);
-    hud.hitMarker();
-  } else if (blockHit.hit) {
-    end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
-    particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
-  } else {
-    end = _eye.clone().addScaledVector(_dir, gun.range);
+    const dmg = playerHit.head ? Math.round(damage * 1.7) : damage;
+    mp.sendHit(playerHit.id, dmg);
+    const end = _eye.clone().addScaledVector(dir, playerDist);
+    particles.burst(end.x, end.y, end.z, playerHit.head ? [255, 220, 60] : [255, 70, 70], playerHit.head ? 16 : 10);
+    hud.hitMarker(playerHit.head);
+    return end;
   }
+  if (mobHit && mobDist === nearest) {
+    mobHit.mob.hurt(damage, player.pos.x, player.pos.z);
+    const end = _eye.clone().addScaledVector(dir, mobDist);
+    particles.burst(end.x, end.y, end.z, [220, 80, 80], 8);
+    hud.hitMarker(false);
+    return end;
+  }
+  if (blockHit.hit) {
+    const end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
+    particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
+    return end;
+  }
+  return _eye.clone().addScaledVector(dir, range);
+}
+
+function fireHitscan(gun, muzzle) {
+  const dir = spreadDir(_dir, gun.spread);
+  const end = castBullet(dir, gun.range, gun.damage);
   tracers.add(muzzle, end, gun.zoom ? 0xbfe4ff : 0xffe08a);
   sfx.gun(gun.zoom ? 'sniper' : 'handgun');
+}
+
+// Shotgun: a cone of pellets; player damage is summed so each victim takes one hit.
+function fireShotgun(gun, muzzle) {
+  for (let i = 0; i < gun.pellets; i++) {
+    const dir = spreadDir(_dir, gun.spread);
+    const end = castBullet(dir, gun.range, gun.damage, 0xffd08a);
+    tracers.add(muzzle, end, 0xffc46a);
+  }
+  sfx.gun('shotgun');
+}
+
+// Railgun: a piercing beam that damages every enemy along the ray up to the wall.
+function fireRail(gun, muzzle) {
+  const blockHit = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - _eye.x, blockHit.y + 0.5 - _eye.y, blockHit.z + 0.5 - _eye.z) : gun.range;
+  for (const m of mobs.list) {
+    const t = m.rayHit(_eye.x, _eye.y, _eye.z, _dir.x, _dir.y, _dir.z, blockDist);
+    if (t < blockDist) m.hurt(gun.damage, player.pos.x, player.pos.z);
+  }
+  if (mp.online) {
+    for (const ph of mp.raycastAll(_eye, _dir, blockDist)) {
+      mp.sendHit(ph.id, ph.head ? Math.round(gun.damage * 1.4) : gun.damage); hud.hitMarker(ph.head);
+    }
+  }
+  const end = _eye.clone().addScaledVector(_dir, blockDist);
+  tracers.add(muzzle, end, 0xb98bff);
+  tracers.add(muzzle, end, 0xe6d4ff);   // doubled for a thick beam
+  sfx.gun('rail');
 }
 
 function firePortal(slot, gun) {
@@ -740,6 +800,34 @@ function firePortal(slot, gun) {
     new THREE.Vector3(hit.x + 0.5 + hit.nx * 0.5, hit.y + 0.5 + hit.ny * 0.5, hit.z + 0.5 + hit.nz * 0.5),
     new THREE.Vector3(hit.nx, hit.ny, hit.nz));
   sfx.portal();
+}
+
+// Rocket explosion: AoE damage (mobs / remote players / self with knockback) plus
+// destruction of soft cover (wool/planks/glass/leaves) — never the floor or walls.
+function rocketImpact(pos, gun) {
+  particles.burst(pos.x, pos.y, pos.z, [255, 150, 60], 44);
+  particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 22);
+  sfx.explosion();
+  const R = gun.radius;
+  for (const m of mobs.list) {
+    const d = Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z);
+    if (d < R) m.hurt(Math.round(gun.splash * (1 - d / R)), pos.x, pos.z);
+  }
+  if (mp.online) for (const { id, dist } of mp.playersNear(pos, R)) {
+    mp.sendHit(id, Math.round(gun.splash * (1 - dist / R))); hud.hitMarker(false);
+  }
+  // Self splash (rocket-jump): less damage, full knockback via damagePlayer.
+  const ds = Math.hypot(player.pos.x - pos.x, player.pos.y + 0.9 - pos.y, player.pos.z - pos.z);
+  if (ds < R) damagePlayer(Math.round(gun.splash * (1 - ds / R) * 0.45), pos.x, pos.z);
+  // Blow apart soft cover only.
+  const fx = Math.floor(pos.x), fy = Math.floor(pos.y), fz = Math.floor(pos.z);
+  const batch = [];
+  for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
+    if (dx * dx + dy * dy + dz * dz > 5) continue;
+    const x = fx + dx, y = fy + dy, z = fz + dz, b = world.getBlock(x, y, z);
+    if (b === WOOL || b === PLANK || b === GLASS || b === LEAVES) { recordEdit(x, y, z, AIR); batch.push([x, y, z, AIR]); }
+  }
+  mp.sendEdits(batch);
 }
 
 function plasmaImpact(pos, dmg, hitPlayer) {
@@ -847,14 +935,16 @@ function frame() {
   if (active && gun) {
     resetBreak();
     const id = inventory.selectedId();
-    if (mouseLeft && fireCD <= 0) {
+    // Auto guns fire while held; the rest fire once per click.
+    if (mouseLeft && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
       if (gun.mag && reloadingGun === id) { /* busy reloading */ }
-      else if (gun.mag && ammoFor(gun, id) <= 0) { startReload(gun, id); fireCD = 0.25; }
+      else if (gun.mag && ammoFor(gun, id) <= 0) { startReload(gun, id); fireCD = 0.25; triggerConsumed = true; }
       else {
         fireGun(gun, false);
         if (gun.mag) ammo[id]--;
         muzzle.flash(); recoilPitch += gun.recoil || 0; recoilKick += 0.08;
         fireCD = gun.rate;
+        if (!gun.auto) triggerConsumed = true;
       }
     }
     if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); recoilKick += 0.05; fire2CD = gun.rate; }
@@ -882,6 +972,7 @@ function frame() {
   muzzle.update(dt);
   tracers.update(dt);
   plasmas.update(dt, world, mobs, mp, plasmaImpact);
+  rockets.update(dt, world, mobs, mp, rocketImpact);
   portals.update(dt, player);
   mp.update(dt);
   if (active) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw });
@@ -903,7 +994,7 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, mobs, inventory, mp, tracers, plasmas, portals,
+  world, player, sky, scene, renderer, mobs, inventory, mp, tracers, plasmas, rockets, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },

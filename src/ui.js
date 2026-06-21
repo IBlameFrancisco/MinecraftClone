@@ -141,11 +141,12 @@ export class HUD {
     setTimeout(() => { if (line.parentNode) line.remove(); }, 5400);
   }
 
-  // Brief crosshair confirmation when you land a hit.
-  hitMarker() {
+  // Brief crosshair confirmation when you land a hit (gold + bigger on a headshot).
+  hitMarker(head) {
+    this.hitEl.classList.toggle('head', !!head);
     this.hitEl.style.transition = 'none';
     this.hitEl.style.opacity = '1';
-    this.hitEl.style.transform = 'translate(-50%, -50%) scale(1.25)';
+    this.hitEl.style.transform = `translate(-50%, -50%) scale(${head ? 1.6 : 1.25})`;
     requestAnimationFrame(() => {
       this.hitEl.style.transition = 'opacity 0.3s, transform 0.3s';
       this.hitEl.style.opacity = '0';
@@ -255,6 +256,7 @@ export class HUD {
         background:#fff; box-shadow:0 0 4px #fff; }
       #hitmarker::before { transform:translate(-50%,-50%) rotate(45deg); }
       #hitmarker::after  { transform:translate(-50%,-50%) rotate(-45deg); }
+      #hitmarker.head::before, #hitmarker.head::after { background:#ffd23a; box-shadow:0 0 6px #ffb02a; }
     `;
     document.head.appendChild(s);
   }
