@@ -18,7 +18,32 @@ export class HUD {
     this.roEl = document.createElement('div'); this.roEl.id = 'roundover';
     this.radarEl = document.createElement('canvas'); this.radarEl.id = 'radar'; this.radarEl.width = 144; this.radarEl.height = 144;
     this.radarCtx = this.radarEl.getContext('2d');
+    this.announceEl = document.createElement('div'); this.announceEl.id = 'announce';
+    this.dmgDirEl = document.createElement('div'); this.dmgDirEl.id = 'dmgdir'; this.dmgDirEl.innerHTML = '<div class="wedge"></div>';
     ui.appendChild(this.sbEl); ui.appendChild(this.roEl); ui.appendChild(this.radarEl);
+    ui.appendChild(this.announceEl); ui.appendChild(this.dmgDirEl);
+  }
+
+  // Big fading announcer banner (First Blood, multikills, round win…).
+  announce(text, color) {
+    this.announceEl.textContent = text;
+    this.announceEl.style.color = color || '#ffe27a';
+    this.announceEl.style.transition = 'none';
+    this.announceEl.style.opacity = '1';
+    this.announceEl.style.transform = 'translateX(-50%) scale(1.15)';
+    requestAnimationFrame(() => {
+      this.announceEl.style.transition = 'opacity 1.2s, transform 0.5s';
+      this.announceEl.style.opacity = '0';
+      this.announceEl.style.transform = 'translateX(-50%) scale(1)';
+    });
+  }
+
+  // Red wedge pointing toward where damage came from (relative to facing).
+  showDamageDir(relAngle) {
+    this.dmgDirEl.style.transform = `rotate(${relAngle}rad)`;
+    const w = this.dmgDirEl.firstChild;
+    w.style.transition = 'none'; w.style.opacity = '0.85';
+    requestAnimationFrame(() => { w.style.transition = 'opacity 0.7s'; w.style.opacity = '0'; });
   }
 
   showRadar(on) { this.radarEl.style.display = on ? 'block' : 'none'; }
@@ -206,6 +231,7 @@ export class HUD {
 
   // Brief crosshair confirmation when you land a hit (gold + bigger on a headshot).
   hitMarker(head) {
+    this.onHitSound && this.onHitSound(!!head);
     this.hitEl.classList.toggle('head', !!head);
     this.hitEl.style.transition = 'none';
     this.hitEl.style.opacity = '1';
@@ -338,6 +364,12 @@ export class HUD {
       #roundover .rosub { margin-top:8px; font-size:15px; opacity:0.8; }
       #radar { display:none; position:absolute; left:14px; bottom:14px; width:144px; height:144px;
         filter:drop-shadow(0 3px 8px rgba(0,0,0,0.6)); }
+      #announce { position:absolute; left:50%; top:24%; transform:translateX(-50%); opacity:0; pointer-events:none;
+        font-size:38px; font-weight:900; letter-spacing:2px; text-transform:uppercase; white-space:nowrap;
+        text-shadow:0 2px 10px rgba(0,0,0,0.9), 0 0 18px rgba(0,0,0,0.5); }
+      #dmgdir { position:absolute; left:50%; top:50%; width:0; height:0; pointer-events:none; }
+      #dmgdir .wedge { position:absolute; left:-110px; top:-185px; width:220px; height:80px; opacity:0;
+        background:radial-gradient(ellipse at 50% 100%, rgba(255,45,45,0.85) 0%, rgba(255,45,45,0) 72%); }
     `;
     document.head.appendChild(s);
   }

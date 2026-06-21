@@ -127,7 +127,7 @@ export class Multiplayer {
       case 'chat': this.handlers.onChat?.(d.name, d.text); if (this.isHost) this._relay(conn.peer, d); break;
       case 'hit':
         if (d.target === this.myId) this.handlers.onHit?.(d.dmg, d.fromName);
-        else if (this.isHost && String(d.target).startsWith('bot:')) this.handlers.onBotHit?.(d.target, d.dmg, d.fromName);
+        else if (this.isHost && String(d.target).startsWith('bot:')) this.handlers.onBotHit?.(d.target, d.dmg, d.fromName, d.head);
         if (this.isHost) this._relay(conn.peer, d);
         break;
       case 'death':
@@ -170,8 +170,8 @@ export class Multiplayer {
 
   // PvP: tell a peer it took damage (each client owns its own health). Routed via
   // the host relay, so it works whether shooter and target are host or guests.
-  sendHit(target, dmg) {
-    if (this.online && dmg > 0) this.broadcast({ t: 'hit', target, dmg, from: this.myId, fromName: this.name });
+  sendHit(target, dmg, head) {
+    if (this.online && dmg > 0) this.broadcast({ t: 'hit', target, dmg, head: !!head, from: this.myId, fromName: this.name });
   }
   sendDeath(by) { if (this.online) this.broadcast({ t: 'death', id: this.myId, name: this.name, by: by || null }); }
 
