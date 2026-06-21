@@ -33,8 +33,10 @@ export const ROCKET_LAUNCHER = 280;
 export const RAILGUN = 281;
 export const BLACK_HOLE_BOMB = 282;
 export const HEAVY_MG = 283;
+export const RASENGAN = 284;
+export const RASENSHURIKEN = 285;
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -75,6 +77,10 @@ export const ITEMS = {
   [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 8, range: 70, speed: 24, radius: 12, pull: 26, duration: 3.6, splash: 70, mag: 2, reload: 3.0, recoil: 0.05, color: 0x7b3ff2 } },
   // Belt-fed LMG (MG42): a brutal sustained-fire weapon — the bunker nest gun.
   [HEAVY_MG]: { name: 'MG42', gun: { kind: 'hitscan', rate: 0.055, damage: 5, range: 82, auto: true, spread: 0.05, mag: 75, reload: 3.2, recoil: 0.022, color: 0x2b2b2f } },
+  // Ninjutsu: a spinning chakra sphere ground into a foe at point-blank — huge hit + knockback.
+  [RASENGAN]: { name: 'Rasengan', gun: { kind: 'rasengan', rate: 0.55, damage: 30, range: 4.6, recoil: 0.04, knockback: 17, color: 0x4aa3ff } },
+  // A thrown chakra shuriken that detonates into a vast dome of microscopic wind blades (AoE).
+  [RASENSHURIKEN]: { name: 'Rasenshuriken', gun: { kind: 'rasenshuriken', rate: 1.5, damage: 0, splash: 85, radius: 9, speed: 34, range: 90, mag: 1, reload: 2.3, recoil: 0.05, color: 0xbfe9ff } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
@@ -191,6 +197,20 @@ function drawGun(ctx, id) {
     ctx.fillStyle = '#6a4a2a'; ctx.fillRect(2, 8.4, 3.2, 1.8);             // wooden stock
     ctx.strokeStyle = '#b08a3a'; ctx.lineWidth = 1; ctx.beginPath();      // ammo belt
     ctx.moveTo(6, 8.6); ctx.lineTo(7, 11); ctx.lineTo(9, 11.5); ctx.stroke();
+  } else if (id === RASENGAN) {
+    const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 6.5);          // swirling chakra orb
+    grad.addColorStop(0, '#eaf6ff'); grad.addColorStop(0.45, '#7ec8ff'); grad.addColorStop(0.8, '#3a86e0'); grad.addColorStop(1, 'rgba(40,110,200,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(8, 8, 6.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(235,250,255,0.85)'; ctx.lineWidth = 1; ctx.beginPath();   // spiral
+    for (let a = 0; a < 6.4; a += 0.3) { const r = a * 0.9; const px = 8 + Math.cos(a * 1.6) * r, py = 8 + Math.sin(a * 1.6) * r; a === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); }
+    ctx.stroke();
+  } else if (id === RASENSHURIKEN) {
+    ctx.save(); ctx.translate(8, 8); ctx.rotate(0.5);
+    ctx.fillStyle = '#dff2ff';
+    for (let i = 0; i < 4; i++) { ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(7, -1.6); ctx.lineTo(6, 0); ctx.lineTo(7, 1.6); ctx.closePath(); ctx.fill(); }  // 4 curved blades
+    const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, 3.5); cg.addColorStop(0, '#fff'); cg.addColorStop(1, 'rgba(120,200,255,0)');
+    ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   } else if (id === BLACK_HOLE_BOMB) {
     ctx.fillStyle = '#241a33'; ctx.fillRect(2, 6, 9, 4); ctx.fillRect(3, 9.5, 3, 3.5);  // dark launcher
     ctx.fillStyle = '#140d1f'; ctx.fillRect(10, 5, 3, 6);                               // muzzle housing

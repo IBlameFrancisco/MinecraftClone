@@ -157,6 +157,16 @@ export class SFX {
     this._tone(120, 26, 0.95, 0.18, 'sine');        // sub rumble
     this._noise(0.6, 320, 0.6, 0.12, 'lowpass');    // airy suck
   }
+  rasengan() {
+    if (!this.ctx) return;
+    this._tone(440, 190, 0.24, 0.15, 'sine');        // swirling chakra whoosh
+    this._noise(0.2, 1500, 1.3, 0.12, 'bandpass');   // grinding hiss
+  }
+  rasenshuriken() {
+    if (!this.ctx) return;
+    this._tone(820, 1700, 0.16, 0.13, 'sawtooth');   // high chakra whirr on throw
+    this._noise(0.14, 3200, 1.6, 0.08, 'highpass');
+  }
 
   // Surface-dependent footstep. `mat` is a material category.
   step(mat = 'grass') {
