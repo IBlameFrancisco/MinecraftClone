@@ -57,13 +57,33 @@
 
       #overlay {
         position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-        background: rgba(8,14,26,0.55); backdrop-filter: blur(3px); cursor: pointer; pointer-events: auto;
-        transition: opacity 0.35s; text-align: center;
+        background: radial-gradient(ellipse at center, rgba(6,10,18,0.18) 0%, rgba(6,10,18,0.62) 100%);
+        pointer-events: auto; transition: opacity 0.4s; text-align: center;
       }
       #overlay.hidden { opacity: 0; pointer-events: none; }
-      #overlay .card { background: rgba(0,0,0,0.45); padding: 30px 42px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.12); }
-      #overlay h1 { font-size: 34px; letter-spacing: 1px; margin-bottom: 6px; }
-      #overlay p { opacity: 0.85; font-size: 15px; margin-top: 6px; }
+      #overlay .card {
+        position: relative; overflow: hidden; min-width: 400px; padding: 40px 46px 32px;
+        border-radius: 20px; border: 1px solid rgba(255,255,255,0.12);
+        background: linear-gradient(165deg, rgba(24,30,44,0.86), rgba(12,16,26,0.9));
+        backdrop-filter: blur(16px) saturate(1.15);
+        box-shadow: 0 34px 90px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08);
+      }
+      #overlay .card::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+        background: linear-gradient(90deg, #ff7b3a, #ffd86b, #6db33f);
+      }
+      .gclogo {
+        font-family: 'Arial Black', 'Helvetica Neue', sans-serif; font-weight: 900;
+        line-height: 1; letter-spacing: 3px;
+      }
+      .gclogo span {
+        -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+        -webkit-text-stroke: 1.5px rgba(0,0,0,0.32);
+      }
+      .gclogo .g1 { background-image: linear-gradient(180deg, #ffe08a 8%, #ff7b32 92%); }
+      .gclogo .g2 { background-image: linear-gradient(180deg, #c6ef8e 8%, #4f9a2f 92%); }
+      #overlay .gclogo { font-size: 58px; margin-bottom: 6px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.55)); }
+      #overlay .tagline { opacity: 0.62; font-size: 13px; letter-spacing: 0.4px; margin-top: 0; margin-bottom: 4px; }
       #overlay .seedrow { margin-top: 18px; display: flex; align-items: center; gap: 8px; justify-content: center; }
       #overlay .seedrow label { font-size: 13px; opacity: 0.8; }
       #overlay #seedInput {
@@ -73,13 +93,20 @@
       #overlay #seedInput:focus { border-color: #ffe27a; }
       #overlay .btnrow { margin-top: 16px; display: flex; gap: 10px; justify-content: center; }
       #overlay button {
-        font: inherit; cursor: pointer; padding: 10px 18px; border-radius: 9px;
-        border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.10); color: #fff;
-        transition: background 0.15s, border-color 0.15s;
+        font: inherit; cursor: pointer; padding: 10px 18px; border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.08); color: #fff;
+        transition: transform 0.12s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
       }
-      #overlay button:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.45); }
+      #overlay button:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.45); transform: translateY(-1px); }
+      #overlay button:active { transform: translateY(0); }
       #overlay #diceBtn { padding: 8px 11px; }
-      #overlay .play { font-size: 17px; color: #ffe27a; font-weight: 700; }
+      #overlay .btnrow { margin-top: 18px; }
+      #overlay .play {
+        font-size: 17px; font-weight: 800; color: #2a1c06; border: none; padding: 12px 26px;
+        background: linear-gradient(180deg, #ffe08a, #ff9d3c);
+        box-shadow: 0 6px 18px rgba(255,150,60,0.35);
+      }
+      #overlay .play:hover { background: linear-gradient(180deg, #ffe8a0, #ffab4f); box-shadow: 0 9px 24px rgba(255,150,60,0.5); }
       #overlay .moderow { margin-top: 18px; display: flex; gap: 10px; justify-content: center; }
       #overlay .modebtn { padding: 10px 20px; font-size: 15px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.18);
         background: rgba(255,255,255,0.07); color: #fff; cursor: pointer; transition: all 0.15s; }
@@ -112,8 +139,7 @@
       #loading .cube span:nth-child(2) { transform: rotateY(90deg) translateZ(26px); background: linear-gradient(135deg, #9a6a3a, #6f4a26); }
       #loading .cube span:nth-child(3) { transform: rotateX(90deg) translateZ(26px); background: linear-gradient(135deg, #9bd96a, #6db33f); }
       @keyframes gc-spin { from { transform: rotateX(-22deg) rotateY(0deg); } to { transform: rotateX(-22deg) rotateY(360deg); } }
-      #loading h2 { font-size: 34px; letter-spacing: 4px; margin-bottom: 16px; font-weight: 800;
-        text-shadow: 0 2px 14px rgba(0,0,0,0.8), 0 0 26px rgba(120,180,255,0.35); }
+      #loading .loadlogo { font-size: 42px; margin-bottom: 18px; filter: drop-shadow(0 3px 14px rgba(0,0,0,0.75)); }
       #loading .bar { width: 280px; height: 10px; margin: 0 auto; background: rgba(0,0,0,0.45);
         border: 1px solid rgba(255,255,255,0.18); border-radius: 6px; overflow: hidden;
         box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
@@ -145,15 +171,15 @@
     <div id="loading">
       <div class="loader">
         <div class="scene"><div class="cube"><span></span><span></span><span></span></div></div>
-        <h2>GUNCRAFT</h2>
+        <div class="gclogo loadlogo"><span class="g1">GUN</span><span class="g2">CRAFT</span></div>
         <div class="bar"><div id="loadingBar"></div></div>
         <p id="loadingTip">Generating world…</p>
       </div>
     </div>
     <div id="overlay" class="hidden">
       <div class="card">
-        <h1>GUNCRAFT</h1>
-        <p>A voxel sandbox with guns &amp; co-op — built with three.js</p>
+        <div class="gclogo"><span class="g1">GUN</span><span class="g2">CRAFT</span></div>
+        <p class="tagline">A voxel sandbox with guns &amp; co-op</p>
         <div class="moderow">
           <button id="modeSurvival" class="modebtn active">⛏ Survival</button>
           <button id="modeCreative" class="modebtn">✦ Creative</button>
