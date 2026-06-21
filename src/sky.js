@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { DAY_LENGTH, RENDER_DISTANCE, CHUNK_SIZE } from './constants.js';
-import { setWorldTint } from './materials.js';
+import { setWorldTint, setWaterEnv } from './materials.js';
 
 // sRGB colour helper -> linear THREE.Color (matches renderer output pipeline).
 function sc(r, g, b) {
@@ -97,6 +97,13 @@ export class Sky {
     this._tmpTop = new THREE.Color();
     this._tmpHorizon = new THREE.Color();
     this._tmpLight = new THREE.Color();
+
+    // Exposed for entity lighting / mob spawning / water.
+    this.sunDir = new THREE.Vector3(0.5, 0.8, 0.3);
+    this.isNight = false;
+    this.dirColor = new THREE.Color(1, 1, 1);
+    this.dirIntensity = 1;
+    this.ambIntensity = 0.6;
   }
 
   update(dt) {
@@ -122,6 +129,14 @@ export class Sky {
     this.uniforms.horizonColor.value.copy(this._tmpHorizon);
     this.fog.color.copy(this._tmpHorizon);
     setWorldTint(this._tmpLight.r, this._tmpLight.g, this._tmpLight.b);
+
+    // Drive water + entity lighting from the same solar state.
+    this.sunDir.copy(sunDir);
+    this.isNight = e < -0.04;
+    this.dirColor.copy(this._tmpLight);
+    this.dirIntensity = THREE.MathUtils.clamp(e * 1.3 + 0.55, 0.12, 1.1);
+    this.ambIntensity = THREE.MathUtils.clamp(0.45 + e * 0.3, 0.32, 0.78);
+    setWaterEnv(sunDir, this._tmpHorizon, e < 0 ? 0.82 : 0.74);
 
     // Keep dome centred; place sun/moon on the celestial sphere.
     const cam = this.camera.position;

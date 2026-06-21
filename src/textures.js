@@ -177,6 +177,11 @@ const generators = {
     if ((x === 3 || x === 12) && y % 5 === 2) { g += 30; r += 30; b += 20; } // spine
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
+  wool(x, y) {
+    let v = vary(232, 10);
+    if (rand() < 0.12) v -= 18;       // fluffy texture
+    return [clamp255(v - 2), clamp255(v - 1), clamp255(v), 255];
+  },
 };
 
 // ---- Build the atlas ----
@@ -301,3 +306,37 @@ export function drawBlockIcon(ctx, blockId, S) {
   face(side, M, R, Mb, 0.46);  // right face (darkest)
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
+
+// ---- Block-breaking crack overlay (10 progressive stages) ----
+export const CRACK_TEXTURES = (() => {
+  const crackRng = mulberry32(0x5EED);
+  const stages = [];
+  // Pre-generate a pool of crack segments; reveal more of them each stage.
+  const segs = [];
+  for (let i = 0; i < 26; i++) {
+    segs.push({ x: crackRng() * 16, y: crackRng() * 16, len: 2 + crackRng() * 5, ang: crackRng() * Math.PI * 2 });
+  }
+  for (let s = 0; s < 10; s++) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 16;
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, 16, 16);
+    g.strokeStyle = 'rgba(0,0,0,0.55)';
+    g.lineWidth = 1;
+    const reveal = Math.ceil(((s + 1) / 10) * segs.length);
+    for (let i = 0; i < reveal; i++) {
+      const seg = segs[i];
+      const grow = Math.min(1, (s + 1) / 10 + 0.3);
+      g.beginPath();
+      g.moveTo(seg.x, seg.y);
+      g.lineTo(seg.x + Math.cos(seg.ang) * seg.len * grow, seg.y + Math.sin(seg.ang) * seg.len * grow);
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    stages.push(tex);
+  }
+  return stages;
+})();

@@ -35,14 +35,39 @@ export class Player {
     this.bobAmount = 0;
     this.fov = BASE_FOV;
 
+    this.mode = 1;            // 0 survival, 1 creative (set by main)
+    this.flying = false;
+    this.sprintToggle = false;
+    this._lastSpace = -1;
+    this._lastW = -1;
+    this.fallImpact = 0;     // consumed by main for fall damage
+
     camera.rotation.order = 'YXZ';
     this._bindInput();
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    if (mode === 0) this.flying = false;
   }
 
   _bindInput() {
     document.addEventListener('keydown', (e) => {
       if (e.code === 'Tab') e.preventDefault();
       this.keys.add(e.code);
+      if (!e.repeat) {
+        const now = performance.now();
+        if (e.code === 'Space') {
+          if (this.mode === 1 && now - this._lastSpace < 300) {
+            this.flying = !this.flying;
+            this.vel.y = 0;
+          }
+          this._lastSpace = now;
+        } else if (e.code === 'KeyW') {
+          if (now - this._lastW < 300) this.sprintToggle = true;
+          this._lastW = now;
+        }
+      }
     });
     document.addEventListener('keyup', (e) => this.keys.delete(e.code));
     document.addEventListener('mousemove', (e) => {
@@ -75,8 +100,10 @@ export class Player {
     const b = this.keys.has('KeyS') ? 1 : 0;
     const l = this.keys.has('KeyA') ? 1 : 0;
     const r = this.keys.has('KeyD') ? 1 : 0;
-    const sneaking = this.keys.has('ControlLeft') || this.keys.has('ControlRight');
-    let sprinting = (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && f && !sneaking;
+    const sneaking = (this.keys.has('ControlLeft') || this.keys.has('ControlRight')) && !this.flying;
+    const shift = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    if (!f) this.sprintToggle = false;
+    let sprinting = (shift || this.sprintToggle) && f && !sneaking;
 
     const sinY = Math.sin(this.yaw), cosY = Math.cos(this.yaw);
     // forward = (-sinY, -cosY), right = (cosY, -sinY)
@@ -84,6 +111,25 @@ export class Player {
     let wz = (-cosY) * (f - b) + (-sinY) * (r - l);
     const wlen = Math.hypot(wx, wz);
     if (wlen > 0) { wx /= wlen; wz /= wlen; }
+
+    if (this.flying) {
+      // --- Creative flight ---
+      let speed = sprinting ? 11 : 6;
+      const accel = 12;
+      this.vel.x += (wx * speed - this.vel.x) * Math.min(1, accel * dt);
+      this.vel.z += (wz * speed - this.vel.z) * Math.min(1, accel * dt);
+      let vy = 0;
+      if (this.keys.has('Space')) vy += 1;
+      if (shift || this.keys.has('ControlLeft') || this.keys.has('ControlRight')) vy -= 1;
+      this.vel.y += (vy * speed - this.vel.y) * Math.min(1, accel * dt);
+
+      this.onGround = false;
+      this._moveAxis('x', this.vel.x * dt);
+      this._moveAxis('z', this.vel.z * dt);
+      this._moveAxis('y', this.vel.y * dt);
+      this._updateCamera(dt, false, sprinting, speed);
+      return;
+    }
 
     let speed = sprinting ? SPRINT : sneaking ? SNEAK : WALK;
     if (this.inWater) speed *= 0.6;
@@ -94,7 +140,6 @@ export class Player {
     this.vel.x += (targetX - this.vel.x) * Math.min(1, accel * dt);
     this.vel.z += (targetZ - this.vel.z) * Math.min(1, accel * dt);
     if (this.onGround && wlen === 0) {
-      // ground friction
       const fr = Math.min(1, 12 * dt);
       this.vel.x -= this.vel.x * fr;
       this.vel.z -= this.vel.z * fr;
@@ -119,9 +164,11 @@ export class Player {
     this.onGround = false;
     this._moveAxis('x', this.vel.x * dt);
     this._moveAxis('z', this.vel.z * dt);
+    const vyPrev = this.vel.y;
     this._moveAxis('y', this.vel.y * dt);
+    // Record a hard landing for fall-damage (survival, handled by main).
+    if (this.onGround && !this.inWater && vyPrev < -16) this.fallImpact = -vyPrev - 16;
 
-    // Respawn safety if somehow fallen out of world.
     if (this.pos.y < -20) {
       this.pos.set(this.pos.x, 90, this.pos.z);
       this.vel.set(0, 0, 0);

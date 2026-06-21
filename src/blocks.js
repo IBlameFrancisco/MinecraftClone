@@ -19,6 +19,7 @@ export const BEDROCK = 14;
 export const GRAVEL = 15;
 export const GLOWSTONE = 16;
 export const CACTUS = 17;
+export const WOOL = 18;
 
 // A block is described by:
 //  - solid:   participates in collision
@@ -45,7 +46,19 @@ export const BLOCKS = {
   [GRAVEL]:   { name: 'Gravel',     solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'gravel', side: 'gravel', bottom: 'gravel' } },
   [GLOWSTONE]:{ name: 'Glowstone',  solid: true,  opaque: true,  transparent: false, light: 14, tiles: { top: 'glowstone', side: 'glowstone', bottom: 'glowstone' } },
   [CACTUS]:   { name: 'Cactus',     solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'cactus_top', side: 'cactus_side', bottom: 'cactus_top' } },
+  [WOOL]:     { name: 'Wool',       solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'wool', side: 'wool', bottom: 'wool' } },
 };
+
+// How long (seconds) to break each block by hand in survival.
+export const HARDNESS = {
+  [GRASS]: 0.6, [DIRT]: 0.6, [SAND]: 0.5, [GRAVEL]: 0.6, [SNOW]: 0.5,
+  [STONE]: 1.5, [COBBLE]: 1.8, [COAL_ORE]: 2.2, [IRON_ORE]: 2.6, [BEDROCK]: Infinity,
+  [LOG]: 1.4, [LEAVES]: 0.3, [PLANK]: 1.4, [GLASS]: 0.4, [GLOWSTONE]: 0.4,
+  [CACTUS]: 0.5, [WOOL]: 0.7, [WATER]: Infinity,
+};
+export function hardness(id) {
+  return HARDNESS[id] !== undefined ? HARDNESS[id] : 1.0;
+}
 
 export function isOpaque(id) {
   return id !== AIR && BLOCKS[id].opaque;
@@ -62,3 +75,9 @@ export function lightEmission(id) {
 
 // Blocks shown in the hotbar, in order. Keys 1..9 + scroll wheel.
 export const HOTBAR = [GRASS, DIRT, STONE, COBBLE, PLANK, SAND, LOG, LEAVES, GLOWSTONE];
+
+// Every placeable block, for the creative inventory palette.
+export const PLACEABLE = [
+  GRASS, DIRT, STONE, COBBLE, SAND, GRAVEL, SNOW, LOG, PLANK, LEAVES,
+  GLASS, WOOL, COAL_ORE, IRON_ORE, GLOWSTONE, CACTUS, WATER, BEDROCK,
+];
