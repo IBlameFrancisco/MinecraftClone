@@ -182,6 +182,23 @@ const generators = {
     if (rand() < 0.12) v -= 18;       // fluffy texture
     return [clamp255(v - 2), clamp255(v - 1), clamp255(v), 255];
   },
+  craft_top(x, y) {
+    const p = generators.plank(x, y);
+    // grid: cross through the middle + border
+    if (x === 0 || y === 0 || x === 15 || y === 15 || x === 7 || x === 8 || y === 7 || y === 8) {
+      return [clamp255(p[0] - 46), clamp255(p[1] - 40), clamp255(p[2] - 30), 255];
+    }
+    return p;
+  },
+  craft_side(x, y) {
+    const p = generators.plank(x, y);
+    // a darker tool panel on the upper half
+    if (y >= 2 && y <= 7 && x >= 2 && x <= 13) {
+      if (x === 2 || x === 13 || y === 2 || y === 7) return [clamp255(p[0] - 50), clamp255(p[1] - 44), clamp255(p[2] - 34), 255];
+      if ((x + y) % 3 === 0) return [clamp255(p[0] - 24), clamp255(p[1] - 20), clamp255(p[2] - 14), 255];
+    }
+    return p;
+  },
 };
 
 // ---- Build the atlas ----

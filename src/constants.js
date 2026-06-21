@@ -12,4 +12,4 @@ export const RENDER_DISTANCE = 7;
 export const REACH = 6;
 
 // Length of a full day/night cycle in seconds.
-export const DAY_LENGTH = 180;
+export const DAY_LENGTH = 600;
