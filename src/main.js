@@ -614,9 +614,10 @@ function battleDeath() {
   sfx.gun('sniper'); lastHitBy = null; streak = 0;
   if (gameMode === 'br') {
     eliminated = true;
+    player.flying = true;                 // free-fly spectator
     player.pos.set(0.5, ARENA.FLOOR + 24, 0.5); player.vel.set(0, 0, 0);
     health = 20; hud.setHealth(20); invuln = 999;
-    hud.announce('Eliminated', '#ff5b5b'); hud.flashHurt();
+    hud.announce('Eliminated — spectating', '#ff5b5b'); hud.flashHurt();
     return;
   }
   const sp = teamSpawnPoint(myTeam);
@@ -682,7 +683,7 @@ function setupMatch() {
   matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
-  streak = 0; grenadeCount = 2; hud.setGrenades(2);
+  streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   botMgr.clear();
   computeCoverPoints();
@@ -856,7 +857,7 @@ function endMatch(winner) {
 function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
-  gunLevelShown = -1; eliminated = false; stormTimer = 0;
+  gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   matchWinner = null; hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'wave') { if (isAuthority()) startWave(1); }
@@ -991,10 +992,11 @@ function botFire(bot, dir) {
     const pd = gun.spread ? spreadDir(dir, gun.spread) : dir;
     botBullet(bot, pd, gun.range, gun.damage, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
   }
-  sfx.gunAt(gun.kind === 'rail' ? 'rail' : gun.kind === 'shotgun' ? 'shotgun' : gun.zoom ? 'sniper' : 'handgun', muzzle.x, muzzle.y, muzzle.z);
+  if (botSoundBudget > 0) { botSoundBudget--; sfx.gunAt(gun.kind === 'rail' ? 'rail' : gun.kind === 'shotgun' ? 'shotgun' : gun.zoom ? 'sniper' : 'handgun', muzzle.x, muzzle.y, muzzle.z); }
   if (mp.isHost) mp.broadcast({ t: 'bfire', kind: gun.kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z, range: gun.range, color });
 }
 let botBroadcastT = 0;
+let botSoundBudget = 0;   // caps how many bot gunshots make sound per frame
 function broadcastBotPositions() {
   mp.broadcast({ t: 'bpos', bots: botMgr.bots.map((b) => ({ id: b.id, name: b.name, skin: b.skinId, team: b.team, x: b.pos.x, y: b.pos.y, z: b.pos.z, yaw: b.yaw, alive: b.alive })) });
 }
@@ -1582,6 +1584,7 @@ function frame() {
   // Bots + match flow: the authority simulates; guests render via broadcasts.
   if (mode === BATTLE && loaded) {
     if (isAuthority()) {
+      botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
       botMgr.update(matchWinner ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
       manageBots(dt);
       if (!matchWinner) modeTick(dt);
