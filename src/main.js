@@ -225,11 +225,13 @@ let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
 let triggerConsumed = false;   // for semi-auto guns: one shot per click
 const ammo = {};
-let reloadingGun = -1, reloadTimer = 0, recoilPitch = 0, recoilYaw = 0, recoilKick = 0;
+let reloadingGun = -1, reloadTimer = 0, reloadDur = 1, recoilPitch = 0, recoilYaw = 0, vmRecoil = 0;
+// Viewmodel animation + aim-down-sights state.
+let adsAmount = 0, vmEquip = 0, vmSwayX = 0, vmSwayY = 0, lastYaw = 0, lastPitch = 0;
 function ammoFor(gun, id) { if (!gun.mag) return Infinity; if (ammo[id] === undefined) ammo[id] = gun.mag; return ammo[id]; }
 function startReload(gun, id) {
   if (!gun.mag || reloadingGun === id || (ammo[id] ?? gun.mag) >= gun.mag) return;
-  reloadingGun = id; reloadTimer = gun.reload;
+  reloadingGun = id; reloadTimer = gun.reload; reloadDur = gun.reload;
 }
 function resetBreak() { breakKey = null; breakProgress = 0; crackMesh.visible = false; }
 
@@ -1051,7 +1053,47 @@ function updateViewModel() {
   if (gid === viewGunId) return;
   viewGunId = gid;
   if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); viewModel = null; }
-  if (gid !== -1) { viewModel = makeViewModel(gid); camera.add(viewModel); }
+  if (gid !== -1) { viewModel = makeViewModel(gid); camera.add(viewModel); vmEquip = 1; }
+}
+
+// Procedural viewmodel animation: hip↔ADS, walk bob, idle breathing, look sway,
+// recoil kick, reload dip/roll, and a raise-up on equip.
+const VM_HIP = [0.42, -0.5, -0.85], VM_HIPR = [0.04, -0.13, 0.0];
+const VM_ADS = [0.0, -0.31, -0.55], VM_ADSR = [0.0, 0.0, 0.0];
+function animateViewModel(dt) {
+  if (!viewModel) return;
+  vmEquip *= Math.max(0, 1 - 6 * dt);
+  const dyaw = player.yaw - lastYaw, dpitch = player.pitch - lastPitch;
+  lastYaw = player.yaw; lastPitch = player.pitch;
+  const k = Math.min(1, 9 * dt);
+  vmSwayX += (Math.max(-0.05, Math.min(0.05, dyaw * 0.5)) - vmSwayX) * k;
+  vmSwayY += (Math.max(-0.05, Math.min(0.05, dpitch * 0.5)) - vmSwayY) * k;
+
+  const a = adsAmount, hip = 1 - a;
+  let px = VM_HIP[0] + (VM_ADS[0] - VM_HIP[0]) * a;
+  let py = VM_HIP[1] + (VM_ADS[1] - VM_HIP[1]) * a;
+  let pz = VM_HIP[2] + (VM_ADS[2] - VM_HIP[2]) * a;
+  let rx = VM_HIPR[0] + (VM_ADSR[0] - VM_HIPR[0]) * a;
+  let ry = VM_HIPR[1] + (VM_ADSR[1] - VM_HIPR[1]) * a;
+  let rz = VM_HIPR[2] + (VM_ADSR[2] - VM_HIPR[2]) * a;
+
+  const bob = player.bobAmount || 0, bt = player.bobTime || 0;
+  px += Math.cos(bt) * 0.016 * bob * hip;
+  py -= Math.abs(Math.sin(bt)) * 0.02 * bob * hip;
+  rz += Math.cos(bt) * 0.012 * bob * hip;
+  const now = performance.now() * 0.001, idle = (1 - Math.min(1, bob)) * hip;
+  py += Math.sin(now * 1.6) * 0.006 * idle;
+  rx += Math.sin(now * 1.2) * 0.012 * idle;
+  ry += Math.sin(now * 0.9) * 0.01 * idle;
+
+  px += vmSwayX * hip; ry += vmSwayX * 0.7; py += vmSwayY * hip; rx -= vmSwayY * 0.7;
+  pz += vmRecoil * 0.14; rx -= vmRecoil * 0.42; py += vmRecoil * 0.03;
+  const rl = reloadingGun >= 0 ? Math.sin(Math.min(1, 1 - reloadTimer / reloadDur) * Math.PI) : 0;
+  py -= rl * 0.28; rx += rl * 0.95; rz += rl * 0.6; px += rl * 0.06;
+  py -= vmEquip * 0.45; rx += vmEquip * 0.7;
+
+  viewModel.position.set(px, py, pz);
+  viewModel.rotation.set(rx, ry, rz);
 }
 
 // Sniper scope: narrow the FOV, swap the crosshair for the scope overlay, and
@@ -1101,18 +1143,30 @@ function raycastEnemies(origin, dir, maxDist) {
   return best;
 }
 let _suppressDmgNum = false;
-// One hitscan ray (already-perturbed `dir`) resolved against enemies, mobs and
-// blocks. Returns the world-space endpoint, applying damage to whatever it hits.
-function castBullet(dir, range, damage) {
-  const enemy = raycastEnemies(_eye, dir, range);
-  const mobHit = mobs.raycast(_eye, dir, range);
-  const blockHit = voxelRaycast(_eye, dir, range, (x, y, z) => world.getBlock(x, y, z));
-  const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - _eye.x, blockHit.y + 0.5 - _eye.y, blockHit.z + 0.5 - _eye.z) : Infinity;
+// One hitscan ray (already-perturbed `dir`) from `origin`, drawing its own tracer
+// from `tracerStart`. Resolves against enemies, mobs, blocks — and passes through
+// portals, continuing the shot out the paired one.
+function castBullet(origin, dir, range, damage, tracerStart, color, depth = 0) {
+  const start = tracerStart || origin;
+  const portalHit = depth < 2 ? portals.rayPortal(origin, dir, range) : null;
+  const enemy = raycastEnemies(origin, dir, range);
+  const mobHit = mobs.raycast(origin, dir, range);
+  const blockHit = voxelRaycast(origin, dir, range, (x, y, z) => world.getBlock(x, y, z));
+  const blockDist = blockHit.hit ? Math.hypot(blockHit.x + 0.5 - origin.x, blockHit.y + 0.5 - origin.y, blockHit.z + 0.5 - origin.z) : Infinity;
   const enemyDist = enemy ? enemy.dist : Infinity;
   const mobDist = mobHit ? mobHit.dist : Infinity;
-  const nearest = Math.min(blockDist, enemyDist, mobDist);
+  const portalDist = portalHit ? portalHit.dist : Infinity;
+  const nearest = Math.min(blockDist, enemyDist, mobDist, portalDist);
+
+  if (portalHit && portalDist === nearest) {
+    const pp = origin.clone().addScaledVector(dir, portalDist);
+    if (color != null) tracers.add(start, pp, color);
+    castBullet(portalHit.exitPos, portalHit.exitDir, range - portalDist, damage, portalHit.exitPos.clone(), color, depth + 1);
+    return;
+  }
+  let end;
   if (enemy && enemyDist === nearest) {
-    const end = _eye.clone().addScaledVector(dir, enemyDist);
+    end = origin.clone().addScaledVector(dir, enemyDist);
     if (!friendly(enemy.id)) {
       const dmg = enemy.head ? Math.round(damage * 1.7) : damage;
       if (enemy.bot) botHurt(enemy.id, dmg, myName(), enemy.head); else mp.sendHit(enemy.id, dmg, enemy.head);
@@ -1120,38 +1174,33 @@ function castBullet(dir, range, damage) {
       if (!_suppressDmgNum) damageNumbers.spawn(end, dmg, enemy.head);
       hud.hitMarker(enemy.head);
     }
-    return end;
-  }
-  if (mobHit && mobDist === nearest) {
+  } else if (mobHit && mobDist === nearest) {
     mobHit.mob.hurt(damage, player.pos.x, player.pos.z);
-    const end = _eye.clone().addScaledVector(dir, mobDist);
+    end = origin.clone().addScaledVector(dir, mobDist);
     particles.burst(end.x, end.y, end.z, [220, 80, 80], 8);
     if (!_suppressDmgNum) damageNumbers.spawn(end, damage, false);
     hud.hitMarker(false);
-    return end;
-  }
-  if (blockHit.hit) {
-    const end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
+  } else if (blockHit.hit) {
+    end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
     particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
-    return end;
+  } else {
+    end = origin.clone().addScaledVector(dir, range);
   }
-  return _eye.clone().addScaledVector(dir, range);
+  if (color != null) tracers.add(start, end, color);
 }
 
 function fireHitscan(gun, muzzle) {
-  const dir = spreadDir(_dir, gun.spread);
-  const end = castBullet(dir, gun.range, gun.damage);
-  tracers.add(muzzle, end, gun.zoom ? 0xbfe4ff : 0xffe08a);
+  const dir = spreadDir(_dir, gun.spread * (1 - adsAmount * 0.85));
+  castBullet(_eye.clone(), dir.clone(), gun.range, gun.damage, muzzle, gun.zoom ? 0xbfe4ff : 0xffe08a);
   sfx.gun(gun.zoom ? 'sniper' : 'handgun');
 }
 
 // Shotgun: a cone of pellets (no per-pellet damage numbers — markers suffice).
 function fireShotgun(gun, muzzle) {
   _suppressDmgNum = true;
+  const spread = gun.spread * (1 - adsAmount * 0.55);   // shotgun stays a cone even ADS
   for (let i = 0; i < gun.pellets; i++) {
-    const dir = spreadDir(_dir, gun.spread);
-    const end = castBullet(dir, gun.range, gun.damage);
-    tracers.add(muzzle, end, 0xffc46a);
+    castBullet(_eye.clone(), spreadDir(_dir, spread).clone(), gun.range, gun.damage, muzzle, 0xffc46a);
   }
   _suppressDmgNum = false;
   sfx.gun('shotgun');
@@ -1297,10 +1346,10 @@ function frame() {
       const fb = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z));
       sfx.step(stepCategory(fb));
     }
-    // Recoil (player camera only): vertical kick + horizontal sway, recovering.
+    // Camera recoil (kick up + horizontal sway) + screen shake.
     recoilPitch *= Math.max(0, 1 - 14 * dt);
     recoilYaw *= Math.max(0, 1 - 10 * dt);
-    recoilKick *= Math.max(0, 1 - 12 * dt);
+    vmRecoil *= Math.max(0, 1 - 9 * dt);
     camera.rotation.x -= recoilPitch;
     camera.rotation.y += recoilYaw;
     if (shakeAmt > 0.001) {
@@ -1309,14 +1358,11 @@ function frame() {
       camera.position.z += (Math.random() - 0.5) * shakeAmt * 0.5;
       camera.rotation.z += (Math.random() - 0.5) * shakeAmt * 0.6;
     }
-    if (viewModel) viewModel.position.z = -0.85 + recoilKick;
-    updateViewModel();
   } else if (menuView) {
     menuCamera(dt);
     hideViewModel();
   } else {
     player.update(0);   // paused (inventory / death) after playing
-    updateViewModel();
   }
 
   if (reloadingGun >= 0) { reloadTimer -= dt; if (reloadTimer <= 0) { const rg = gunOf(reloadingGun); if (rg) ammo[reloadingGun] = rg.mag; reloadingGun = -1; sfx.place(); } }
@@ -1374,21 +1420,30 @@ function frame() {
         // Per-gun recoil: vertical kick, a little horizontal sway, viewmodel kickback.
         const rc = gun.recoil || 0.015;
         muzzle.flash();
-        recoilPitch += rc;
-        recoilYaw += (Math.random() - 0.5) * rc * 0.9;
-        recoilKick += Math.min(0.16, rc * 1.6 + 0.03);
+        // ADS reduces vertical recoil; recoil also kicks the viewmodel.
+        recoilPitch += rc * (1 - adsAmount * 0.45);
+        recoilYaw += (Math.random() - 0.5) * rc * 0.9 * (1 - adsAmount * 0.6);
+        vmRecoil = Math.min(1, vmRecoil + 0.5 + rc * 4);
         addShake(Math.min(0.1, rc * 0.9));
         fireCD = gun.rate;
         if (!gun.auto) triggerConsumed = true;
       }
     }
-    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); recoilKick += 0.05; fire2CD = gun.rate; }
+    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); vmRecoil = Math.min(1, vmRecoil + 0.3); fire2CD = gun.rate; }
   } else if (active) {
     if (mouseLeft) attackOrBreak(dt); else resetBreak();
     if (mouseRight && placeCD <= 0) { handleUse(); placeCD = 0.25; }
   }
   setScoped(active && !!gun && !!gun.zoom && mouseRight);
   if (active) survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
+
+  // Aim-down-sights (every non-scope gun) + animated viewmodel.
+  const adsActive = active && gun && !gun.zoom && gun.kind !== 'portal' && mouseRight;
+  adsAmount += ((adsActive ? 1 : 0) - adsAmount) * Math.min(1, 13 * dt);
+  if (adsAmount < 0.002) adsAmount = 0;
+  if (!zoomed) { const f = player.fov * (1 - 0.17 * adsAmount); if (Math.abs(camera.fov - f) > 0.04) { camera.fov = f; camera.updateProjectionMatrix(); } }
+  crosshairEl.classList.toggle('ads', adsAmount > 0.5);
+  if (!menuView) { updateViewModel(); animateViewModel(dt); }
 
   // Block highlight (hidden while aiming a gun)
   const hit = castFromEye();
