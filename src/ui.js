@@ -30,6 +30,10 @@ export class HUD {
     this.modeEl.id = 'modeind';
     document.getElementById('ui').appendChild(this.modeEl);
 
+    this.diffEl = document.createElement('div');
+    this.diffEl.id = 'diffind';
+    document.getElementById('ui').appendChild(this.diffEl);
+
     this.hurtEl = document.createElement('div');
     this.hurtEl.id = 'hurt';
     document.getElementById('ui').appendChild(this.hurtEl);
@@ -51,6 +55,12 @@ export class HUD {
     this.modeEl.textContent = survival ? 'Survival' : 'Creative';
     this.modeEl.style.color = survival ? '#ff8f6a' : '#7ad0ff';
     this.statusEl.style.display = survival ? 'flex' : 'none';
+    this.diffEl.style.display = survival ? 'block' : 'none';
+  }
+
+  setDifficulty(name) {
+    this.diffEl.textContent = name;
+    this.diffEl.style.color = name === 'Peaceful' ? '#8fe08f' : name === 'Hardcore' ? '#ff5050' : '#ddd';
   }
 
   setHealth(cur, max = 20) { this._drawIcons(this.healthCtx, cur, max, 'heart'); }
@@ -117,6 +127,8 @@ export class HUD {
       #status canvas { image-rendering:auto; filter:drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
       #modeind { position:absolute; right:14px; top:40px; font-size:13px; font-weight:700;
         background:rgba(0,0,0,0.35); padding:4px 10px; border-radius:8px; text-shadow:0 1px 2px #000; }
+      #diffind { position:absolute; right:14px; top:70px; font-size:12px; font-weight:700;
+        background:rgba(0,0,0,0.30); padding:3px 9px; border-radius:8px; text-shadow:0 1px 2px #000; }
       #hurt { position:absolute; inset:0; pointer-events:none; opacity:0;
         background:radial-gradient(ellipse at center, rgba(120,0,0,0) 40%, rgba(150,0,0,0.85) 100%); }
     `;

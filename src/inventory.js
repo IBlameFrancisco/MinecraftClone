@@ -1,9 +1,12 @@
-// Inventory: owns the hotbar (data + DOM) and the full inventory screen (E).
-// Creative shows a palette of every block; survival shows 27 storage slots + the
-// hotbar with a click-to-pick / click-to-place held cursor. Stacks up to 64.
+// Inventory: separate creative and survival item sets, hotbar (data + DOM), the
+// full inventory screen (E) with a crafting grid (2x2, or 3x3 at a crafting
+// table), and a click-to-pick / click-to-place held cursor. Slots hold either a
+// block id (< ITEM_BASE) or an item id, so drops and crafted items just work.
 
 import { HOTBAR, PLACEABLE, BLOCKS, AIR } from './blocks.js';
 import { drawBlockIcon } from './textures.js';
+import { isItem, isBlockId, itemName, drawItemIcon } from './items.js';
+import { matchRecipe } from './crafting.js';
 
 const STACK = 64;
 const ICON = 40;
@@ -11,19 +14,27 @@ const ICON = 40;
 function iconCanvas(id) {
   const c = document.createElement('canvas');
   c.width = c.height = ICON;
-  drawBlockIcon(c.getContext('2d'), id, ICON);
+  const ctx = c.getContext('2d');
+  if (isItem(id)) drawItemIcon(ctx, id, ICON);
+  else drawBlockIcon(ctx, id, ICON);
   return c;
 }
 
 export class Inventory {
   constructor(onSelect) {
     this.onSelect = onSelect || (() => {});
-    this.hotbar = HOTBAR.map((id) => ({ id, count: 1 }));
-    this.main = new Array(27).fill(null);
+    // Separate sets: creative keeps a convenience hotbar; survival starts EMPTY.
+    this.cHotbar = HOTBAR.map((id) => ({ id, count: 1 }));
+    this.cMain = new Array(27).fill(null);
+    this.sHotbar = new Array(9).fill(null);
+    this.sMain = new Array(27).fill(null);
+
     this.selected = 0;
     this.open = false;
-    this.creative = true;
-    this.cursor = null; // {id,count} held by mouse in survival
+    this.creative = false;       // start in survival
+    this.cursor = null;          // {id,count} held by mouse
+    this.craft = new Array(9).fill(null);
+    this.craftSize = 2;
 
     this._injectStyles();
     this._buildHotbar();
@@ -32,13 +43,17 @@ export class Inventory {
     this.select(0);
   }
 
+  get hotbar() { return this.creative ? this.cHotbar : this.sHotbar; }
+  get main() { return this.creative ? this.cMain : this.sMain; }
+
   // ---------- data helpers ----------
   selectedStack() { return this.hotbar[this.selected]; }
-  selectedBlock() { const s = this.hotbar[this.selected]; return s ? s.id : AIR; }
+  selectedId() { const s = this.hotbar[this.selected]; return s ? s.id : 0; }
+  selectedBlock() { const s = this.hotbar[this.selected]; return s && isBlockId(s.id) ? s.id : AIR; }
 
   canPlace() {
     const s = this.hotbar[this.selected];
-    if (!s || s.id === AIR) return false;
+    if (!s || !isBlockId(s.id)) return false;
     return this.creative || s.count > 0;
   }
 
@@ -49,25 +64,20 @@ export class Inventory {
     s.count--;
     if (s.count <= 0) this.hotbar[this.selected] = null;
     this.renderHotbar();
+    if (this.open) this.renderScreen();
   }
 
   // Survival pickup: add `count` of `id`, return leftover.
   add(id, count) {
     if (this.creative) return 0;
-    const slots = [...this.hotbar, ...this.main];
-    const ref = (i) => (i < 9 ? this.hotbar[i] : this.main[i - 9]);
-    const set = (i, v) => { if (i < 9) this.hotbar[i] = v; else this.main[i - 9] = v; };
-    // top up existing stacks
-    for (let i = 0; i < slots.length && count > 0; i++) {
+    const ref = (i) => (i < 9 ? this.sHotbar[i] : this.sMain[i - 9]);
+    const set = (i, v) => { if (i < 9) this.sHotbar[i] = v; else this.sMain[i - 9] = v; };
+    for (let i = 0; i < 36 && count > 0; i++) {
       const s = ref(i);
-      if (s && s.id === id && s.count < STACK) {
-        const add = Math.min(STACK - s.count, count);
-        s.count += add; count -= add;
-      }
+      if (s && s.id === id && s.count < STACK) { const a = Math.min(STACK - s.count, count); s.count += a; count -= a; }
     }
-    // fill empties
-    for (let i = 0; i < slots.length && count > 0; i++) {
-      if (!ref(i)) { const add = Math.min(STACK, count); set(i, { id, count: add }); count -= add; }
+    for (let i = 0; i < 36 && count > 0; i++) {
+      if (!ref(i)) { const a = Math.min(STACK, count); set(i, { id, count: a }); count -= a; }
     }
     this.renderHotbar();
     if (this.open) this.renderScreen();
@@ -78,12 +88,14 @@ export class Inventory {
     this.selected = i;
     [...this.hotbarEl.children].forEach((el, k) => el.classList.toggle('active', k === i));
     const s = this.hotbar[i];
-    this.onSelect(s ? BLOCKS[s.id].name : 'Empty');
+    this.onSelect(s ? itemName(s.id) : 'Empty');
   }
 
   setMode(creative) {
     this.creative = creative;
+    this.renderHotbar();
     if (this.open) this.renderScreen();
+    this.select(this.selected);
   }
 
   // ---------- hotbar DOM ----------
@@ -118,13 +130,21 @@ export class Inventory {
     const wrap = document.createElement('div');
     wrap.id = 'inventory';
     wrap.className = 'hidden';
-    wrap.innerHTML = `<div class="panel"><h2></h2><div class="grid"></div>
+    wrap.innerHTML = `<div class="panel">
+      <h2></h2>
+      <div class="craftarea"><div class="craftgrid"></div><div class="arrow">➜</div><div class="resultwrap"></div></div>
+      <div class="hr crafthr"></div>
+      <div class="grid"></div>
       <div class="hr"></div><div class="hbrow"></div></div>`;
     document.getElementById('ui').appendChild(wrap);
     this.screen = wrap;
     this.gridEl = wrap.querySelector('.grid');
     this.hbRowEl = wrap.querySelector('.hbrow');
     this.titleEl = wrap.querySelector('h2');
+    this.craftGridEl = wrap.querySelector('.craftgrid');
+    this.resultWrapEl = wrap.querySelector('.resultwrap');
+    this.craftAreaEl = wrap.querySelector('.craftarea');
+    this.craftHrEl = wrap.querySelector('.crafthr');
 
     this.cursorEl = document.createElement('div');
     this.cursorEl.id = 'invcursor';
@@ -142,7 +162,7 @@ export class Inventory {
     el.dataset.type = type; el.dataset.index = index;
     if (stack && stack.id !== AIR) {
       el.appendChild(iconCanvas(stack.id));
-      if (!this.creative && stack.count > 1) {
+      if ((!this.creative || type === 'craft' || type === 'result') && stack.count > 1) {
         const c = document.createElement('span'); c.className = 'cnt'; c.textContent = stack.count; el.appendChild(c);
       }
     }
@@ -150,14 +170,19 @@ export class Inventory {
   }
 
   renderScreen() {
-    this.titleEl.textContent = this.creative ? 'Creative — pick a block' : 'Inventory';
+    const showCraft = !this.creative;
+    this.craftAreaEl.style.display = showCraft ? 'flex' : 'none';
+    this.craftHrEl.style.display = showCraft ? 'block' : 'none';
+    this.titleEl.textContent = this.creative ? 'Creative — pick a block'
+      : this.craftSize === 3 ? 'Crafting Table' : 'Inventory';
+
     this.gridEl.innerHTML = '';
     this.hbRowEl.innerHTML = '';
-
     if (this.creative) {
       PLACEABLE.forEach((id) => this.gridEl.appendChild(this._makeSlot('palette', id, { id, count: 1 })));
     } else {
       this.main.forEach((s, i) => this.gridEl.appendChild(this._makeSlot('main', i, s)));
+      this._renderCraft();
     }
     this.hotbar.forEach((s, i) => {
       const el = this._makeSlot('hotbar', i, s);
@@ -166,31 +191,57 @@ export class Inventory {
     });
   }
 
+  _renderCraft() {
+    const n = this.craftSize * this.craftSize;
+    this.craftGridEl.style.gridTemplateColumns = `repeat(${this.craftSize},48px)`;
+    this.craftGridEl.innerHTML = '';
+    for (let i = 0; i < n; i++) this.craftGridEl.appendChild(this._makeSlot('craft', i, this.craft[i]));
+    this.resultWrapEl.innerHTML = '';
+    const result = matchRecipe(this.craft.slice(0, n));
+    this.resultWrapEl.appendChild(this._makeSlot('result', 0, result ? { id: result.id, count: result.count } : null));
+    this._result = result;
+  }
+
   _clickSlot(el) {
     const type = el.dataset.type;
     const index = parseInt(el.dataset.index, 10);
 
     if (this.creative) {
-      if (type === 'palette') { this.hotbar[this.selected] = { id: index, count: 1 }; this.renderHotbar(); this.renderScreen(); this.select(this.selected); }
+      if (type === 'palette') { this.cHotbar[this.selected] = { id: index, count: 1 }; this.renderHotbar(); this.renderScreen(); this.select(this.selected); }
       else if (type === 'hotbar') { this.select(index); this.renderScreen(); }
       return;
     }
 
-    // Survival: pick up / place down a held stack.
-    const get = () => (type === 'hotbar' ? this.hotbar[index] : this.main[index]);
-    const put = (v) => { if (type === 'hotbar') this.hotbar[index] = v; else this.main[index] = v; };
+    if (type === 'result') { this._craftOnce(); return; }
+
+    const get = () => (type === 'hotbar' ? this.sHotbar[index] : type === 'main' ? this.sMain[index] : this.craft[index]);
+    const put = (v) => { if (type === 'hotbar') this.sHotbar[index] = v; else if (type === 'main') this.sMain[index] = v; else this.craft[index] = v; };
     const here = get();
     if (this.cursor) {
       if (!here) { put(this.cursor); this.cursor = null; }
-      else if (here.id === this.cursor.id) {
-        const add = Math.min(STACK - here.count, this.cursor.count);
-        here.count += add; this.cursor.count -= add; if (this.cursor.count <= 0) this.cursor = null;
-      } else { put(this.cursor); this.cursor = here; }
+      else if (here.id === this.cursor.id) { const a = Math.min(STACK - here.count, this.cursor.count); here.count += a; this.cursor.count -= a; if (this.cursor.count <= 0) this.cursor = null; }
+      else { put(this.cursor); this.cursor = here; }
     } else if (here) { this.cursor = here; put(null); }
-    this.renderHotbar();
-    this.renderScreen();
-    this.select(this.selected);
-    this._paintCursor();
+
+    this.renderHotbar(); this.renderScreen(); this.select(this.selected); this._paintCursor();
+  }
+
+  _craftOnce() {
+    if (!this._result) return;
+    const res = this._result;
+    // If holding a cursor stack, it must match and have room.
+    if (this.cursor) {
+      if (this.cursor.id !== res.id || this.cursor.count + res.count > STACK) return;
+      this.cursor.count += res.count;
+    } else {
+      this.cursor = { id: res.id, count: res.count };
+    }
+    const n = this.craftSize * this.craftSize;
+    for (let i = 0; i < n; i++) {
+      const s = this.craft[i];
+      if (s) { s.count--; if (s.count <= 0) this.craft[i] = null; }
+    }
+    this.renderHotbar(); this.renderScreen(); this._paintCursor();
   }
 
   _paintCursor() {
@@ -200,20 +251,20 @@ export class Inventory {
   }
 
   toggle() { this.open ? this.close() : this.openScreen(); }
-  openScreen() { this.open = true; this.renderScreen(); this.screen.classList.remove('hidden'); }
+  openScreen(craftSize = 2) { this.craftSize = craftSize; this.open = true; this.renderScreen(); this.screen.classList.remove('hidden'); }
   close() {
     this.open = false;
     this.screen.classList.add('hidden');
-    // drop any held cursor back into inventory
+    // return held cursor + crafting-grid contents to the inventory
     if (this.cursor) { this.add(this.cursor.id, this.cursor.count); this.cursor = null; this._paintCursor(); }
+    for (let i = 0; i < this.craft.length; i++) {
+      if (this.craft[i]) { this.add(this.craft[i].id, this.craft[i].count); this.craft[i] = null; }
+    }
   }
 
   _bind() {
     window.addEventListener('keydown', (e) => {
-      if (e.code.startsWith('Digit')) {
-        const n = parseInt(e.code.slice(5), 10) - 1;
-        if (n >= 0 && n < 9) this.select(n);
-      }
+      if (e.code.startsWith('Digit')) { const n = parseInt(e.code.slice(5), 10) - 1; if (n >= 0 && n < 9) this.select(n); }
     });
     window.addEventListener('wheel', (e) => {
       if (this.open) return;
@@ -228,26 +279,27 @@ export class Inventory {
   _injectStyles() {
     const s = document.createElement('style');
     s.textContent = `
-      .slot .cnt { position:absolute; right:3px; bottom:1px; font-size:13px; font-weight:700;
-        color:#fff; text-shadow:1px 1px 2px #000; }
+      .slot .cnt { position:absolute; right:3px; bottom:1px; font-size:13px; font-weight:700; color:#fff; text-shadow:1px 1px 2px #000; }
       #inventory { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
         background:rgba(8,12,22,0.55); backdrop-filter:blur(3px); pointer-events:auto; z-index:20; }
       #inventory.hidden { display:none; }
       #inventory .panel { background:rgba(28,30,38,0.96); border:2px solid rgba(255,255,255,0.14);
         border-radius:12px; padding:18px 20px; box-shadow:0 18px 60px rgba(0,0,0,0.5); }
       #inventory h2 { font-size:16px; margin-bottom:12px; opacity:0.9; letter-spacing:0.5px; }
-      #inventory .grid { display:grid; grid-template-columns:repeat(9,48px); gap:5px; max-height:340px; overflow-y:auto; }
+      #inventory .craftarea { display:flex; align-items:center; gap:14px; margin-bottom:10px; }
+      #inventory .craftgrid { display:grid; gap:5px; }
+      #inventory .arrow { font-size:22px; opacity:0.7; }
+      #inventory .grid { display:grid; grid-template-columns:repeat(9,48px); gap:5px; max-height:360px; overflow-y:auto; }
       #inventory .hbrow { display:grid; grid-template-columns:repeat(9,48px); gap:5px; margin-top:6px; }
       #inventory .hr { height:1px; background:rgba(255,255,255,0.12); margin:12px 0; }
       .islot { position:relative; width:48px; height:48px; border-radius:5px; background:rgba(255,255,255,0.06);
-        border:2px solid rgba(255,255,255,0.10); display:flex; align-items:center; justify-content:center;
-        cursor:pointer; image-rendering:pixelated; }
+        border:2px solid rgba(255,255,255,0.10); display:flex; align-items:center; justify-content:center; cursor:pointer; image-rendering:pixelated; }
       .islot:hover { background:rgba(255,255,255,0.18); border-color:rgba(255,255,255,0.4); }
       .islot.active { border-color:#fff; }
+      .resultwrap .islot { width:54px; height:54px; background:rgba(120,200,120,0.12); border-color:rgba(140,220,140,0.4); }
       .islot canvas { width:40px; height:40px; image-rendering:pixelated; }
       .islot .cnt { position:absolute; right:2px; bottom:0; font-size:13px; font-weight:700; color:#fff; text-shadow:1px 1px 2px #000; }
-      #invcursor { position:fixed; left:0; top:0; width:40px; height:40px; margin:-20px 0 0 -20px;
-        pointer-events:none; display:none; z-index:30; image-rendering:pixelated; }
+      #invcursor { position:fixed; left:0; top:0; width:40px; height:40px; margin:-20px 0 0 -20px; pointer-events:none; display:none; z-index:30; image-rendering:pixelated; }
       #invcursor canvas { width:40px; height:40px; image-rendering:pixelated; }
     `;
     document.head.appendChild(s);

@@ -41,19 +41,19 @@ export const waterMaterial = new THREE.ShaderMaterial({
     #include <fog_pars_vertex>
     void main() {
       vColor = color;
-      vec3 p = position;
-      float w = sin(p.x * 0.6 + uTime * 1.6) * 0.06
-              + sin(p.z * 0.5 - uTime * 1.2) * 0.05
-              + sin((p.x + p.z) * 0.9 + uTime * 2.3) * 0.03;
-      p.y += w;
-      float dx = 0.6 * cos(p.x * 0.6 + uTime * 1.6) * 0.06
-               + 0.9 * cos((p.x + p.z) * 0.9 + uTime * 2.3) * 0.03;
-      float dz = -0.5 * cos(p.z * 0.5 - uTime * 1.2) * 0.05
-               + 0.9 * cos((p.x + p.z) * 0.9 + uTime * 2.3) * 0.03;
+      // Drive waves from WORLD position so they're seamless across chunk borders.
+      vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+      float w = sin(wp.x * 0.6 + uTime * 1.6) * 0.06
+              + sin(wp.z * 0.5 - uTime * 1.2) * 0.05
+              + sin((wp.x + wp.z) * 0.9 + uTime * 2.3) * 0.03;
+      wp.y += w;
+      float dx = 0.6 * cos(wp.x * 0.6 + uTime * 1.6) * 0.06
+               + 0.9 * cos((wp.x + wp.z) * 0.9 + uTime * 2.3) * 0.03;
+      float dz = -0.5 * cos(wp.z * 0.5 - uTime * 1.2) * 0.05
+               + 0.9 * cos((wp.x + wp.z) * 0.9 + uTime * 2.3) * 0.03;
       vNormal = normalize(vec3(-dx, 1.0, -dz));
-      vec4 worldPos = modelMatrix * vec4(p, 1.0);
-      vWorld = worldPos.xyz;
-      vec4 mvPosition = viewMatrix * worldPos;
+      vWorld = wp;
+      vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
       gl_Position = projectionMatrix * mvPosition;
       #include <fog_vertex>
     }`,

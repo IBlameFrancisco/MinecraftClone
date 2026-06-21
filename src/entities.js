@@ -5,15 +5,25 @@
 import * as THREE from 'three';
 import { moveEntity, rayAABB } from './physics.js';
 import { WOOL } from './blocks.js';
+import { PORKCHOP, BEEF, MUTTON, ROTTEN_FLESH, LEATHER } from './items.js';
 
 const TWO_PI = Math.PI * 2;
 const GRAVITY = 26;
+const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1)); // inclusive int
 
 const KINDS = {
-  pig:   { hostile: false, half: 0.45, height: 0.85, hp: 10, speed: 1.3, drop: null },
-  cow:   { hostile: false, half: 0.5,  height: 0.95, hp: 12, speed: 1.2, drop: null },
-  sheep: { hostile: false, half: 0.45, height: 0.9,  hp: 10, speed: 1.3, drop: WOOL },
-  zombie:{ hostile: true,  half: 0.3,  height: 1.9,  hp: 20, speed: 3.1, drop: null },
+  pig:   { hostile: false, half: 0.45, height: 0.85, hp: 10, speed: 1.3 },
+  cow:   { hostile: false, half: 0.5,  height: 0.95, hp: 12, speed: 1.2 },
+  sheep: { hostile: false, half: 0.45, height: 0.9,  hp: 10, speed: 1.3 },
+  zombie:{ hostile: true,  half: 0.3,  height: 1.9,  hp: 20, speed: 3.1 },
+};
+
+// What each mob drops on death: list of [id, minCount, maxCount].
+const DROPS = {
+  pig: [[PORKCHOP, 1, 2]],
+  cow: [[BEEF, 1, 2], [LEATHER, 0, 1]],
+  sheep: [[WOOL, 1, 1], [MUTTON, 1, 1]],
+  zombie: [[ROTTEN_FLESH, 0, 2]],
 };
 
 function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
@@ -93,6 +103,15 @@ class Mob {
     this.mesh.position.copy(this.pos);
   }
 
+  getDrops() {
+    const out = [];
+    for (const [id, lo, hi] of (DROPS[this.kind] || [])) {
+      const n = ri(lo, hi);
+      if (n > 0) out.push({ id, count: n });
+    }
+    return out;
+  }
+
   hurt(dmg, fromX, fromZ) {
     this.health -= dmg;
     this.hurtFlash = 0.2;
@@ -116,7 +135,7 @@ class Mob {
       desiredX = -toPx; desiredZ = -toPz; speed = this.speed * 2.2;
     } else if (this.hostile && (ctx.isNight || this.aggro) && distP < 22) {
       desiredX = toPx; desiredZ = toPz; speed = this.speed;
-      if (distP < 1.5 && this.attackCD <= 0) { ctx.damagePlayer(3, this.pos.x, this.pos.z); this.attackCD = 1.0; }
+      if (distP < 1.5 && this.attackCD <= 0) { ctx.damagePlayer(3 * (ctx.dmgMul || 1), this.pos.x, this.pos.z); this.attackCD = 1.0; }
     } else {
       this.wanderTimer -= dt;
       if (this.wanderTimer <= 0) {
@@ -210,11 +229,11 @@ export class Mobs {
     return m;
   }
 
-  trySpawnAround(player, isNight) {
+  trySpawnAround(player, isNight, peaceful) {
     const animals = this.countKind(false);
     const hostiles = this.countKind(true);
     const wantAnimal = animals < 14;
-    const wantZombie = isNight && hostiles < 12;
+    const wantZombie = isNight && !peaceful && hostiles < 12;
     if (!wantAnimal && !wantZombie) return;
 
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -241,14 +260,17 @@ export class Mobs {
   }
 
   update(dt, player, isNight, ctx) {
+    const peaceful = ctx.peaceful;
     this.spawnTimer -= dt;
-    if (this.spawnTimer <= 0) { this.spawnTimer = 1.5; this.trySpawnAround(player, isNight); }
+    if (this.spawnTimer <= 0) { this.spawnTimer = 1.5; this.trySpawnAround(player, isNight, peaceful); }
 
     for (let i = this.list.length - 1; i >= 0; i--) {
       const m = this.list[i];
-      m.update(dt, this.world, { player, isNight, damagePlayer: ctx.damagePlayer });
+      m.update(dt, this.world, { player, isNight, damagePlayer: ctx.damagePlayer, dmgMul: ctx.dmgMul || 1 });
+      // Peaceful: hostile mobs vanish.
+      const banished = peaceful && m.hostile;
       const far = Math.hypot(m.pos.x - player.pos.x, m.pos.z - player.pos.z) > 72;
-      if (m.dead || far || m.pos.y < -30) {
+      if (m.dead || banished || far || m.pos.y < -30) {
         if (m.dead && ctx.onKill) ctx.onKill(m);
         this.group.remove(m.mesh);
         m.mesh.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });

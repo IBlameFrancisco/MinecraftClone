@@ -7,8 +7,9 @@ import Stats from 'stats.js';
 import { REACH, SEA_LEVEL, WORLD_SEED } from './constants.js';
 import {
   AIR, WATER, BEDROCK, GRASS, DIRT, STONE, COBBLE, COAL_ORE, IRON_ORE,
-  LEAVES, GLASS, GLOWSTONE, hardness,
+  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, hardness,
 } from './blocks.js';
+import { isFood, foodValue, APPLE } from './items.js';
 import { World } from './world.js';
 import { Player } from './player.js';
 import { Sky } from './sky.js';
@@ -24,8 +25,13 @@ import { blockTint, CRACK_TEXTURES } from './textures.js';
 const SURVIVAL = 0, CREATIVE = 1;
 const MELEE_REACH = 4;
 
+// Difficulty (peaceful → hardcore) controls mob spawns, damage, and respawn.
+const PEACEFUL = 0, EASY = 1, NORMAL = 2, HARD = 3, HARDCORE = 4;
+const DIFF_NAMES = ['Peaceful', 'Easy', 'Normal', 'Hard', 'Hardcore'];
+const DMG_MUL = [0, 0.5, 1, 1.5, 1.6];
+
 // What a broken block drops in survival.
-const DROPS = { [GRASS]: DIRT, [STONE]: COBBLE, [LEAVES]: AIR, [GLASS]: AIR };
+const DROPS = { [GRASS]: DIRT, [STONE]: COBBLE, [GLASS]: AIR };
 const dropFor = (id) => (DROPS[id] !== undefined ? DROPS[id] : id);
 
 // ---------- Renderer / scene ----------
@@ -55,13 +61,15 @@ const hud = new HUD();
 const inventory = new Inventory((name) => hud.showName(name));
 const mobs = new Mobs(scene, world);
 
-let mode = CREATIVE;
+let mode = SURVIVAL;            // start in survival with an empty inventory
+let difficulty = NORMAL;
 let health = 20, hunger = 20, dead = false;
 let invuln = 0, regenTimer = 0, hungerTimer = 0, starveTimer = 0;
 
-player.setMode(CREATIVE);
-inventory.setMode(true);
-hud.setMode(false);
+player.setMode(SURVIVAL);
+inventory.setMode(false);
+hud.setMode(true);
+hud.setDifficulty(DIFF_NAMES[difficulty]);
 hud.setHealth(20); hud.setHunger(20);
 
 const stats = new Stats();
@@ -119,7 +127,7 @@ SPAWN.y = player.pos.y;
 const overlay = document.getElementById('overlay');
 const deathEl = document.createElement('div');
 deathEl.id = 'death';
-deathEl.innerHTML = `<div class="card"><h1>YOU DIED</h1><p class="play" id="respawn">↺ Respawn</p></div>`;
+deathEl.innerHTML = `<div class="card"><h1>YOU DIED</h1><p class="play" id="respawn">↺ Respawn</p><p id="hcnote" style="display:none;opacity:0.8;font-size:14px;margin-top:8px">Hardcore — reload the page to start a new world</p></div>`;
 deathEl.style.cssText = 'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(60,0,0,0.55);backdrop-filter:blur(3px);pointer-events:auto;z-index:25;text-align:center;';
 document.getElementById('ui').appendChild(deathEl);
 
@@ -139,7 +147,8 @@ function toggleMode() {
   player.setMode(mode);
   inventory.setMode(mode === CREATIVE);
   hud.setMode(mode === SURVIVAL);
-  if (mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
+  if (mode === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
+  hud.showName(mode === CREATIVE ? 'Creative Mode' : 'Survival Mode');
   resetBreak();
 }
 
@@ -153,23 +162,41 @@ function damagePlayer(dmg, srcX, srcZ) {
   }
   if (health <= 0) die();
 }
-function die() { dead = true; document.exitPointerLock(); resetBreak(); refreshOverlays(); }
+function die() {
+  dead = true; document.exitPointerLock(); resetBreak();
+  const hardcore = difficulty === HARDCORE;
+  deathEl.querySelector('h1').textContent = hardcore ? 'GAME OVER' : 'YOU DIED';
+  deathEl.querySelector('#respawn').style.display = hardcore ? 'none' : 'block';
+  deathEl.querySelector('#hcnote').style.display = hardcore ? 'block' : 'none';
+  refreshOverlays();
+}
 function respawn() {
+  if (difficulty === HARDCORE) return;
   dead = false; health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20);
   player.pos.copy(SPAWN); player.vel.set(0, 0, 0);
   refreshOverlays(); renderer.domElement.requestPointerLock();
 }
 
-// ---------- Keyboard (E inventory, G mode) ----------
+function openInventory(size) { inventory.openScreen(size); document.exitPointerLock(); refreshOverlays(); }
+function closeInventory() { inventory.close(); refreshOverlays(); if (!dead) renderer.domElement.requestPointerLock(); }
+
+function applyDifficulty() {
+  difficulty = (difficulty + 1) % 5;
+  hud.setDifficulty(DIFF_NAMES[difficulty]);
+  hud.showName('Difficulty: ' + DIFF_NAMES[difficulty]);
+}
+
+// ---------- Keyboard (E inventory, G mode, B difficulty) ----------
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') {
     if (dead) return;
-    if (inventory.open) { inventory.close(); refreshOverlays(); renderer.domElement.requestPointerLock(); }
-    else { inventory.openScreen(); document.exitPointerLock(); refreshOverlays(); }
+    if (inventory.open) closeInventory(); else openInventory(2);
   } else if (e.code === 'Escape' && inventory.open) {
     inventory.close(); refreshOverlays();
   } else if (e.code === 'KeyG') {
     if (!dead && !inventory.open) toggleMode();
+  } else if (e.code === 'KeyB') {
+    if (!dead && !inventory.open) applyDifficulty();
   }
 });
 
@@ -203,7 +230,10 @@ function breakBlock(x, y, z) {
   if (world.setBlock(x, y, z, AIR)) {
     particles.burst(x + 0.5, y + 0.5, z + 0.5, blockTint(id));
     sfx.break();
-    if (mode === SURVIVAL) { const d = dropFor(id); if (d !== AIR) inventory.add(d, 1); }
+    if (mode === SURVIVAL) {
+      if (id === LEAVES) { if (Math.random() < 0.06) inventory.add(APPLE, 1); }
+      else { const d = dropFor(id); if (d !== AIR) inventory.add(d, 1); }
+    }
   }
 }
 
@@ -224,6 +254,23 @@ function handleBreak(hit, dt) {
   crackMesh.visible = true;
   if (Math.random() < 0.25) particles.burst(hit.x + 0.5, hit.y + 0.6, hit.z + 0.5, blockTint(id), 2);
   if (breakProgress >= 1) { breakBlock(hit.x, hit.y, hit.z); resetBreak(); }
+}
+
+// Right click: open a crafting table, else eat held food, else place a block.
+function handleUse() {
+  const look = castFromEye();
+  if (look.hit && world.getBlock(look.x, look.y, look.z) === CRAFTING_TABLE) { openInventory(3); return; }
+
+  const sel = inventory.selectedId();
+  if (isFood(sel)) {
+    if (mode === SURVIVAL && hunger >= 20) return;
+    hunger = Math.min(20, hunger + foodValue(sel));
+    hud.setHunger(hunger);
+    inventory.consumeSelected();
+    sfx.place();
+    return;
+  }
+  doPlace();
 }
 
 function doPlace() {
@@ -258,19 +305,22 @@ function attackOrBreak(dt) {
 
 function onKill(mob) {
   particles.burst(mob.pos.x, mob.pos.y + mob.height * 0.5, mob.pos.z, [200, 150, 150], 16);
-  if (mode === SURVIVAL && mob.def.drop) inventory.add(mob.def.drop, 1 + ((Math.random() * 2) | 0));
+  if (mode === SURVIVAL) for (const d of mob.getDrops()) inventory.add(d.id, d.count);
 }
 
 // ---------- Survival tick (hunger / regen) ----------
 function survivalTick(dt, moving) {
   if (mode !== SURVIVAL || dead) return;
-  hungerTimer += dt * (moving ? 1.4 : 0.4);
-  if (hungerTimer > 8 && hunger > 0) { hunger--; hungerTimer = 0; hud.setHunger(hunger); }
-  if (hunger >= 18 && health < 20) {
+  const peaceful = difficulty === PEACEFUL;
+  if (!peaceful) {
+    hungerTimer += dt * (moving ? 1.4 : 0.4);
+    if (hungerTimer > 8 && hunger > 0) { hunger--; hungerTimer = 0; hud.setHunger(hunger); }
+  }
+  if ((peaceful || hunger >= 18) && health < 20) {
     regenTimer += dt;
-    if (regenTimer > 3) { health = Math.min(20, health + 1); regenTimer = 0; hud.setHealth(health); }
+    if (regenTimer > (peaceful ? 1.5 : 3)) { health = Math.min(20, health + 1); regenTimer = 0; hud.setHealth(health); }
   } else regenTimer = 0;
-  if (hunger <= 0) {
+  if (!peaceful && hunger <= 0) {
     starveTimer += dt;
     if (starveTimer > 4 && health > 2) { health--; starveTimer = 0; hud.setHealth(health); hud.flashHurt(); }
   } else starveTimer = 0;
@@ -311,13 +361,15 @@ function frame() {
   sun.color.copy(sky.dirColor); sun.intensity = sky.dirIntensity;
   ambient.color.copy(sky.dirColor); ambient.intensity = sky.ambIntensity;
 
-  mobs.update(dead ? 0 : dt, player, sky.isNight, { damagePlayer, onKill });
+  mobs.update(dead ? 0 : dt, player, sky.isNight, {
+    damagePlayer, onKill, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
+  });
 
   // Interaction
   invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt;
   if (active) {
     if (mouseLeft) attackOrBreak(dt); else resetBreak();
-    if (mouseRight && placeCD <= 0) { doPlace(); placeCD = 0.25; }
+    if (mouseRight && placeCD <= 0) { handleUse(); placeCD = 0.25; }
     survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
   }
 
@@ -331,4 +383,8 @@ function frame() {
 }
 frame();
 
-window.__game = { world, player, sky, scene, renderer, mobs, inventory, crackMesh, crackMat, CRACK_TEXTURES, toggleMode, get state() { return { mode, health, hunger, dead }; } };
+window.__game = {
+  world, player, sky, scene, renderer, mobs, inventory, crackMesh, crackMat, CRACK_TEXTURES,
+  toggleMode, applyDifficulty, openInventory,
+  get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead }; },
+};
