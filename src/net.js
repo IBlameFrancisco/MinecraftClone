@@ -7,6 +7,7 @@ import { Peer } from 'peerjs';
 import * as THREE from 'three';
 import { rayAABB } from './physics.js';
 import { getSkin, DEFAULT_SKIN } from './skins.js';
+import { makeHeldWeapon } from './guns.js';
 
 const PREFIX = 'guncraft-';
 
@@ -168,6 +169,7 @@ export class Multiplayer {
         this.handlers.onKillFeed?.(d.name, d.by);
         if (this.isHost) { this.handlers.onDeathAuthority?.(d.by, d.id); this._relay(conn.peer, d); }
         break;
+      case 'pfire': this.handlers.onPlayerFire?.(d); if (this.isHost) this._relay(conn.peer, d); break;   // a remote player's shot (visual)
       case 'bpos': this._syncBots(d.bots); break;     // host → guests
       case 'bfire': this.handlers.onBotFire?.(d); break;
       case 'board': this.handlers.onBoard?.(d); break;
@@ -198,7 +200,7 @@ export class Multiplayer {
     const now = performance.now();
     if (now - this._lastPos < 50) return;          // ~20 Hz
     this._lastPos = now;
-    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive !== false });
+    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive !== false, wep: p.wep | 0 });
   }
   sendEdit(x, y, z, id) { if (this.online) this.broadcast({ t: 'edit', x, y, z, id }); }
   sendEdits(list) { if (this.online && list.length) this.broadcast({ t: 'edits', list }); }
@@ -263,6 +265,15 @@ export class Multiplayer {
     if (!r) { r = { group: makeAvatar(d.name || 'Player', getSkin(d.skin)) }; this.group.add(r.group); this.remotes.set(id, r); }
     r.target = { x: d.x, y: d.y, z: d.z, yaw: d.yaw };
     r.group.visible = d.alive !== false;          // hide dead/spectating players (mirrors _updateBot)
+    this._setHeldWeapon(r, d.wep | 0);
+  }
+
+  // Show the gun/jutsu a remote player is holding in their hand (rebuild on change).
+  _setHeldWeapon(r, wep) {
+    if (r.wep === wep) return;
+    r.wep = wep;
+    if (r.weapon) { r.group.remove(r.weapon); r.weapon.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); r.weapon = null; }
+    if (wep) { try { r.weapon = makeHeldWeapon(wep); r.group.add(r.weapon); } catch { r.weapon = null; } }
   }
 
   // Guest-side bot avatar (driven by the host's 'bpos'); team-coloured, hidden when dead.
@@ -300,12 +311,21 @@ export class Multiplayer {
 
   update(dt) {
     const k = Math.min(1, 10 * dt);
+    this._t = (this._t || 0) + dt;
     for (const r of this.remotes.values()) {
       if (!r.target) continue;
       r.group.position.x += (r.target.x - r.group.position.x) * k;
       r.group.position.y += (r.target.y - r.group.position.y) * k;
       r.group.position.z += (r.target.z - r.group.position.z) * k;
-      r.group.rotation.y += (r.target.yaw - r.group.rotation.y) * k;
+      // A player's forward is (-sin yaw, -cos yaw) but the avatar faces +Z, so a
+      // human avatar must turn yaw+π to face where they look (bots already use the
+      // +Z/atan2 convention). Lerp along the shortest arc so it never spins around.
+      const faceYaw = r.target.yaw + (r.bot ? 0 : Math.PI);
+      let dy = faceYaw - r.group.rotation.y;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      r.group.rotation.y += dy * k;
+      if (r.weapon && r.weapon.userData.chakraAnim) r.weapon.userData.chakraAnim(0.7, dt, this._t);   // spin the held jutsu orb
     }
   }
 

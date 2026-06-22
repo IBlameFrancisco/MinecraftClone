@@ -600,6 +600,19 @@ const mpHandlers = {
   onBotHit: (botId, dmg, fromName, head) => botHurt(botId, dmg, fromName, head),
   onDeathAuthority: (by, id) => registerKill(by, id),
   onBotFire: (d) => { shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color); sfx.gunAt(d.kind === 'rail' ? 'rail' : d.kind === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z); },
+  // Another player's shot — render it visually (no damage; their client resolves hits).
+  onPlayerFire: (d) => {
+    const muzzle = new THREE.Vector3(d.x, d.y, d.z), dir = new THREE.Vector3(d.dx, d.dy, d.dz);
+    const k = d.k;
+    if (k === 'hitscan' || k === 'shotgun' || k === 'rail') {
+      shotTracer(k, muzzle, dir.clone().normalize(), d.r || 60, d.c || 0xffd27a);
+      sfx.gunAt(k === 'rail' ? 'rail' : k === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z);
+    } else if (k === 'plasma') { plasmas.spawn(muzzle, dir.clone().normalize(), d.sp || 40, 0, d.r || 70, true); sfx.plasma(); }
+    else if (k === 'rocket') { rockets.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 30, range: d.r || 70 }, 'remote', true); sfx.gunAt('shotgun', d.x, d.y, d.z); }
+    else if (k === 'grenade') { grenades.spawn(muzzle, dir, d.fuse || 1.6, null, true); sfx.place(); }
+    else if (k === 'rasengan') { chakra.burst(muzzle.clone().addScaledVector(dir.clone().normalize(), 2.2), 1.6 + 1.8 * (d.cf || 1), 0x4aa3ff, false); sfx.rasengan(); }
+    else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); sfx.rasenshuriken(); }
+  },
   onBoard: (d) => {
     board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
     const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
@@ -1521,14 +1534,18 @@ function spreadDir(dir, spread) {
   return _sd.copy(dir).addScaledVector(_rt, ox).addScaledVector(_up2, oy).normalize();
 }
 
+// Broadcast a shot so other players see our tracers/projectiles (visual-only on their end).
+function broadcastFire(kind, muzzle, dir, extra) {
+  if (mp.online) mp.broadcast(Object.assign({ t: 'pfire', k: kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z }, extra || {}));
+}
 function fireGun(gun, secondary) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
-  if (gun.kind === 'hitscan') fireHitscan(gun, muzzle);
-  else if (gun.kind === 'shotgun') fireShotgun(gun, muzzle);
-  else if (gun.kind === 'rail') fireRail(gun, muzzle);
-  else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); }
-  else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); }
+  if (gun.kind === 'hitscan') { fireHitscan(gun, muzzle); broadcastFire('hitscan', muzzle, _dir, { r: gun.range, c: gun.zoom ? 0xbfe4ff : 0xfff1b0 }); }
+  else if (gun.kind === 'shotgun') { fireShotgun(gun, muzzle); broadcastFire('shotgun', muzzle, _dir, { r: gun.range, c: 0xffd27a }); }
+  else if (gun.kind === 'rail') { fireRail(gun, muzzle); broadcastFire('rail', muzzle, _dir, { r: gun.range, c: 0xb98bff }); }
+  else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); broadcastFire('plasma', muzzle, _dir, { sp: gun.speed, r: gun.range }); }
+  else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); broadcastFire('rocket', muzzle, _dir, { sp: gun.speed, r: gun.range }); }
   else if (gun.kind === 'blackhole') { blackholes.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.blackhole(); }
   else if (gun.kind === 'rasengan') fireRasengan(gun);
   else if (gun.kind === 'rasenshuriken') { chakra.throw(muzzle, _dir.clone(), gun, mp.myId || 'me', rasenshurikenImpact); sfx.rasenshuriken(); addShake(0.18); }
@@ -1701,13 +1718,14 @@ function releaseCharge(gun, cf) {
   }
   chakraEnergy -= cost;
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
-  if (gun.kind === 'rasengan') fireRasengan(gun, cf);
+  if (gun.kind === 'rasengan') { fireRasengan(gun, cf); broadcastFire('rasengan', _eye, _dir, { cf }); }
   else if (gun.kind === 'rasenshuriken') {
     const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
     // Longer charge → faster throw, a bigger dome and far more splash.
     const scaled = { ...gun, radius: gun.radius * (0.5 + 0.5 * cf), splash: Math.round(gun.splash * (0.35 + 0.65 * cf)), speed: gun.speed * (0.7 + 0.3 * cf) };
     chakra.throw(muzzle, _dir.clone(), scaled, mp.myId || 'me', rasenshurikenImpact);
     sfx.rasenshuriken(); addShake(0.06 + 0.2 * cf);
+    broadcastFire('rasenshuriken', muzzle, _dir, { cf, sp: scaled.speed, rad: scaled.radius, r: gun.range });
   }
   vmRecoil = Math.min(1, vmRecoil + 0.6);
   return true;
@@ -1859,7 +1877,9 @@ function throwGrenade() {
   grenadeCount--; grenadeCD = 0.5; hud.setGrenades(grenadeCount);
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   const vel = _dir.clone().multiplyScalar(17); vel.y += 3.5;
-  grenades.spawn(_eye.clone().addScaledVector(_dir, 0.5), vel, 1.6, grenadeExplode);
+  const gpos = _eye.clone().addScaledVector(_dir, 0.5);
+  grenades.spawn(gpos, vel, 1.6, grenadeExplode);
+  broadcastFire('grenade', gpos, vel, { fuse: 1.6 });   // dx/dy/dz carry the throw velocity
   sfx.place();
 }
 
@@ -2150,7 +2170,7 @@ function frame() {
   mp.update(dt);
   // Keep broadcasting in-game even while dead so peers can hide our avatar (alive flag);
   // only the home menu suppresses it.
-  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated });
+  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated, wep: gunOf(inventory.selectedId()) ? inventory.selectedId() : 0 });
 
   // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
   shakeAmt *= Math.max(0, 1 - 9 * dt);
