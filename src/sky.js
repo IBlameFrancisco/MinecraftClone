@@ -27,11 +27,12 @@ const ARENA_FOG = sc(0.78, 0.91, 1.0);
 const ARENA_TINT = new THREE.Color(1.1, 1.06, 1.0);    // bright, slightly warm (linear multiplier, >1 → glow)
 const _ARENA_SUN = new THREE.Vector3(0.32, 0.86, 0.38).normalize();
 
-// ---- War mode (D-Day beach): a bleak, overcast, smoke-hazed grey morning. ----
-const WAR_TOP = sc(0.40, 0.43, 0.48);
-const WAR_HORIZON = sc(0.58, 0.58, 0.60);
-const WAR_FOG = sc(0.60, 0.60, 0.62);
-const WAR_TINT = new THREE.Color(0.74, 0.74, 0.76);
+// ---- War mode (D-Day beach): a bleak, overcast, smoke-hazed grey morning with a
+// warm horizon stain from the fires up the beach. ----
+const WAR_TOP = sc(0.28, 0.31, 0.37);
+const WAR_HORIZON = sc(0.54, 0.49, 0.43);
+const WAR_FOG = sc(0.52, 0.49, 0.46);
+const WAR_TINT = new THREE.Color(0.70, 0.67, 0.63);
 
 function radialSprite(inner, outer) {
   const c = document.createElement('canvas');
@@ -258,24 +259,28 @@ export class Sky {
     this.fog.near = 16; this.fog.far = 150;
     setWorldTint(WAR_TINT.r, WAR_TINT.g, WAR_TINT.b);
 
-    // Flat overcast daylight — soft directional, no harsh sun.
+    // Flat overcast daylight — soft directional, no harsh sun; a faint warm flicker
+    // from the fires on the beach.
+    this._flickT += dt;
+    const ember = 1 + 0.05 * Math.sin(this._flickT * 3.3) + 0.03 * Math.sin(this._flickT * 11);
+    this.uniforms.horizonColor.value.copy(WAR_HORIZON).multiplyScalar(ember);
     this.isNight = false;
     this.sunDir.set(0.25, 0.85, 0.35).normalize();
-    this.dirColor.setRGB(0.78, 0.78, 0.80);
-    this.dirIntensity = 0.7;
-    this.ambIntensity = 0.62;
-    setWaterEnv(this.sunDir, WAR_HORIZON, 0.6);
+    this.dirColor.setRGB(0.74, 0.71, 0.68);
+    this.dirIntensity = 0.66;
+    this.ambIntensity = 0.6;
+    setWaterEnv(this.sunDir, WAR_HORIZON, 0.55);
 
     const cam = this.camera.position;
     this.dome.position.copy(cam);
     this.sun.material.opacity = 0;
     this.moon.material.opacity = 0;
-    // Heavy low overcast.
+    // Heavy, low, fast-drifting smoke pall.
     this.clouds.position.x = cam.x; this.clouds.position.z = cam.z;
-    this.clouds.material.map.offset.x += dt * 0.003;
-    this.clouds.material.map.offset.y += dt * 0.0015;
-    this.clouds.material.color.setRGB(0.55, 0.55, 0.57);
-    this.clouds.material.opacity = 0.85;
+    this.clouds.material.map.offset.x += dt * 0.006;
+    this.clouds.material.map.offset.y += dt * 0.0026;
+    this.clouds.material.color.setRGB(0.42, 0.41, 0.42);
+    this.clouds.material.opacity = 0.9;
     return this.time;
   }
 
