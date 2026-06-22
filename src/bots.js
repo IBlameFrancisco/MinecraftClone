@@ -256,7 +256,7 @@ export class BotManager {
       } else if (b.defend && b.anchor) {
         // Defender: hold the nest. Return to it if pushed off; otherwise shuffle and fire.
         const ax = b.anchor.x - b.pos.x, az = b.anchor.z - b.pos.z, ad = Math.hypot(ax, az);
-        if (ad > 4.5) { desiredX = ax; desiredZ = az; }
+        if (ad > 2.5) { desiredX = ax; desiredZ = az; }   // hug the nest line so the embrasure stays in front of the gun
         else { if (b.strafeTimer <= 0) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeTimer = 1.2 + Math.random(); }
           // Gentle nest shuffle — apply as a slower speed, not a smaller vector (which the
           // unit-normalisation below would cancel out, making defenders strafe at full tilt).
