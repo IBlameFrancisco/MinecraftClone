@@ -280,8 +280,9 @@ export class BotManager {
     if (b.vel.y < -34) b.vel.y = -34;
     b.onGround = moveEntity(ctx.world, b.pos, b.vel, HALF, HEIGHT, dt);
 
-    // Fell off the map → eliminate (counts as a death, no killer).
-    if (b.pos.y < ctx.arenaFloorY - 25) { b.alive = false; }
+    // Fell off the map → eliminate (counts as a death, no killer — clear any recent
+    // hit so it isn't credited to whoever last tagged it).
+    if (b.pos.y < ctx.arenaFloorY - 25) { b.alive = false; b.lastHitTime = -1e9; }
 
     b.mesh.position.copy(b.pos);
     b.mesh.rotation.y = b.yaw;

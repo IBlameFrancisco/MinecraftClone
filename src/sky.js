@@ -134,6 +134,14 @@ export class Sky {
     this._normalFog = [this.fog.near, this.fog.far];
   }
 
+  // Recompute fog distances when the render distance changes (else fog stays pegged
+  // to the initial value and terrain pops in past the fog wall).
+  setRenderDistance(rd) {
+    const far = (rd - 0.5) * CHUNK_SIZE;
+    this._normalFog = [far * 0.45, far];
+    if (!this.arena && !this.war) { this.fog.near = far * 0.45; this.fog.far = far; }
+  }
+
   _restoreSky() {
     this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1];
     this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(40);
