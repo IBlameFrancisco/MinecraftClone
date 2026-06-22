@@ -602,7 +602,7 @@ const mpHandlers = {
   onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg, undefined, undefined, true); },
   onKillFeed: (victim, killer) => { hud.addKill(victim, killer); if (killer === myName()) announceKill(false); },
   onBotHit: (botId, dmg, fromName, head) => botHurt(botId, dmg, fromName, head),
-  onDeathAuthority: (by, id) => registerKill(by, id),
+  onDeathAuthority: (by, id) => { const r = mp.remotes.get(id); if (r) noteKill(by, mp.roster.get(id), r.group.position.x, r.group.position.y + 1, r.group.position.z); registerKill(by, id); },
   onBotFire: (d) => { shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color); sfx.gunAt(d.kind === 'rail' ? 'rail' : d.kind === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z); },
   // Another player's shot — render it visually (no damage; their client resolves hits).
   onPlayerFire: (d) => {
@@ -622,7 +622,7 @@ const mpHandlers = {
     const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
     hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo()); mp.recolorBots(colorForBot);
   },
-  onRoundOver: (winner) => { hud.showRoundOver(winner); hud.showScoreboard(); },
+  onRoundOver: (winner) => { matchWinner = winner; if (!(gameMode === 'gungame' && startKillCam(winner))) { hud.showRoundOver(winner); hud.showScoreboard(); } },
   onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
   botColor: (team) => colorForBot(team),
 };
@@ -732,6 +732,7 @@ function battleDeath() {
   const killer = (now - lastHitTime < 10) ? lastHitBy : null;
   hud.addKill(myName(), killer);
   if (mp.online) mp.sendDeath(killer);
+  noteKill(killer, myName(), player.pos.x, player.pos.y + 1, player.pos.z);
   if (isAuthority()) registerKill(killer, selfId(), myName());
   particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 80, 80], 30);
   sfx.gun('sniper'); lastHitBy = null; streak = 0;
@@ -771,7 +772,12 @@ let warTimer = 0;                // countdown — Axis win if it runs out
 let warCapture = 0;             // Allied capture progress on the objective (0..100)
 let warFinalAnnounced = false;   // announced "reinforcements exhausted" yet
 const WAR_TIME = 180, WAR_TICKETS = 18;
-const GUNGAME_LADDER = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, PLASMA_GUN, SNIPER, RAILGUN, ROCKET_LAUNCHER];
+// Gun Game ladder — escalates weakest→strongest, finishing on the point-blank
+// Rasengan (the "knife round": you must close to chakra range for the win).
+const GUNGAME_LADDER = [
+  HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, HEAVY_MG, PLASMA_GUN,
+  SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, RASENSHURIKEN, RASENGAN,
+];
 const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
 const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
 let hillMesh = null, zoneMesh = null;
@@ -780,6 +786,9 @@ const humanScore = new Map();   // remote human id -> { k, d }
 const teamAssign = new Map();   // combatant id -> team
 let board = [];                 // scoreboard snapshot
 let matchWinner = null, matchOverTimer = 0;
+// Gun Game final-kill cam: a cinematic orbit on the match-winning kill.
+const killCam = { active: false, t: 0, dur: 4.6, focus: new THREE.Vector3(), base: 0, sweep: 1.3, r0: 8, r1: 4.6, h0: 3.2, h1: 1.9 };
+const lastKill = { killer: '', victim: '', vpos: new THREE.Vector3(), at: -1 };
 let coverPoints = [];
 const isAuthority = () => (!mp.online || mp.isHost);
 const selfId = () => (mp.online ? mp.myId : 'me');
@@ -828,7 +837,7 @@ function setupMatch() {
   if (gameMode === 'wave' || gameMode === 'war') teamMode = true;
   scoreLimit = gameMode === 'gungame' ? GUNGAME_LADDER.length : battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
-  matchWinner = null; matchOverTimer = 0; hud.hideRoundOver();
+  matchWinner = null; matchOverTimer = 0; endKillCam(false); hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
@@ -1062,6 +1071,12 @@ function addDeathById(id) {
   const bt = botMgr.get(id); if (bt) { bt.deaths++; return; }
   const s = humanScore.get(id) || { k: 0, d: 0 }; s.d++; humanScore.set(id, s);
 }
+// Record the most recent kill (who, whom, where) so that if it turns out to be
+// the match-winning blow in Gun Game we can frame the final-kill cam on it.
+function noteKill(killerName, victimName, vx, vy, vz) {
+  lastKill.killer = killerName || ''; lastKill.victim = victimName || '';
+  lastKill.vpos.set(vx, vy, vz); lastKill.at = performance.now() / 1000;
+}
 function registerKill(killerName, victimId) {
   if (!isAuthority() || matchWinner) { return; }
   addKillByName(killerName); addDeathById(victimId);
@@ -1086,17 +1101,72 @@ function checkWin() {
   }
 }
 function endMatch(winner) {
-  matchWinner = winner; matchOverTimer = 7;
+  matchWinner = winner;
   if (mp.isHost) mp.broadcast({ t: 'roundover', winner });
-  hud.showRoundOver(winner); hud.announce(`${winner} wins!`, '#ffd86b'); sfx.announce('win');
-  hud.showScoreboard();   // final standings during the round-over
+  // Gun Game gets a cinematic final-kill cam before the standings come up.
+  const cam = gameMode === 'gungame' && startKillCam(winner);
+  matchOverTimer = cam ? 8.5 : 7;
+  if (!cam) { hud.showRoundOver(winner); hud.showScoreboard(); }
+  hud.announce(`${winner} wins!`, '#ffd86b'); sfx.announce('win');
+}
+
+// Resolve a combatant's live position by name (self / bot / remote).
+function findCombatantPos(name, out) {
+  if (!name) return false;
+  if (name === myName()) { out.copy(player.pos); return true; }
+  for (const b of botMgr.bots) if (b.name === name) { out.copy(b.pos); return true; }
+  if (mp.online) for (const [id, n] of mp.roster) if (n === name) { const r = mp.remotes.get(id); if (r) { out.copy(r.group.position); return true; } }
+  return false;
+}
+const _kcWin = new THREE.Vector3();
+function startKillCam(winner) {
+  if (!findCombatantPos(winner, _kcWin)) return false;
+  const fresh = (performance.now() / 1000 - lastKill.at < 1.2) && lastKill.killer === winner;
+  const v = fresh ? lastKill.vpos : null;
+  // Frame the orbit between the winner and (if known) their last victim.
+  killCam.focus.copy(_kcWin); killCam.focus.y += 1.0;
+  if (v) killCam.focus.set((_kcWin.x + v.x) / 2, (_kcWin.y + 1.0 + v.y) / 2, (_kcWin.z + v.z) / 2);
+  // Start behind the winner, looking past them toward the action, then sweep.
+  let bx = v ? _kcWin.x - v.x : _kcWin.x - killCam.focus.x;
+  let bz = v ? _kcWin.z - v.z : _kcWin.z - killCam.focus.z;
+  if (bx === 0 && bz === 0) bz = 1;
+  killCam.base = Math.atan2(bz, bx);
+  killCam.sweep = (Math.random() < 0.5 ? 1 : -1) * (1.0 + Math.random() * 0.5);
+  killCam.t = 0; killCam.active = true;
+  hud.showKillCam(winner, fresh ? lastKill.victim : '');
+  return true;
+}
+const _kcEye = new THREE.Vector3();
+function updateKillCam(dt) {
+  if (!killCam.active) return;
+  killCam.t += Math.max(0, dt);
+  const p = Math.min(1, killCam.t / killCam.dur);
+  const e = 1 - Math.pow(1 - p, 3);                       // easeOutCubic dolly-in
+  const ang = killCam.base + killCam.sweep * e;
+  const rad = killCam.r0 + (killCam.r1 - killCam.r0) * e;
+  const h = killCam.h0 + (killCam.h1 - killCam.h0) * e;
+  const f = killCam.focus;
+  _kcEye.set(f.x + Math.cos(ang) * rad, f.y + h, f.z + Math.sin(ang) * rad);
+  // Don't let the cam sink below the arena floor.
+  if (_kcEye.y < ARENA.FLOOR + 1.2) _kcEye.y = ARENA.FLOOR + 1.2;
+  camera.position.copy(_kcEye);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(f.x, f.y + 0.1, f.z);
+  if (viewModel) viewModel.visible = false;   // no first-person hands during the cam
+  if (killCam.t >= killCam.dur) endKillCam(true);
+}
+function endKillCam(showRound) {
+  if (!killCam.active) return;
+  killCam.active = false;
+  hud.hideKillCam();
+  if (showRound && matchWinner) { hud.showRoundOver(matchWinner); hud.showScoreboard(); }
 }
 function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
-  matchWinner = null; hud.hideRoundOver(); hud.hideScoreboard();
+  matchWinner = null; endKillCam(false); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
     warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
   }
@@ -1122,6 +1192,7 @@ function onBotKilled(b) {
   hud.addKill(b.name, killer);
   if (killer === myName()) announceKill(b.lastHeadshot);
   if (mp.isHost) mp.broadcast({ t: 'death', id: b.id, name: b.name, by: killer });
+  noteKill(killer, b.name, b.pos.x, b.pos.y + 1, b.pos.z);
   registerKill(killer, b.id);
   b.mesh.visible = false; b.respawnIn = 2.5;
 }
@@ -1227,18 +1298,33 @@ function shotTracer(kind, muzzle, dir, range, color) {
   if (kind === 'rail') tracers.add(muzzle, end, 0xe6d4ff);
 }
 // A bot fires its current gun (authority): resolve damage + spawn/broadcast visuals.
+// Bots resolve every gun as instant hitscan for clean damage attribution. Most
+// weapons set gun.damage directly; projectile/AoE/jutsu kinds (rocket, plasma,
+// blackhole, rasengan, rasenshuriken) either lean on splash or deal 0 on the
+// direct hit, so derive an effective bot damage from splash — otherwise a bot
+// forced onto e.g. the Rasenshuriken in Gun Game could never score and stall.
+function botEffectiveDamage(gun) {
+  if (gun.damage > 0) return gun.damage;
+  if (gun.splash) return Math.max(8, Math.round(gun.splash * 0.4));
+  return 12;
+}
 function botFire(bot, dir) {
   const gun = bot.gun;
   bot.eye(_botEye);
   const muzzle = _botEye.clone().addScaledVector(dir, 0.6);
-  const color = gun.kind === 'rail' ? 0xb98bff : (gun.zoom ? 0xbfe4ff : 0xffd27a);
+  const color = gun.kind === 'rail' ? 0xb98bff
+    : gun.kind === 'rasengan' || gun.kind === 'rasenshuriken' ? 0x9fdcff
+    : gun.kind === 'blackhole' ? 0xb98bff
+    : gun.kind === 'plasma' ? 0x7af0e2
+    : (gun.zoom ? 0xbfe4ff : 0xffd27a);
+  const dmg = botEffectiveDamage(gun);
   if (gun.kind === 'shotgun') {
-    for (let i = 0; i < gun.pellets; i++) { const pd = spreadDir(dir, gun.spread); botBullet(bot, pd, gun.range, gun.damage, false); shotTracer('shotgun', muzzle, pd, gun.range, color); }
+    for (let i = 0; i < gun.pellets; i++) { const pd = spreadDir(dir, gun.spread); botBullet(bot, pd, gun.range, dmg, false); shotTracer('shotgun', muzzle, pd, gun.range, color); }
   } else if (gun.kind === 'rail') {
-    botBullet(bot, dir, gun.range, gun.damage, true); shotTracer('rail', muzzle, dir, gun.range, color);
+    botBullet(bot, dir, gun.range, dmg, true); shotTracer('rail', muzzle, dir, gun.range, color);
   } else {
     const pd = gun.spread ? spreadDir(dir, gun.spread) : dir;
-    botBullet(bot, pd, gun.range, gun.damage, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
+    botBullet(bot, pd, gun.range, dmg, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
   }
   if (botSoundBudget > 0) { botSoundBudget--; sfx.gunAt(gun.kind === 'rail' ? 'rail' : gun.kind === 'shotgun' ? 'shotgun' : gun.zoom ? 'sniper' : 'handgun', muzzle.x, muzzle.y, muzzle.z); }
   if (mp.isHost) mp.broadcast({ t: 'bfire', kind: gun.kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z, range: gun.range, color });
@@ -1737,15 +1823,19 @@ function rocketImpact(pos, gun) {
 // Unleash a charged jutsu (cf = 0..1 charge fraction). Jutsu draw from the chakra
 // reserve — a weak tap costs less, a full charge costs the most. No chakra → fizzle.
 function releaseCharge(gun, cf) {
+  // Gun Game cycles you through every weapon — don't gate the jutsu tiers on the
+  // chakra reserve, or a player could reach the Rasengan/Rasenshuriken and be
+  // unable to fire (and unable to win). Every other mode pays the chakra cost.
+  const freeJutsu = gameMode === 'gungame';
   const cost = Math.round((gun.kind === 'rasenshuriken' ? RASENSHURIKEN_COST : RASENGAN_COST) * (0.5 + 0.5 * cf));
-  if (chakraEnergy < cost) {                       // not enough chakra — sputter out
+  if (!freeJutsu && chakraEnergy < cost) {          // not enough chakra — sputter out
     player.eyePosition(_eye); camera.getWorldDirection(_dir);
     const p = _eye.clone().addScaledVector(_dir, 0.5);
     particles.burst(p.x, p.y, p.z, [110, 150, 200], 8);
     hud.setChakra(chakraEnergy / CHAKRA_MAX, false);
     return false;
   }
-  chakraEnergy -= cost;
+  if (!freeJutsu) chakraEnergy -= cost;
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   if (gun.kind === 'rasengan') { fireRasengan(gun, cf); broadcastFire('rasengan', _eye, _dir, { cf }); }
   else if (gun.kind === 'rasenshuriken') {
@@ -2007,7 +2097,7 @@ function frame() {
   world.processQueues(loaded ? 6 : 40);
   if (!loaded) updateLoading();
 
-  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated;
+  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated && !killCam.active;
   // Pausing (Esc) freezes the single-player world; co-op keeps running (can't pause others).
   const frozen = paused && !mp.online;
   const sdt = frozen ? 0 : dt;
@@ -2221,6 +2311,7 @@ function frame() {
   // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
   shakeAmt *= Math.max(0, 1 - 9 * dt);
   if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+  updateKillCam(dt);   // takes over the camera for the Gun Game final-kill cam
   camera.getWorldDirection(_camFwd);
   sfx.setListener(camera.position.x, camera.position.y, camera.position.z, _camFwd.x, _camFwd.z);
 
@@ -2258,6 +2349,9 @@ window.__game = {
   __channel: (on) => { chargingChakra = !!on; },                           // simulate holding C in tests
   __break: (x, y, z) => breakBlock(x, y, z, false),                        // test hook: break a block (runs water-fill)
   __cactusContact: (dt) => cactusContact(dt),
+  __endMatch: (w) => endMatch(w),                       // test hook: force a round win
+  get gunGameLadder() { return GUNGAME_LADDER.slice(); },
+  get killCam() { return { active: killCam.active, t: killCam.t, fx: killCam.focus.x, fz: killCam.focus.z }; },
   get vmCharge() { return vmCharge; },
   get chakraEnergy() { return chakraEnergy; },
   set chakraEnergy(v) { chakraEnergy = v; },
