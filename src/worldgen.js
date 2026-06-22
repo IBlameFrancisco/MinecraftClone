@@ -41,21 +41,67 @@ const ARENA_STRUCT = [
   { x0: 28, x1: 28, z0: 16, z1: 16, y0: 1, y1: 2, mat: COBBLE, cap: GLOWSTONE },
 ];
 
-// Re-skinnable arena palettes. The layout is identical across every theme (the
-// same balanced, mirrored map), but the materials, light sources and a little
-// decoration change — so each map plays the same yet looks, and is lit, wholly
-// different. Material roles: f1/f2 floor checker, node lit-grid, wall/band/cren
-// perimeter, daisStep/beacon/sheath centre, pin/pout structure cover.
+// Per-theme arena LAYOUTS — each map has its own structure tuned for a different
+// style of weapon, authored in folded (|x|,|z|) quadrant coords (mirrored into all
+// four quadrants). `mat` is a role marker: COBBLE → the theme's `pin` cover, PLANK
+// → `pout`; `cap` → a `beacon` light one above the top.
+//
+// JUNGLE — close-quarters: a maze of head-high walls + (with the trees) dense
+// cover and short sightlines. Rewards shotgun / SMG / point-blank jutsu.
+const JUNGLE_STRUCT = [
+  { x0: 9, x1: 10, z0: 9, z1: 15, y0: 1, y1: 3, mat: COBBLE },
+  { x0: 9, x1: 15, z0: 9, z1: 10, y0: 1, y1: 3, mat: COBBLE },
+  { x0: 16, x1: 22, z0: 14, z1: 15, y0: 1, y1: 3, mat: PLANK },
+  { x0: 14, x1: 15, z0: 16, z1: 22, y0: 1, y1: 3, mat: PLANK },
+  { x0: 24, x1: 25, z0: 8, z1: 16, y0: 1, y1: 3, mat: COBBLE },
+  { x0: 8, x1: 16, z0: 24, z1: 25, y0: 1, y1: 3, mat: COBBLE },
+  { x0: 20, x1: 21, z0: 26, z1: 31, y0: 1, y1: 3, mat: PLANK },
+  { x0: 26, x1: 31, z0: 20, z1: 21, y0: 1, y1: 3, mat: PLANK },
+  { x0: 29, x1: 31, z0: 29, z1: 31, y0: 1, y1: 4, mat: COBBLE, cap: GLOWSTONE },
+  { x0: 12, x1: 13, z0: 30, z1: 32, y0: 1, y1: 3, mat: COBBLE },
+  { x0: 30, x1: 32, z0: 12, z1: 13, y0: 1, y1: 3, mat: COBBLE },
+];
+// FROZEN — long-range: a wide-open ice field with only tall sniper perches and a
+// few low blocks. Sweeping sightlines reward the sniper / railgun / laser.
+const FROZEN_STRUCT = [
+  // Corner sniper perch — 1-high steps you can walk up to a raised platform + spire.
+  { x0: 27, x1: 31, z0: 27, z1: 31, y0: 1, y1: 1, mat: COBBLE },
+  { x0: 28, x1: 31, z0: 28, z1: 31, y0: 1, y1: 2, mat: COBBLE },
+  { x0: 29, x1: 31, z0: 29, z1: 31, y0: 1, y1: 3, mat: PLANK },
+  { x0: 31, x1: 31, z0: 31, z1: 31, y0: 1, y1: 5, mat: COBBLE, cap: GLOWSTONE },
+  // Two stepped mid perches.
+  { x0: 11, x1: 13, z0: 27, z1: 29, y0: 1, y1: 1, mat: COBBLE },
+  { x0: 12, x1: 13, z0: 28, z1: 29, y0: 1, y1: 2, mat: PLANK, cap: GLOWSTONE },
+  { x0: 27, x1: 29, z0: 11, z1: 13, y0: 1, y1: 1, mat: COBBLE },
+  { x0: 28, x1: 29, z0: 12, z1: 13, y0: 1, y1: 2, mat: PLANK, cap: GLOWSTONE },
+  // One sliver of central low cover — otherwise wide open.
+  { x0: 17, x1: 19, z0: 17, z1: 17, y0: 1, y1: 2, mat: COBBLE },
+];
+// DESERT — explosives / verticality: open ground with raised plateaus, ramps and
+// low walls to bank rockets and the black hole around. Splash + zoning rule.
+const DESERT_STRUCT = [
+  { x0: 8, x1: 14, z0: 8, z1: 14, y0: 1, y1: 2, mat: COBBLE },                      // raised plateau
+  { x0: 15, x1: 16, z0: 9, z1: 13, y0: 1, y1: 1, mat: COBBLE },                     // ramp step up
+  { x0: 9, x1: 13, z0: 15, z1: 16, y0: 1, y1: 1, mat: COBBLE },
+  { x0: 22, x1: 30, z0: 26, z1: 27, y0: 1, y1: 2, mat: PLANK },                     // long low walls (rocket banks)
+  { x0: 26, x1: 27, z0: 22, z1: 30, y0: 1, y1: 2, mat: PLANK },
+  { x0: 28, x1: 30, z0: 6, z1: 12, y0: 1, y1: 3, mat: COBBLE, cap: GLOWSTONE },     // pillars
+  { x0: 6, x1: 12, z0: 28, z1: 30, y0: 1, y1: 3, mat: COBBLE, cap: GLOWSTONE },
+  { x0: 16, x1: 20, z0: 16, z1: 18, y0: 1, y1: 2, mat: COBBLE },                    // mid cover
+];
+
+// Re-skinnable arena themes. Each has its own palette (materials + light sources),
+// decoration, and structural `layout` tuned for a different weapon style — so every
+// map looks, is lit, AND plays differently. Material roles: f1/f2 floor checker,
+// node lit-grid, wall/band/cren perimeter, daisStep/beacon/sheath centre, pin/pout
+// structure cover.
 export const ARENA_THEME_NAMES = ['ruins', 'jungle', 'frozen', 'desert'];
 export const ARENA_THEMES = {
-  ruins:  { f1: STONE, f2: COBBLE, node: GLOWSTONE, wall: COBBLE, band: GLOWSTONE, cren: GLASS,  daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: COBBLE, pout: PLANK, decor: 'none' },
-  jungle: { f1: GRASS, f2: GRASS,  node: GLOWSTONE, wall: LOG,    band: LEAVES,    cren: LEAVES, daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: LOG,    pout: LOG,   decor: 'jungle' },
-  frozen: { f1: SNOW,  f2: GLASS,  node: GLOWSTONE, wall: SNOW,   band: GLASS,     cren: GLASS,  daisStep: SNOW,   beacon: GLOWSTONE, sheath: GLASS, pin: GLASS,  pout: SNOW,  decor: 'frozen' },
-  desert: { f1: SAND,  f2: SAND,   node: GLOWSTONE, wall: SAND,   band: GLOWSTONE, cren: SAND,   daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: COBBLE, pout: SAND,  decor: 'desert' },
+  ruins:  { f1: STONE, f2: COBBLE, node: GLOWSTONE, wall: COBBLE, band: GLOWSTONE, cren: GLASS,  daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: COBBLE, pout: PLANK, decor: 'none',   layout: ARENA_STRUCT,  decorCenters: [] },
+  jungle: { f1: GRASS, f2: GRASS,  node: GLOWSTONE, wall: LOG,    band: LEAVES,    cren: LEAVES, daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: LOG,    pout: LOG,   decor: 'jungle', layout: JUNGLE_STRUCT, decorCenters: [[12, 12], [20, 20], [16, 28], [28, 16], [10, 24], [24, 10], [8, 8], [18, 8], [8, 18]] },
+  frozen: { f1: SNOW,  f2: GLASS,  node: GLOWSTONE, wall: SNOW,   band: GLASS,     cren: GLASS,  daisStep: SNOW,   beacon: GLOWSTONE, sheath: GLASS, pin: GLASS,  pout: SNOW,  decor: 'frozen', layout: FROZEN_STRUCT, decorCenters: [[20, 20], [24, 10], [10, 24]] },
+  desert: { f1: SAND,  f2: SAND,   node: GLOWSTONE, wall: SAND,   band: GLOWSTONE, cren: SAND,   daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: COBBLE, pout: SAND,  decor: 'desert', layout: DESERT_STRUCT, decorCenters: [[12, 12], [20, 20], [30, 16], [16, 30]] },
 };
-// Mirrored decoration anchors in folded (|x|,|z|) coords — kept clear of the
-// spawn ring (±34,0)/(0,±34)/(±24,±24), the corner towers and the central dais.
-const ARENA_DECOR_CENTERS = [[12, 12], [20, 20], [16, 28], [28, 16], [10, 24], [24, 10], [8, 8]];
 
 // ---- War / D-Day beach (an asymmetric assault map) ----
 // Allied storm in from the sea (high +Z) across an open, obstacle-studded beach,
@@ -323,7 +369,7 @@ export class WorldGen {
 
         // Mirrored structures (pillars, cover, stages, towers, braziers) — remapped
         // to the theme: cool cover → pin, warm cover → pout, glow caps → beacon.
-        for (const s of ARENA_STRUCT) {
+        for (const s of (T.layout || ARENA_STRUCT)) {
           if (ax >= s.x0 && ax <= s.x1 && az >= s.z0 && az <= s.z1) {
             const mat = s.mat === PLANK ? T.pout : T.pin;
             for (let y = s.y0; y <= s.y1; y++) chunk.setLocal(lx, F + y, lz, mat);
@@ -332,7 +378,7 @@ export class WorldGen {
         }
 
         // Themed decoration (jungle trees + puddles, frozen ice spikes, desert cacti).
-        if (T.decor !== 'none' && m > 6 && m < HALF - 2) this.arenaDecor(chunk, lx, lz, F, ax, az, T.decor);
+        if (T.decor !== 'none' && m > 6 && m < HALF - 2) this.arenaDecor(chunk, lx, lz, F, ax, az, T.decor, T.decorCenters);
       }
     }
     chunk.recomputeHeightMap();
@@ -341,8 +387,8 @@ export class WorldGen {
 
   // Stamp mirrored, theme-specific decoration around the arena decor anchors. Folded
   // (ax,az) coords mean every feature appears identically in all four quadrants.
-  arenaDecor(chunk, lx, lz, F, ax, az, decor) {
-    for (const [cx, cz] of ARENA_DECOR_CENTERS) {
+  arenaDecor(chunk, lx, lz, F, ax, az, decor, centers) {
+    for (const [cx, cz] of (centers || [])) {
       const dx = Math.abs(ax - cx), dz = Math.abs(az - cz), cheb = Math.max(dx, dz);
       if (cheb > 2) continue;
       if (decor === 'jungle') {
