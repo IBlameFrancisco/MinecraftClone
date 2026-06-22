@@ -338,7 +338,7 @@ export class BlackHoles {
     this._diskTex = accretionTexture();
     this._ringTex = einsteinRingTexture();
   }
-  spawn(pos, dir, gun, ownerId) {
+  spawn(pos, dir, gun, ownerId, ghost) {
     const g = new THREE.Group(); g.position.copy(pos); g.scale.setScalar(0.45);
     const add = (m) => { g.add(m); return m; };
     const core = add(new THREE.Mesh(new THREE.SphereGeometry(1.3, 24, 16), new THREE.MeshBasicMaterial({ color: 0x000000 })));
@@ -360,7 +360,7 @@ export class BlackHoles {
     for (const o of [disk, disk2, ring, shock, ...parts.map((p) => p.s)]) o.visible = false;  // fly = just the orb
     this.group.add(g);
     this.list.push({ phase: 'fly', pos: pos.clone(), vel: dir.clone().normalize().multiplyScalar(gun.speed),
-      gun, ownerId, t: 0, travelled: 0, c: 0, g, core, glow, disk, disk2, ring, shock, parts });
+      gun, ownerId, ghost, t: 0, travelled: 0, c: 0, g, core, glow, disk, disk2, ring, shock, parts });
   }
   _dispose(h) { this.group.remove(h.g); h.g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
   update(dt, world, hooks) {
@@ -371,10 +371,10 @@ export class BlackHoles {
         h.g.position.copy(h.pos);
         h.g.rotation.y += dt * 6; h.glow.material.opacity = 0.7 + 0.3 * Math.sin(h.t * 20); h.t += dt;
         const solid = isSolid(world.getBlock(Math.floor(h.pos.x), Math.floor(h.pos.y), Math.floor(h.pos.z)));
-        if (solid || h.travelled > gun.range || (hooks.anchorAt && hooks.anchorAt(h.pos))) {
+        if (solid || h.travelled > gun.range || (!h.ghost && hooks.anchorAt && hooks.anchorAt(h.pos))) {
           h.phase = 'open'; h.t = 0; h.g.rotation.set(0, 0, 0);
           for (const o of [h.disk, h.disk2, h.ring, h.shock, ...h.parts.map((p) => p.s)]) o.visible = true;
-          if (hooks.onAnchor) hooks.onAnchor(h.pos.clone());
+          if (!h.ghost && hooks.onAnchor) hooks.onAnchor(h.pos.clone());
         }
         continue;
       }
@@ -383,7 +383,7 @@ export class BlackHoles {
       if (h.phase === 'open') { s = easeOutBack(Math.min(1, h.t / 0.45)) * 1.0; if (h.t >= 0.45) h.phase = 'hold'; }
       else if (h.phase === 'hold') { s = 1 + 0.04 * Math.sin(h.t * 8); if (h.t >= gun.duration - 0.5) { h.phase = 'collapse'; h.c = 0; } }
       else { h.c += dt; const k = Math.min(1, h.c / 0.5); s = (1 - k) * (1 - k) * (1 + 0.6 * Math.sin(k * 30));
-        if (h.c >= 0.5) { if (hooks.onCollapse) hooks.onCollapse(h.pos.clone(), gun); this._dispose(h); this.list.splice(i, 1); continue; } }
+        if (h.c >= 0.5) { if (!h.ghost && hooks.onCollapse) hooks.onCollapse(h.pos.clone(), gun); this._dispose(h); this.list.splice(i, 1); continue; } }
       h.g.scale.setScalar(Math.max(0.001, s));
       h.disk.rotation.z += dt * 2.6; h.disk2.rotation.z -= dt * 3.4;
       h.disk2.rotation.x = -1.18 + 0.08 * Math.sin(h.t * 3);   // slight precession for depth
@@ -404,7 +404,7 @@ export class BlackHoles {
         p.s.scale.setScalar(0.18 + (1 - cl) * 0.5);                       // brighter + larger as they fall in
         p.s.material.opacity = 0.55 + 0.35 * (1 - cl);
       }
-      if (hooks.onField) hooks.onField(h.pos, dt, gun, h.phase);
+      if (!h.ghost && hooks.onField) hooks.onField(h.pos, dt, gun, h.phase);
     }
   }
 }
