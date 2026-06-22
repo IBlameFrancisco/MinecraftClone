@@ -698,6 +698,13 @@ function toggleMode() {
 function damagePlayer(dmg, srcX, srcZ, pvp) {
   if ((mode !== SURVIVAL && mode !== BATTLE) || dead || !player.locked) return;
   if (!pvp && invuln > 0) return;
+  // Channelling chakra raises a protective shield: it soaks most of the hit, draining
+  // chakra to do so (no chakra → no shield).
+  if (chargingChakra && chakraEnergy > 0 && dmg > 0) {
+    dmg = Math.max(0, Math.ceil(dmg * 0.35));
+    chakraEnergy = Math.max(0, chakraEnergy - 12);
+    particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [120, 200, 255], 10);
+  }
   health -= dmg; if (!pvp) invuln = 0.5;
   hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.hurt(); addShake(0.12 + dmg * 0.004);
   if (srcX !== undefined) {
@@ -2212,7 +2219,7 @@ function frame() {
   mp.update(dt);
   // Keep broadcasting in-game even while dead so peers can hide our avatar (alive flag);
   // only the home menu suppresses it.
-  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated, wep: gunOf(inventory.selectedId()) ? inventory.selectedId() : 0 });
+  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated, wep: gunOf(inventory.selectedId()) ? inventory.selectedId() : 0, ch: +chakraAuraI.toFixed(2) });
 
   // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
   shakeAmt *= Math.max(0, 1 - 9 * dt);
