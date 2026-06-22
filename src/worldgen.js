@@ -41,6 +41,22 @@ const ARENA_STRUCT = [
   { x0: 28, x1: 28, z0: 16, z1: 16, y0: 1, y1: 2, mat: COBBLE, cap: GLOWSTONE },
 ];
 
+// Re-skinnable arena palettes. The layout is identical across every theme (the
+// same balanced, mirrored map), but the materials, light sources and a little
+// decoration change — so each map plays the same yet looks, and is lit, wholly
+// different. Material roles: f1/f2 floor checker, node lit-grid, wall/band/cren
+// perimeter, daisStep/beacon/sheath centre, pin/pout structure cover.
+export const ARENA_THEME_NAMES = ['ruins', 'jungle', 'frozen', 'desert'];
+export const ARENA_THEMES = {
+  ruins:  { f1: STONE, f2: COBBLE, node: GLOWSTONE, wall: COBBLE, band: GLOWSTONE, cren: GLASS,  daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: COBBLE, pout: PLANK, decor: 'none' },
+  jungle: { f1: GRASS, f2: GRASS,  node: GLOWSTONE, wall: LOG,    band: LEAVES,    cren: LEAVES, daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: LOG,    pout: LOG,   decor: 'jungle' },
+  frozen: { f1: SNOW,  f2: GLASS,  node: GLOWSTONE, wall: SNOW,   band: GLASS,     cren: GLASS,  daisStep: SNOW,   beacon: GLOWSTONE, sheath: GLASS, pin: GLASS,  pout: SNOW,  decor: 'frozen' },
+  desert: { f1: SAND,  f2: SAND,   node: GLOWSTONE, wall: SAND,   band: GLOWSTONE, cren: SAND,   daisStep: COBBLE, beacon: GLOWSTONE, sheath: GLASS, pin: COBBLE, pout: SAND,  decor: 'desert' },
+};
+// Mirrored decoration anchors in folded (|x|,|z|) coords — kept clear of the
+// spawn ring (±34,0)/(0,±34)/(±24,±24), the corner towers and the central dais.
+const ARENA_DECOR_CENTERS = [[12, 12], [20, 20], [16, 28], [28, 16], [10, 24], [24, 10], [8, 8]];
+
 // ---- War / D-Day beach (an asymmetric assault map) ----
 // Allied storm in from the sea (high +Z) across an open, obstacle-studded beach,
 // breach a seawall, and assault a fortified bluff of bunkers, MG nests and a
@@ -84,6 +100,8 @@ export class WorldGen {
     this._hCache = new Map();
     this.arena = false;          // when true, generate() builds the PvP arena
     this.beach = false;          // when true, generate() builds the D-Day beach
+    this.arenaThemeName = 'ruins';
+    this.T = ARENA_THEMES.ruins; // active arena re-skin palette
   }
 
   climate(wx, wz) {
@@ -266,54 +284,91 @@ export class WorldGen {
   generateArena(chunk) {
     const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
     const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
+    const T = this.T || ARENA_THEMES.ruins;       // active theme palette
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const wx = ox + lx, wz = oz + lz;
         const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az), inr = Math.min(ax, az);
         if (m > HALF) continue;                         // void beyond the arena
 
-        // Foundation + clean light-stone floor with a glowing inlay grid.
+        // Foundation + themed floor with a glowing inlay grid.
         chunk.setLocal(lx, F - 2, lz, BEDROCK);
         chunk.setLocal(lx, F - 1, lz, BEDROCK);
-        let floor = (((wx >> 2) + (wz >> 2)) & 1) ? STONE : COBBLE;
-        if (m < HALF - 1 && wx % 12 === 0 && wz % 12 === 0) floor = GLOWSTONE;   // lit grid nodes
+        let floor = (((wx >> 2) + (wz >> 2)) & 1) ? T.f1 : T.f2;
+        if (m < HALF - 1 && wx % 12 === 0 && wz % 12 === 0) floor = T.node;     // lit grid nodes
         chunk.setLocal(lx, F, lz, floor);
 
-        // Bright perimeter wall: cobble with glowing bands + sconces on the inner
-        // face, glass-topped crenellations.
+        // Perimeter wall: themed material with glowing bands + sconces on the inner
+        // face, accented crenellations.
         if (m >= HALF - 1) {
           for (let y = 1; y <= WH; y++) {
-            let wmat = COBBLE;
-            if (m === HALF - 1 && (y === 4 || y === 8)) wmat = GLOWSTONE;          // glowing bands
-            if (m === HALF - 1 && y === 6 && inr % 6 === 2) wmat = GLOWSTONE;      // sconces
+            let wmat = T.wall;
+            if (m === HALF - 1 && (y === 4 || y === 8)) wmat = T.band;             // glowing bands
+            if (m === HALF - 1 && y === 6 && inr % 6 === 2) wmat = T.band;         // sconces
             chunk.setLocal(lx, F + y, lz, wmat);
           }
-          chunk.setLocal(lx, F + WH + 1, lz, ((ax + az) & 1) === 0 ? GLASS : COBBLE);  // glass-topped crenellations
+          chunk.setLocal(lx, F + WH + 1, lz, ((ax + az) & 1) === 0 ? T.cren : T.wall);  // crenellations
           continue;
         }
 
-        // Central luminous dais: a stepped platform crowned with a glowstone beacon
-        // sheathed in glass.
+        // Central luminous dais: a stepped platform crowned with a beacon in a sheath.
         if (m <= 6) {
           const h = m <= 2 ? 3 : m <= 4 ? 2 : 1;
-          for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, (y === h && m <= 2) ? GLOWSTONE : COBBLE);
-          if (m === 4 && ax === az) chunk.setLocal(lx, F + h + 1, lz, GLOWSTONE);     // corner lamps
-          if (m <= 1) for (let y = 4; y <= 8; y++) chunk.setLocal(lx, F + y, lz, m === 0 ? GLOWSTONE : GLASS); // glowing beacon in glass
-          if (ax === 0 && az === 0) chunk.setLocal(lx, F + 9, lz, GLOWSTONE);         // crowning beacon
+          for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, (y === h && m <= 2) ? T.beacon : T.daisStep);
+          if (m === 4 && ax === az) chunk.setLocal(lx, F + h + 1, lz, T.beacon);       // corner lamps
+          if (m <= 1) for (let y = 4; y <= 8; y++) chunk.setLocal(lx, F + y, lz, m === 0 ? T.beacon : T.sheath); // glowing beacon
+          if (ax === 0 && az === 0) chunk.setLocal(lx, F + 9, lz, T.beacon);            // crowning beacon
           continue;
         }
 
-        // Mirrored structures (pillars, cover, stages, towers, braziers).
+        // Mirrored structures (pillars, cover, stages, towers, braziers) — remapped
+        // to the theme: cool cover → pin, warm cover → pout, glow caps → beacon.
         for (const s of ARENA_STRUCT) {
           if (ax >= s.x0 && ax <= s.x1 && az >= s.z0 && az <= s.z1) {
-            for (let y = s.y0; y <= s.y1; y++) chunk.setLocal(lx, F + y, lz, s.mat);
-            if (s.cap) chunk.setLocal(lx, F + s.y1 + 1, lz, s.cap);
+            const mat = s.mat === PLANK ? T.pout : T.pin;
+            for (let y = s.y0; y <= s.y1; y++) chunk.setLocal(lx, F + y, lz, mat);
+            if (s.cap) chunk.setLocal(lx, F + s.y1 + 1, lz, T.beacon);
           }
         }
+
+        // Themed decoration (jungle trees + puddles, frozen ice spikes, desert cacti).
+        if (T.decor !== 'none' && m > 6 && m < HALF - 2) this.arenaDecor(chunk, lx, lz, F, ax, az, T.decor);
       }
     }
     chunk.recomputeHeightMap();
     chunk.generated = true;
+  }
+
+  // Stamp mirrored, theme-specific decoration around the arena decor anchors. Folded
+  // (ax,az) coords mean every feature appears identically in all four quadrants.
+  arenaDecor(chunk, lx, lz, F, ax, az, decor) {
+    for (const [cx, cz] of ARENA_DECOR_CENTERS) {
+      const dx = Math.abs(ax - cx), dz = Math.abs(az - cz), cheb = Math.max(dx, dz);
+      if (cheb > 2) continue;
+      if (decor === 'jungle') {
+        if (cheb === 0) for (let y = 1; y <= 5; y++) chunk.setLocal(lx, F + y, lz, LOG);   // trunk
+        if (cheb <= 2) { chunk.setLocal(lx, F + 4, lz, LEAVES); chunk.setLocal(lx, F + 5, lz, LEAVES); }
+        if (cheb <= 1) chunk.setLocal(lx, F + 6, lz, LEAVES);                               // canopy crown
+      } else if (decor === 'frozen') {
+        if (cheb === 0) for (let y = 1; y <= 5; y++) chunk.setLocal(lx, F + y, lz, GLASS);  // tall ice spike
+        else if (cheb === 1 && dx + dz === 1) for (let y = 1; y <= 2; y++) chunk.setLocal(lx, F + y, lz, GLASS);
+      } else if (decor === 'desert') {
+        if (cheb === 0) for (let y = 1; y <= 3; y++) chunk.setLocal(lx, F + y, lz, CACTUS); // cactus
+        else if (cheb === 1 && dx + dz === 1) chunk.setLocal(lx, F + 1, lz, SAND);          // sand mound
+      }
+    }
+    // Jungle: shallow water puddles in a couple of clearings (1 deep — wade-through).
+    if (decor === 'jungle') {
+      for (const [cx, cz] of [[30, 8], [8, 30]]) {
+        if (Math.max(Math.abs(ax - cx), Math.abs(az - cz)) <= 2) chunk.setLocal(lx, F, lz, WATER);
+      }
+    }
+  }
+
+  // Select the arena re-skin (materials + decoration) used by generateArena.
+  setArenaTheme(name) {
+    this.arenaThemeName = ARENA_THEMES[name] ? name : 'ruins';
+    this.T = ARENA_THEMES[this.arenaThemeName];
   }
 
   // The D-Day beach: sea + landing craft (high +Z) -> open obstacle-strewn beach

@@ -27,7 +27,7 @@ export class World {
 
   // Wipe all chunks and reseed (used by the seed / "new world" / battle UI). `map`
   // selects the battle map: 'arena' (or true), 'beach', or false for normal terrain.
-  regenerate(seed, map = false) {
+  regenerate(seed, map = false, arenaTheme = 'ruins') {
     for (const c of this.chunks.values()) {
       if (c.mesh) this.group.remove(c.mesh);
       if (c.waterMesh) this.group.remove(c.waterMesh);
@@ -38,6 +38,7 @@ export class World {
     this.gen = new WorldGen(seed);
     this.gen.arena = (map === 'arena' || map === true);
     this.gen.beach = (map === 'beach');
+    this.gen.setArenaTheme(arenaTheme);
   }
 
   getBlock(wx, wy, wz) {

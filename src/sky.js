@@ -20,12 +20,23 @@ const LIGHT_DAY = new THREE.Color(1.0, 0.99, 0.96);
 const LIGHT_NIGHT = new THREE.Color(0.17, 0.21, 0.34);
 const LIGHT_DUSK = new THREE.Color(1.0, 0.66, 0.45);
 
-// ---- Battle arena: a bright, vivid championship sky — luminous and high-energy. ----
-const ARENA_TOP = sc(0.16, 0.42, 0.88);        // vivid deep sky blue
-const ARENA_HORIZON = sc(0.74, 0.90, 1.0);     // bright airy horizon
-const ARENA_FOG = sc(0.78, 0.91, 1.0);
-const ARENA_TINT = new THREE.Color(1.1, 1.06, 1.0);    // bright, slightly warm (linear multiplier, >1 → glow)
-const _ARENA_SUN = new THREE.Vector3(0.32, 0.86, 0.38).normalize();
+// ---- Battle arena: per-theme cinematic atmospheres — each map gets its own time-of-day mood,
+// sun colour and fog so it reads as a wholly different place. (sky top/horizon/fog
+// authored in sRGB; tint is a linear world-light multiplier; sun is a direction.)
+const ARENA_SKIES = {
+  // Golden-hour ritual ground: warm amber light, a low dramatic sun.
+  ruins:  { top: sc(0.18, 0.27, 0.58), horizon: sc(1.0, 0.6, 0.34), fog: sc(0.95, 0.66, 0.46), tint: new THREE.Color(1.16, 0.99, 0.82),
+            sun: new THREE.Vector3(0.55, 0.42, 0.22).normalize(), sunCol: [1.0, 0.74, 0.46], dir: [1.05, 0.83, 0.6], dirI: 1.05, ambI: 0.7, cloud: [1.0, 0.82, 0.66], cloudOp: 0.6 },
+  // Humid jungle noon: lush green-tinted daylight, soft canopy haze.
+  jungle: { top: sc(0.2, 0.5, 0.74), horizon: sc(0.78, 0.92, 0.72), fog: sc(0.72, 0.88, 0.68), tint: new THREE.Color(1.0, 1.12, 0.92),
+            sun: new THREE.Vector3(0.28, 0.86, 0.32).normalize(), sunCol: [1.0, 0.99, 0.82], dir: [0.92, 1.04, 0.8], dirI: 1.12, ambI: 0.86, cloud: [0.94, 1.0, 0.9], cloudOp: 0.7 },
+  // Frozen tundra: pale cold blue, a weak low sun, icy white haze.
+  frozen: { top: sc(0.42, 0.58, 0.84), horizon: sc(0.86, 0.93, 1.0), fog: sc(0.85, 0.92, 1.0), tint: new THREE.Color(0.92, 0.99, 1.14),
+            sun: new THREE.Vector3(0.36, 0.62, 0.5).normalize(), sunCol: [0.84, 0.92, 1.0], dir: [0.86, 0.94, 1.08], dirI: 1.0, ambI: 0.92, cloud: [0.96, 0.98, 1.0], cloudOp: 0.82 },
+  // Scorched desert: hot hazy orange-tan sky, blazing high sun, dust.
+  desert: { top: sc(0.3, 0.5, 0.86), horizon: sc(1.0, 0.83, 0.54), fog: sc(0.96, 0.82, 0.58), tint: new THREE.Color(1.18, 1.04, 0.82),
+            sun: new THREE.Vector3(0.4, 0.84, 0.26).normalize(), sunCol: [1.0, 0.92, 0.7], dir: [1.08, 0.97, 0.73], dirI: 1.2, ambI: 0.82, cloud: [1.0, 0.94, 0.8], cloudOp: 0.55 },
+};
 
 // ---- War mode (D-Day beach): a bleak, overcast, smoke-hazed grey morning with a
 // warm horizon stain from the fires up the beach. ----
@@ -156,6 +167,9 @@ export class Sky {
     if (!on) this._restoreSky();   // restore the sun/moon/cloud look the day/night cycle expects
   }
 
+  // Choose which themed arena atmosphere _updateArena renders.
+  setArenaTheme(name) { this._arenaSky = ARENA_SKIES[name] || ARENA_SKIES.ruins; }
+
   // Toggle the bleak overcast D-Day atmosphere.
   setWar(on) {
     if (this.war === on) return;
@@ -221,33 +235,34 @@ export class Sky {
   _updateArena(dt) {
     this._flickT += dt;
     const f = 1.0 + 0.025 * Math.sin(this._flickT * 1.6);   // gentle energy shimmer (never darkens)
+    const S = this._arenaSky || ARENA_SKIES.ruins;
 
-    this.uniforms.topColor.value.copy(ARENA_TOP);
-    this.uniforms.horizonColor.value.copy(ARENA_HORIZON);
-    this.fog.color.copy(ARENA_FOG);
+    this.uniforms.topColor.value.copy(S.top);
+    this.uniforms.horizonColor.value.copy(S.horizon);
+    this.fog.color.copy(S.fog);
     this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1] * 1.15;   // open, distant fog
-    setWorldTint(ARENA_TINT.r * f, ARENA_TINT.g * f, ARENA_TINT.b * f);
+    setWorldTint(S.tint.r * f, S.tint.g * f, S.tint.b * f);
 
-    // Bright, even lighting so figures + the map pop.
+    // Bright, even lighting so figures + the map pop — coloured per theme.
     this.isNight = false;
-    this.sunDir.copy(_ARENA_SUN);
-    this.dirColor.setRGB(1.0, 0.99, 0.95);
-    this.dirIntensity = 1.15;
-    this.ambIntensity = 0.82;
-    setWaterEnv(this.sunDir, ARENA_HORIZON, 0.7);
+    this.sunDir.copy(S.sun);
+    this.dirColor.setRGB(S.dir[0], S.dir[1], S.dir[2]);
+    this.dirIntensity = S.dirI;
+    this.ambIntensity = S.ambI;
+    setWaterEnv(this.sunDir, S.horizon, 0.7);
 
-    // A bright sun high overhead; airy drifting clouds; no moon.
+    // A themed sun; airy drifting clouds; no moon.
     const cam = this.camera.position;
     this.dome.position.copy(cam);
-    this.sun.material.color.setRGB(1.0, 0.97, 0.86); this.sun.scale.setScalar(72);
+    this.sun.material.color.setRGB(S.sunCol[0], S.sunCol[1], S.sunCol[2]); this.sun.scale.setScalar(72);
     this.sun.material.opacity = 1;
-    this.sun.position.copy(cam).addScaledVector(_ARENA_SUN, 480);
+    this.sun.position.copy(cam).addScaledVector(S.sun, 480);
     this.moon.material.opacity = 0;
     this.clouds.position.x = cam.x; this.clouds.position.z = cam.z;
     this.clouds.material.map.offset.x += dt * 0.004;
     this.clouds.material.map.offset.y += dt * 0.0016;
-    this.clouds.material.color.setRGB(1.0, 1.0, 1.0);
-    this.clouds.material.opacity = 0.65;
+    this.clouds.material.color.setRGB(S.cloud[0], S.cloud[1], S.cloud[2]);
+    this.clouds.material.opacity = S.cloudOp;
     return this.time;
   }
 
