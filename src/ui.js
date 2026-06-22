@@ -29,15 +29,20 @@ export class HUD {
     ui.appendChild(this.announceEl); ui.appendChild(this.dmgDirEl); ui.appendChild(this.kcEl);
   }
 
-  // Cinematic final-kill cam overlay: letterbox bars slide in + a "FINAL KILL" tag.
-  showKillCam(killer, victim) {
+  // Cinematic final-kill cam overlay: letterbox bars slide in + a "FINAL KILL" tag
+  // and, during a replay, a "REPLAY n/N" angle counter.
+  showKillCam(killer, victim, pass, passes) {
+    const tag = this.kcEl.querySelector('.kc-tag');
+    tag.textContent = (pass && passes) ? `★ FINAL KILL · REPLAY ${pass}/${passes}` : '★ FINAL KILL';
     const line = this.kcEl.querySelector('.kc-line');
     line.innerHTML = victim
       ? `<b>${escapeHtml(killer)}</b> <span class="kc-arrow">▸</span> ${escapeHtml(victim)}`
       : `<b>${escapeHtml(killer)}</b> takes the win`;
-    this.kcEl.classList.remove('show'); void this.kcEl.offsetWidth;   // restart the slide-in
-    this.kcEl.style.display = 'block';
-    this.kcEl.classList.add('show');
+    if (!this.kcEl.classList.contains('show')) {   // only replay the slide-in on first show, not per angle
+      void this.kcEl.offsetWidth;
+      this.kcEl.style.display = 'block';
+      this.kcEl.classList.add('show');
+    }
   }
   hideKillCam() { this.kcEl.classList.remove('show'); this.kcEl.style.display = 'none'; }
 
