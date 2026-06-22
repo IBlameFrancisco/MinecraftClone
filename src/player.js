@@ -37,6 +37,12 @@ export class Player {
     this.sens = 0.0022;
     this.fov = BASE_FOV;
 
+    // Camera-feel smoothing state (visual only; never feeds back into physics).
+    this._eyeOff = 0;        // smoothed sneak crouch offset
+    this._roll = 0;          // smoothed camera roll
+    this._landDip = 0;       // transient downward dip on landing
+    this._strafe = 0;        // smoothed strafe input for lean
+
     this.mode = 1;            // 0 survival, 1 creative (set by main)
     this.flying = false;
     this.sprintToggle = false;
@@ -121,6 +127,10 @@ export class Player {
     const wlen = Math.hypot(wx, wz);
     if (wlen > 0) { wx /= wlen; wz /= wlen; }
 
+    // Strafe signal (right-minus-left) for a subtle camera lean; eased so it
+    // also relaxes back to centre when input stops or during flight.
+    this._strafe += ((r - l) - this._strafe) * Math.min(1, 9 * dt);
+
     if (this.flying) {
       // --- Creative flight ---
       let speed = sprinting ? 11 : 6;
@@ -144,12 +154,16 @@ export class Player {
     if (this.inWater) speed *= 0.6;
 
     // --- Horizontal velocity with acceleration/friction ---
-    const accel = this.onGround ? ACCEL : AIR_ACCEL;
+    // Decelerate a touch faster than we accelerate so direction changes feel
+    // crisp without the controller feeling twitchy. Air control stays low.
+    const decel = wlen > 0; // accelerating toward a wish dir vs. coasting
+    let accel = this.onGround ? ACCEL : AIR_ACCEL;
+    if (this.onGround && !decel) accel = ACCEL * 1.3;
     const targetX = wx * speed, targetZ = wz * speed;
     this.vel.x += (targetX - this.vel.x) * Math.min(1, accel * dt);
     this.vel.z += (targetZ - this.vel.z) * Math.min(1, accel * dt);
     if (this.onGround && wlen === 0) {
-      const fr = Math.min(1, 12 * dt);
+      const fr = Math.min(1, 13 * dt);
       this.vel.x -= this.vel.x * fr;
       this.vel.z -= this.vel.z * fr;
     }
@@ -159,7 +173,10 @@ export class Player {
     if (this.inWater) {
       this.vel.y -= GRAVITY * 0.32 * dt;
       this.vel.y *= 0.86;
-      if (this.keys.has('Space')) this.vel.y = 4.2;
+      // Swim up: ease toward a steady ascent so surfacing feels buoyant rather
+      // than a hard velocity snap. Clamp matches the previous ceiling.
+      if (this.keys.has('Space')) this.vel.y += (4.2 - this.vel.y) * Math.min(1, 14 * dt);
+      if (this.vel.y > 4.2) this.vel.y = 4.2;
       if (this.vel.y < -4) this.vel.y = -4;
     } else {
       this.vel.y -= GRAVITY * dt;
@@ -170,6 +187,7 @@ export class Player {
     }
 
     // --- Integrate with per-axis collision ---
+    const wasGround = this.onGround;
     this.onGround = false;
     this._moveAxis('x', this.vel.x * dt);
     this._moveAxis('z', this.vel.z * dt);
@@ -177,6 +195,14 @@ export class Player {
     this._moveAxis('y', this.vel.y * dt);
     // Record a hard landing for fall-damage (survival, handled by main).
     if (this.onGround && !this.inWater && vyPrev < -16) this.fallImpact = -vyPrev - 16;
+    // Visual landing punch: dip the camera (and a hair of FOV) on touchdown,
+    // scaled by impact speed. Purely cosmetic — does not affect collision.
+    // The FOV nudge eases away via the FOV smoothing in _updateCamera.
+    if (this.onGround && !wasGround && !this.inWater && vyPrev < -6) {
+      const f = Math.min(1, (-vyPrev - 6) / 14);
+      this._landDip = Math.max(this._landDip, 0.06 + 0.12 * f);
+      this.fov += 2.0 * f;
+    }
 
     if (this.pos.y < -20) {
       this.pos.set(this.pos.x, 90, this.pos.z);
@@ -222,30 +248,50 @@ export class Player {
   }
 
   _updateCamera(dt, walking, sprinting, speed) {
-    // Head bob
+    // --- Head bob ---
+    // bobAmount stays in [0,1] and bobTime is a continuous phase: the viewmodel
+    // in main.js reads both, so neither may snap or reset.
     const targetBob = walking ? Math.min(1, speed / WALK) : 0;
-    this.bobAmount += (targetBob - this.bobAmount) * Math.min(1, 8 * dt);
+    // Settle to rest a little faster than it spins up, so stopping feels clean.
+    const bobRate = targetBob > this.bobAmount ? 8 : 11;
+    this.bobAmount += (targetBob - this.bobAmount) * Math.min(1, bobRate * dt);
+    if (this.bobAmount < 1e-3) this.bobAmount = 0;
     if (walking) this.bobTime += dt * (sprinting ? 13 : 10);
     const bobY = Math.sin(this.bobTime * 2) * 0.055 * this.bobAmount;
     const bobX = Math.cos(this.bobTime) * 0.045 * this.bobAmount;
 
-    // Sprint FOV (relative to the configurable base FOV)
-    const targetFov = sprinting ? this.baseFov + (SPRINT_FOV - BASE_FOV) : this.baseFov;
-    if (Math.abs(this.fov - targetFov) > 0.05) {
+    // --- Landing dip (decays each frame; purely vertical, see eye below). ---
+    this._landDip -= this._landDip * Math.min(1, 9 * dt);
+    if (this._landDip < 1e-4) this._landDip = 0;
+
+    // --- Sprint FOV (relative to the configurable base FOV). this.fov is the
+    // steady FOV that main.js drives the camera from (ADS/scope multiply it),
+    // so we only ease this.fov here; the landing FOV punch is injected as a
+    // transient offset to this.fov at touchdown and eases back out naturally.
+    const targetFov = (sprinting ? this.baseFov + (SPRINT_FOV - BASE_FOV) : this.baseFov)
+      + (this.inWater ? -2 : 0);
+    // Guard on internal state (not camera.fov): when this.fov has settled we must
+    // NOT write camera.fov, or we'd stomp the scope/ADS value main.js owns.
+    if (Math.abs(this.fov - targetFov) > 0.02) {
       this.fov += (targetFov - this.fov) * Math.min(1, 10 * dt);
       this.camera.fov = this.fov;
       this.camera.updateProjectionMatrix();
     }
 
-    // Slightly lower eye when sneaking.
+    // --- Smoothed sneak crouch (eased instead of snapping the eye height). ---
     const sneaking = this.keys.has('ControlLeft') || this.keys.has('ControlRight');
-    const eye = EYE - (sneaking ? 0.18 : 0);
+    const targetEyeOff = sneaking && !this.flying ? -0.18 : 0;
+    this._eyeOff += (targetEyeOff - this._eyeOff) * Math.min(1, 12 * dt);
+    const eye = EYE + this._eyeOff - this._landDip;
+
+    // --- Camera roll: lean into strafes, with a touch of bob roll. ---
+    const targetRoll = -this._strafe * 0.025 + bobX * 0.25;
+    this._roll += (targetRoll - this._roll) * Math.min(1, 10 * dt);
 
     this.camera.position.set(this.pos.x + bobX, this.pos.y + eye + bobY, this.pos.z);
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
-    // subtle roll while strafing/bobbing
-    this.camera.rotation.z = bobX * 0.25;
+    this.camera.rotation.z = this._roll;
   }
 
   eyePosition(out) {

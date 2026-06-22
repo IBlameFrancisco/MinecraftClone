@@ -53,7 +53,9 @@ function buildModel(kind) {
     const sk = kind === 'skeleton';
     const skin = sk ? 0xd8d4cc : 0x4f7a3a, shirt = sk ? 0xc9c5bd : 0x35656b, pants = sk ? 0xb7b3ab : 0x2c2c5a;
     g.add(at(box(0.6, 0.7, 0.35, shirt), 0, 1.15, 0));
-    g.add(at(box(0.5, 0.5, 0.5, skin), 0, 1.75, 0));
+    const head = at(box(0.5, 0.5, 0.5, skin), 0, 1.75, 0);
+    g.add(head);
+    g.userData.head = head;
     limbs.push(limb(g, 0.2, 0.75, 0.22, -0.3, 1.5, 0, skin));  // arms (forward)
     limbs.push(limb(g, 0.2, 0.75, 0.22, 0.3, 1.5, 0, skin));
     limbs[0].rotation.x = limbs[1].rotation.x = -1.4;
@@ -66,8 +68,9 @@ function buildModel(kind) {
     g.add(at(box(0.55, 0.85, 0.45, green), 0, 1.05, 0));     // body
     const head = at(box(0.5, 0.5, 0.5, green), 0, 1.7, 0);
     g.add(head);
-    g.add(at(box(0.16, 0.16, 0.06, 0x101510), -0.12, 1.74, 0.24)); // eyes
-    g.add(at(box(0.16, 0.16, 0.06, 0x101510), 0.12, 1.74, 0.24));
+    g.userData.head = head;
+    head.add(at(box(0.16, 0.16, 0.06, 0x101510), -0.12, 0.04, 0.27)); // eyes (parented so they track head look)
+    head.add(at(box(0.16, 0.16, 0.06, 0x101510), 0.12, 0.04, 0.27));
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       limbs.push(limb(g, 0.2, 0.4, 0.2, sx * 0.16, 0.4, sz * 0.18, dark));
     }
@@ -80,8 +83,10 @@ function buildModel(kind) {
     const bodyH = kind === 'cow' ? 0.55 : 0.5;
     const bodyY = KINDS[kind].height - bodyH / 2 - 0.32;
     g.add(at(box(0.7, bodyH, 1.05, c), 0, bodyY, 0));
-    g.add(at(box(0.55, 0.55, 0.5, headC), 0, bodyY + 0.12, 0.72));
-    if (kind === 'pig') g.add(at(box(0.28, 0.2, 0.1, 0x9c5560), 0, bodyY + 0.04, 0.98));
+    const head = at(box(0.55, 0.55, 0.5, headC), 0, bodyY + 0.12, 0.72);
+    g.add(head);
+    g.userData.head = head;
+    if (kind === 'pig') head.add(at(box(0.28, 0.2, 0.1, 0x9c5560), 0, -0.08, 0.26)); // snout follows the head
     const lx = 0.24, lz = 0.38, legLen = 0.34;
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       limbs.push(limb(g, 0.2, legLen, 0.2, sx * lx, legLen, sz * lz, legC));
@@ -105,6 +110,10 @@ class Mob {
     this.pos = new THREE.Vector3(x, y, z);
     this.vel = new THREE.Vector3();
     this.yaw = Math.random() * TWO_PI;
+    this.renderYaw = this.yaw;        // smoothed body yaw (visual only)
+    this.headYaw = 0;                 // smoothed head turn relative to body
+    this.headPitch = 0;               // smoothed head look up/down
+    this.idlePhase = Math.random() * TWO_PI; // desync idle sway between mobs
     this.onGround = false;
     this.walk = 0;
     this.wanderTimer = 0;
@@ -119,6 +128,8 @@ class Mob {
     this.mesh = built.group;
     this.legs = built.group.userData.legs;
     this.arms = built.group.userData.arms;
+    this.head = built.group.userData.head || null;
+    this.headBaseY = this.head ? this.head.position.y : 0;
     this.mesh.position.copy(this.pos);
   }
 
@@ -215,18 +226,62 @@ class Mob {
     }
 
     // --- Animation ---
+    const biped = this.kind === 'zombie' || this.kind === 'skeleton';
     const sp = Math.hypot(this.vel.x, this.vel.z);
     if (sp > 0.1) this.walk += dt * (6 + sp);
-    const swing = Math.sin(this.walk) * Math.min(0.9, 0.3 + sp * 0.15);
-    if ((this.kind === 'zombie' || this.kind === 'skeleton') && this.legs.length >= 2) {
+    // Gait strength eases in/out so legs don't snap to a pose when stopping.
+    const gait = Math.min(0.9, 0.3 + sp * 0.15) * Math.min(1, sp / 0.6);
+    const swing = Math.sin(this.walk) * gait;
+    if (biped && this.legs.length >= 2) {
       this.legs[0].rotation.x = swing; this.legs[1].rotation.x = -swing;
+      // Zombies hold arms forward (set at build time); add a gentle counter-swing
+      // and a slow menacing reach so they don't look frozen.
+      if (this.arms.length >= 2) {
+        const reach = -1.4 + Math.sin(this.walk * 0.5) * 0.12;
+        this.arms[0].rotation.x = reach - swing * 0.5;
+        this.arms[1].rotation.x = reach + swing * 0.5;
+      }
     } else if (this.legs.length === 4) {
       this.legs[0].rotation.x = swing; this.legs[3].rotation.x = swing;
       this.legs[1].rotation.x = -swing; this.legs[2].rotation.x = -swing;
     }
 
+    // Idle breathing/sway: a subtle bob plus body lean, fading out while moving.
+    this.idlePhase += dt * 2.2;
+    const idle = 1 - Math.min(1, sp / 0.5);
+    const breath = Math.sin(this.idlePhase) * 0.012 * idle;
+    const sway = Math.sin(this.idlePhase * 0.6) * 0.03 * idle;
+
+    // --- Smooth body turning (shortest-arc toward AI yaw; visual only) ---
+    let dyaw = this.yaw - this.renderYaw;
+    dyaw = ((dyaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI; // wrap to [-PI,PI]
+    this.renderYaw += dyaw * Math.min(1, 10 * dt);
+
+    // --- Head look toward the player when close (and a touch of idle scan). ---
+    if (this.head) {
+      const dx = ctx.player.pos.x - this.pos.x, dz = ctx.player.pos.z - this.pos.z;
+      const dist = Math.hypot(dx, dz);
+      let tYaw = Math.sin(this.idlePhase * 0.5) * 0.18 * idle; // idle glance
+      let tPitch = 0;
+      if (dist < 10) {
+        let rel = Math.atan2(dx, dz) - this.renderYaw;
+        rel = ((rel + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
+        const look = Math.max(0, 1 - dist / 10);
+        tYaw = Math.max(-1.1, Math.min(1.1, rel)) * look;
+        const dy = (ctx.player.pos.y + 1.4) - (this.pos.y + this.height * 0.85);
+        tPitch = Math.max(-0.5, Math.min(0.5, Math.atan2(dy, Math.max(0.5, dist)))) * look;
+      }
+      this.headYaw += (tYaw - this.headYaw) * Math.min(1, 8 * dt);
+      this.headPitch += (tPitch - this.headPitch) * Math.min(1, 8 * dt);
+      this.head.rotation.y = this.headYaw;
+      this.head.rotation.x = -this.headPitch + breath * (biped ? 3 : 6);
+      this.head.position.y = this.headBaseY + breath * 1.5;
+    }
+
     this.mesh.position.copy(this.pos);
-    this.mesh.rotation.y = this.yaw;
+    this.mesh.position.y += breath;
+    this.mesh.rotation.y = this.renderYaw;
+    this.mesh.rotation.z = sway;
 
     let er = 0, eg = 0, eb = 0;
     if (this.hurtFlash > 0) { this.hurtFlash -= dt; er = 0.5; }
