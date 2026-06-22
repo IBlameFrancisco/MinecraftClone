@@ -291,7 +291,7 @@ export class Sky {
     this.uniforms.topColor.value.copy(WAR_TOP);
     this.uniforms.horizonColor.value.copy(WAR_HORIZON);
     this.fog.color.copy(WAR_FOG);
-    this.fog.near = 16; this.fog.far = 150;
+    this.fog.near = 26; this.fog.far = 210;   // hazy, but open enough to read the fleet, bluff + capital ship
     setWorldTint(WAR_TINT.r, WAR_TINT.g, WAR_TINT.b);
 
     // Flat overcast daylight — soft directional, no harsh sun; a faint warm flicker
