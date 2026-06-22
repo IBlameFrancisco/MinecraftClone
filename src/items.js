@@ -142,82 +142,191 @@ export function drawItemIcon(ctx, id, S) {
   ctx.restore();
 }
 
+// Shared icon helper: soft dark outline pass for readability at ~40px. Call
+// before filling a shape — strokes the same path slightly fattened underneath.
+function outline(ctx, color = 'rgba(20,14,8,0.55)', w = 1.1) {
+  ctx.lineWidth = w; ctx.strokeStyle = color; ctx.stroke();
+}
+
 function stick(ctx) {
-  ctx.strokeStyle = HANDLE; ctx.lineWidth = 2.4;
-  ctx.beginPath(); ctx.moveTo(4, 13); ctx.lineTo(12, 4); ctx.stroke();
+  // wood shaft with a darker core line and a top-left highlight, capped ends
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#5e3a1a'; ctx.lineWidth = 3.2;
+  ctx.beginPath(); ctx.moveTo(4.5, 13); ctx.lineTo(11.5, 4); ctx.stroke();
+  ctx.strokeStyle = HANDLE; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.moveTo(4.5, 13); ctx.lineTo(11.5, 4); ctx.stroke();
+  ctx.strokeStyle = '#b98b54'; ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(4.9, 12.4); ctx.lineTo(11.1, 4.6); ctx.stroke();
 }
 function apple(ctx) {
-  ctx.fillStyle = '#d8312a';
-  ctx.beginPath(); ctx.ellipse(8, 9, 5, 5.4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#b3231d'; ctx.beginPath(); ctx.ellipse(6.5, 9, 2, 4.6, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(8, 4); ctx.lineTo(9, 2); ctx.stroke();
-  ctx.fillStyle = '#5aa53a'; ctx.beginPath(); ctx.ellipse(10.5, 3, 1.8, 1, -0.6, 0, Math.PI * 2); ctx.fill();
+  // rounded body with a notch at the top, side shadow, stem, leaf and gloss
+  ctx.beginPath();
+  ctx.moveTo(8, 5.2);
+  ctx.bezierCurveTo(5.5, 3.4, 2.6, 5.8, 3.2, 9);
+  ctx.bezierCurveTo(3.6, 12, 6, 14, 8, 13);
+  ctx.bezierCurveTo(10, 14, 12.4, 12, 12.8, 9);
+  ctx.bezierCurveTo(13.4, 5.8, 10.5, 3.4, 8, 5.2);
+  ctx.closePath();
+  ctx.fillStyle = '#d8312a'; ctx.fill();
+  outline(ctx, 'rgba(70,10,8,0.5)', 0.9);
+  ctx.save(); ctx.clip();
+  ctx.fillStyle = '#b3231d'; ctx.beginPath(); ctx.ellipse(10, 9.5, 3.2, 4.5, -0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,180,170,0.7)'; ctx.beginPath(); ctx.ellipse(5.6, 7, 1.5, 2.2, -0.4, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 1; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(8, 5); ctx.lineTo(8.8, 2.6); ctx.stroke();
+  ctx.fillStyle = '#5aa53a'; ctx.beginPath(); ctx.ellipse(10.6, 3.2, 2, 1.1, -0.6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#7cc257'; ctx.beginPath(); ctx.ellipse(10.4, 2.9, 1, 0.5, -0.6, 0, Math.PI * 2); ctx.fill();
 }
 function meat(ctx, light, dark) {
-  ctx.fillStyle = light; ctx.beginPath(); ctx.ellipse(8, 9, 5.5, 4, 0.3, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(6, 10, 2.4, 2, 0.3, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#efe6d0'; ctx.fillRect(11, 5, 3, 1.6);
+  // fleshy lobe with a bone nub, marbling streak and top-left sheen
+  ctx.beginPath(); ctx.ellipse(8, 9, 5.6, 4.2, 0.3, 0, Math.PI * 2);
+  ctx.fillStyle = light; ctx.fill();
+  outline(ctx, 'rgba(40,15,12,0.45)', 0.9);
+  ctx.save(); ctx.beginPath(); ctx.ellipse(8, 9, 5.6, 4.2, 0.3, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(6.4, 10.4, 2.6, 2, 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,245,235,0.45)'; ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(5, 7.6); ctx.lineTo(9.5, 6.8); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.ellipse(6.6, 7.4, 1.8, 0.9, 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = '#efe6d0'; // bone nub
+  ctx.beginPath(); ctx.ellipse(12.6, 5.6, 1.7, 1.2, -0.4, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(120,100,70,0.5)'; ctx.lineWidth = 0.7; ctx.stroke();
 }
 function hide(ctx) {
-  ctx.fillStyle = '#9c6b3f';
-  ctx.beginPath(); ctx.moveTo(3, 5); ctx.lineTo(13, 4); ctx.lineTo(12, 12); ctx.lineTo(4, 13); ctx.closePath(); ctx.fill();
+  // tanned leather patch with soft edges, stitching dashes and a top sheen
+  ctx.beginPath();
+  ctx.moveTo(3.4, 5); ctx.lineTo(13, 3.8);
+  ctx.quadraticCurveTo(13.6, 8, 12.2, 12.4);
+  ctx.lineTo(4, 13.2); ctx.quadraticCurveTo(2.6, 8.5, 3.4, 5);
+  ctx.closePath();
+  ctx.fillStyle = '#9c6b3f'; ctx.fill();
+  outline(ctx, 'rgba(50,30,12,0.5)', 0.9);
+  ctx.fillStyle = 'rgba(196,150,100,0.6)'; // top sheen
+  ctx.beginPath(); ctx.moveTo(4, 5.4); ctx.lineTo(12.4, 4.4); ctx.lineTo(11.8, 6.2); ctx.lineTo(4.4, 7); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#6f4a26'; ctx.lineWidth = 0.7; ctx.setLineDash([1, 1.2]);
+  ctx.beginPath();
+  ctx.moveTo(4.6, 6); ctx.lineTo(12, 5);
+  ctx.moveTo(4.4, 11.4); ctx.lineTo(11.6, 10.8);
+  ctx.stroke(); ctx.setLineDash([]);
 }
 function lump(ctx, dark, hi) {
-  ctx.fillStyle = dark; ctx.beginPath(); ctx.ellipse(8, 9, 5, 4.5, 0.4, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = hi; ctx.fillRect(6, 6, 2, 2);
+  // faceted nugget: angular silhouette with a bright facet and dark crevices
+  ctx.beginPath();
+  ctx.moveTo(7, 3.6); ctx.lineTo(11.6, 5.4); ctx.lineTo(13, 9.6);
+  ctx.lineTo(9.4, 13); ctx.lineTo(4.4, 11.6); ctx.lineTo(3.4, 7);
+  ctx.closePath();
+  ctx.fillStyle = dark; ctx.fill();
+  outline(ctx, 'rgba(0,0,0,0.55)', 0.9);
+  ctx.save(); ctx.clip();
+  ctx.fillStyle = hi; // lit facet (top-left)
+  ctx.beginPath(); ctx.moveTo(6, 4.6); ctx.lineTo(9.6, 5.8); ctx.lineTo(7.4, 8.4); ctx.lineTo(4.8, 7.4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; // shadow crevice (bottom-right)
+  ctx.beginPath(); ctx.moveTo(13, 9.6); ctx.lineTo(9.4, 13); ctx.lineTo(8.6, 9.6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(6.4, 5.4, 1.2, 1.2); // spark
+  ctx.restore();
 }
 function arrow(ctx) {
-  ctx.strokeStyle = '#caa46a'; ctx.lineWidth = 1.4;
-  ctx.beginPath(); ctx.moveTo(3, 13); ctx.lineTo(12, 4); ctx.stroke();
-  ctx.fillStyle = '#cfd3d6'; ctx.beginPath(); ctx.moveTo(12, 2); ctx.lineTo(14, 5); ctx.lineTo(10, 5); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = '#e8e8e8'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(3, 13); ctx.lineTo(5, 11); ctx.moveTo(3, 13); ctx.lineTo(5, 14); ctx.stroke();
+  // wooden shaft, steel head and feathered fletching with depth
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#7a5a30'; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(3.4, 12.6); ctx.lineTo(12, 4); ctx.stroke();
+  ctx.strokeStyle = '#caa46a'; ctx.lineWidth = 0.9;
+  ctx.beginPath(); ctx.moveTo(3.6, 12.2); ctx.lineTo(11.8, 4.2); ctx.stroke();
+  // arrowhead
+  ctx.beginPath(); ctx.moveTo(12.6, 1.6); ctx.lineTo(14.6, 5.2); ctx.lineTo(10.4, 4.4); ctx.closePath();
+  ctx.fillStyle = '#cfd3d6'; ctx.fill();
+  ctx.strokeStyle = 'rgba(60,70,80,0.6)'; ctx.lineWidth = 0.7; ctx.stroke();
+  ctx.fillStyle = '#eef1f3'; ctx.beginPath(); ctx.moveTo(12.6, 1.6); ctx.lineTo(13.5, 3.4); ctx.lineTo(12, 3.1); ctx.closePath(); ctx.fill();
+  // fletching
+  ctx.fillStyle = '#e6e6e6'; ctx.strokeStyle = '#b8b8b8'; ctx.lineWidth = 0.6;
+  ctx.beginPath(); ctx.moveTo(3.4, 12.6); ctx.lineTo(5.6, 11.4); ctx.lineTo(4.6, 13.4); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(3.4, 12.6); ctx.lineTo(2.4, 14.6); ctx.lineTo(4.4, 13.8); ctx.closePath(); ctx.fill(); ctx.stroke();
 }
+// A rounded metal body slab with a top-left sheen strip and a soft dark
+// outline — the shared look for all the conventional firearms.
+function gunBody(ctx, x, y, w, h, base, r = 1) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+  ctx.fillStyle = base; ctx.fill();
+  ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(8,8,12,0.55)'; ctx.stroke();
+  ctx.fillStyle = shade(base, 38); // top sheen
+  ctx.fillRect(x + 0.6, y + 0.4, w - 1.2, Math.max(0.7, h * 0.22));
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; // bottom shade
+  ctx.fillRect(x + 0.6, y + h - Math.max(0.6, h * 0.18), w - 1.2, Math.max(0.6, h * 0.18));
+}
+
 function drawGun(ctx, id) {
   if (id === HANDGUN) {
-    ctx.fillStyle = '#3a3f47';
-    ctx.fillRect(2, 5, 9, 3.2);            // barrel
-    ctx.fillRect(3, 7, 3.5, 6);            // grip
-    ctx.fillStyle = '#6b7079'; ctx.fillRect(2, 5, 3, 1.2);
+    gunBody(ctx, 2, 5, 9, 3.3, '#3a3f47');       // slide
+    gunBody(ctx, 3, 7.6, 3.6, 5.6, '#33373e');   // grip
+    ctx.fillStyle = '#1c1e22'; ctx.fillRect(6.2, 8.2, 1.4, 1.8); // trigger guard
+    ctx.fillStyle = '#0e0f12'; ctx.fillRect(2, 5.6, 1, 1);       // muzzle
+    ctx.fillStyle = '#7a8089'; ctx.fillRect(9.4, 4.6, 1, 0.9);   // rear sight
   } else if (id === SMG) {
-    ctx.fillStyle = '#44464f'; ctx.fillRect(2, 6, 9, 3); ctx.fillRect(4, 8.5, 2.6, 4.5);
-    ctx.fillStyle = '#2c2e35'; ctx.fillRect(6, 9, 2, 5);   // magazine
-    ctx.fillStyle = '#73767f'; ctx.fillRect(2, 6, 2.4, 1);
+    gunBody(ctx, 2, 6, 9, 3, '#44464f');
+    gunBody(ctx, 4, 8.4, 2.6, 4.8, '#3b3d45');    // grip
+    ctx.fillStyle = '#2c2e35'; ctx.fillRect(6.2, 9, 2, 5);       // magazine
+    ctx.fillStyle = '#202228'; ctx.fillRect(6.2, 9, 2, 1);
+    ctx.fillStyle = '#0e0f12'; ctx.fillRect(2, 6.6, 0.9, 1);     // muzzle
+    ctx.fillStyle = '#7a8089'; ctx.fillRect(9, 5.4, 1.2, 0.8);   // sight
   } else if (id === ASSAULT_RIFLE) {
-    ctx.fillStyle = '#3a4a36'; ctx.fillRect(1, 6, 12, 2.8); ctx.fillRect(4, 8.5, 2.6, 4.5);
-    ctx.fillStyle = '#26301f'; ctx.fillRect(7, 9, 2.2, 4.6); // curved mag
-    ctx.fillStyle = '#5d6b4f'; ctx.fillRect(11, 5.4, 3, 1.4); // muzzle/sight
+    gunBody(ctx, 1, 6, 12, 2.9, '#3a4a36');
+    gunBody(ctx, 4, 8.4, 2.6, 4.8, '#33402f');    // grip
+    ctx.fillStyle = '#26301f'; ctx.beginPath();   // curved mag
+    ctx.moveTo(7, 9); ctx.lineTo(9.2, 9); ctx.quadraticCurveTo(9.6, 12, 8.4, 13.6); ctx.lineTo(6.6, 13.4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5d6b4f'; ctx.fillRect(11.4, 5.2, 2.6, 1.3); // muzzle/sight
+    ctx.fillStyle = '#0e120c'; ctx.fillRect(1, 6.6, 0.9, 1);      // muzzle hole
+    ctx.fillStyle = '#6f7d61'; ctx.fillRect(3.4, 5.4, 1.4, 0.8);  // front sight
   } else if (id === SHOTGUN) {
-    ctx.fillStyle = '#5a3a26'; ctx.fillRect(2, 7, 4, 3);   // stock
-    ctx.fillStyle = '#7a7d85'; ctx.fillRect(5, 6.5, 9, 2.2); // barrel
-    ctx.fillStyle = '#3a3c42'; ctx.fillRect(5, 8.4, 8, 1.4); // pump
+    gunBody(ctx, 1.6, 7, 4.4, 3, '#5a3a26', 0.6); // wood stock
+    ctx.fillStyle = '#7a4a2e'; ctx.fillRect(2.2, 7.4, 3.2, 0.8); // stock grain sheen
+    gunBody(ctx, 5, 6.4, 9, 2.3, '#7a7d85');      // barrel
+    ctx.fillStyle = '#3a3c42'; ctx.fillRect(5, 8.5, 8, 1.5);      // pump
+    ctx.fillStyle = '#2a2c31'; ctx.fillRect(5.5, 8.7, 7, 0.5);
+    ctx.fillStyle = '#0e0f12'; ctx.beginPath(); ctx.arc(13.6, 7.5, 0.8, 0, Math.PI * 2); ctx.fill(); // bore
   } else if (id === SNIPER) {
-    ctx.fillStyle = '#23262b';
-    ctx.fillRect(1, 7, 14, 2.4);           // long barrel
-    ctx.fillRect(3, 8.5, 3, 4);            // grip
-    ctx.fillStyle = '#111'; ctx.fillRect(6, 4.5, 5, 2);  // scope
-    ctx.fillStyle = '#4aa3ff'; ctx.fillRect(10, 5, 1.4, 1.4);
+    gunBody(ctx, 1, 7, 14, 2.4, '#23262b');       // long barrel/receiver
+    gunBody(ctx, 3, 8.6, 3, 4.4, '#1d2024');      // grip
+    ctx.fillStyle = '#34464f'; ctx.fillRect(6, 9.4, 5.5, 1.6);    // thumbhole stock fill
+    ctx.fillStyle = '#0e0f12'; ctx.fillRect(5.6, 4.3, 5.8, 2.2);  // scope tube
+    ctx.fillStyle = '#2a2d33'; ctx.fillRect(6, 4.0, 1.4, 0.6); ctx.fillRect(9.8, 4.0, 1.4, 0.6); // scope rings
+    ctx.fillStyle = '#4aa3ff'; ctx.beginPath(); ctx.arc(10.6, 5.4, 0.9, 0, Math.PI * 2); ctx.fill(); // lens glint
+    ctx.fillStyle = '#bfe0ff'; ctx.beginPath(); ctx.arc(10.3, 5.1, 0.35, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0c0d10'; ctx.fillRect(1, 7.6, 0.9, 1);      // muzzle
   } else if (id === RAILGUN) {
-    ctx.fillStyle = '#342b4a'; ctx.fillRect(1, 6, 13, 3); ctx.fillRect(4, 9, 2.6, 4);
-    ctx.fillStyle = '#9b6bff'; ctx.fillRect(2, 7, 11, 0.9); // energy rail
-    const grad = ctx.createRadialGradient(13, 7.5, 0, 13, 7.5, 3);
-    grad.addColorStop(0, '#d8c4ff'); grad.addColorStop(1, 'rgba(120,80,255,0)');
-    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(13, 7.5, 3, 0, Math.PI * 2); ctx.fill();
+    gunBody(ctx, 1, 6, 13, 3, '#342b4a');
+    gunBody(ctx, 4, 9, 2.6, 4, '#2c2540');        // grip
+    ctx.fillStyle = '#1a1428'; ctx.fillRect(2, 6.9, 11, 1.1);     // rail channel
+    ctx.fillStyle = '#9b6bff'; ctx.fillRect(2, 7.1, 11, 0.7);     // energy rail
+    ctx.fillStyle = '#e0d0ff'; ctx.fillRect(2, 7.1, 11, 0.25);    // rail glow line
+    const grad = ctx.createRadialGradient(13, 7.5, 0, 13, 7.5, 3.2);
+    grad.addColorStop(0, '#f0e6ff'); grad.addColorStop(0.4, '#d8c4ff'); grad.addColorStop(1, 'rgba(120,80,255,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(13, 7.5, 3.2, 0, Math.PI * 2); ctx.fill();
   } else if (id === PLASMA_GUN) {
-    ctx.fillStyle = '#2a6f68'; ctx.fillRect(2, 6, 10, 4); ctx.fillRect(3, 9, 3, 4);
-    const grad = ctx.createRadialGradient(12, 8, 0, 12, 8, 4);
-    grad.addColorStop(0, '#bafff5'); grad.addColorStop(1, 'rgba(43,214,192,0)');
-    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(12, 8, 4, 0, Math.PI * 2); ctx.fill();
+    gunBody(ctx, 2, 6, 10, 4, '#2a6f68');
+    gunBody(ctx, 3, 9.4, 3, 3.6, '#235c56');      // grip
+    ctx.fillStyle = '#1b4a45'; ctx.beginPath(); ctx.arc(11.5, 8, 2.4, 0, Math.PI * 2); ctx.fill(); // emitter ring
+    const grad = ctx.createRadialGradient(11.5, 8, 0, 11.5, 8, 4.2);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(0.35, '#bafff5'); grad.addColorStop(1, 'rgba(43,214,192,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(11.5, 8, 4.2, 0, Math.PI * 2); ctx.fill();
   } else if (id === ROCKET_LAUNCHER) {
-    ctx.fillStyle = '#556b2f'; ctx.fillRect(1, 6, 13, 3.6); ctx.fillRect(4, 9.4, 2.6, 3.4);
-    ctx.fillStyle = '#3f5022'; ctx.beginPath(); ctx.arc(2, 7.8, 1.9, Math.PI / 2, -Math.PI / 2); ctx.fill();
-    ctx.fillStyle = '#d23a2a'; ctx.beginPath(); ctx.moveTo(14, 6); ctx.lineTo(15.5, 7.8); ctx.lineTo(14, 9.6); ctx.closePath(); ctx.fill(); // warhead
+    gunBody(ctx, 1, 6, 13, 3.6, '#556b2f');
+    gunBody(ctx, 4, 9.4, 2.6, 3.4, '#49591f');    // grip
+    ctx.fillStyle = '#2c3a16'; ctx.beginPath(); ctx.arc(2, 7.8, 1.9, Math.PI / 2, -Math.PI / 2); ctx.fill(); // rear vent
+    ctx.fillStyle = '#7d7d4a'; ctx.fillRect(7.6, 4.6, 2.2, 1.2); // optic
+    ctx.fillStyle = '#d23a2a'; ctx.beginPath(); ctx.moveTo(13.6, 5.6); ctx.lineTo(15.6, 7.8); ctx.lineTo(13.6, 10); ctx.closePath(); ctx.fill(); // warhead
+    ctx.fillStyle = '#f2a23a'; ctx.beginPath(); ctx.moveTo(13.6, 5.6); ctx.lineTo(14.7, 6.8); ctx.lineTo(13.6, 7.6); ctx.closePath(); ctx.fill(); // warhead tip sheen
   } else if (id === HEAVY_MG) {
-    ctx.fillStyle = '#2b2b2f'; ctx.fillRect(1, 6, 12, 2.6);                 // long receiver
-    ctx.fillStyle = '#46484e'; ctx.fillRect(11, 5.6, 4, 3.2);              // perforated barrel shroud
-    ctx.fillStyle = '#1c1c20'; ctx.fillRect(11.5, 6.2, 0.7, 2); ctx.fillRect(13, 6.2, 0.7, 2);
-    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(2, 8.4, 3.2, 1.8);             // wooden stock
-    ctx.strokeStyle = '#b08a3a'; ctx.lineWidth = 1; ctx.beginPath();      // ammo belt
-    ctx.moveTo(6, 8.6); ctx.lineTo(7, 11); ctx.lineTo(9, 11.5); ctx.stroke();
+    gunBody(ctx, 1, 6, 12, 2.6, '#2b2b2f');                       // long receiver
+    ctx.fillStyle = '#46484e'; ctx.fillRect(11, 5.6, 4, 3.2);     // perforated barrel shroud
+    ctx.fillStyle = '#5a5c63'; ctx.fillRect(11, 5.6, 4, 0.7);     // shroud top sheen
+    ctx.fillStyle = '#15151a'; ctx.fillRect(11.6, 6.2, 0.7, 2); ctx.fillRect(12.6, 6.2, 0.7, 2); ctx.fillRect(13.6, 6.2, 0.7, 2); // vent holes
+    gunBody(ctx, 2, 8.2, 3.4, 2, '#6a4a2a', 0.6);                 // wooden stock
+    ctx.fillStyle = '#3a3c2e'; ctx.fillRect(5.4, 8.6, 1.6, 2.4);  // belt feed box
+    ctx.strokeStyle = '#c79a44'; ctx.lineWidth = 1.4; ctx.lineCap = 'round'; // ammo belt
+    ctx.setLineDash([0.6, 1]); ctx.beginPath();
+    ctx.moveTo(6, 8.8); ctx.lineTo(7.4, 11); ctx.lineTo(9.6, 11.8); ctx.stroke(); ctx.setLineDash([]);
   } else if (id === RASENGAN) {
     const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 6.5);          // swirling chakra orb
     grad.addColorStop(0, '#eaf6ff'); grad.addColorStop(0.45, '#7ec8ff'); grad.addColorStop(0.8, '#3a86e0'); grad.addColorStop(1, 'rgba(40,110,200,0)');
@@ -233,20 +342,25 @@ function drawGun(ctx, id) {
     ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   } else if (id === BLACK_HOLE_BOMB) {
-    ctx.fillStyle = '#241a33'; ctx.fillRect(2, 6, 9, 4); ctx.fillRect(3, 9.5, 3, 3.5);  // dark launcher
-    ctx.fillStyle = '#140d1f'; ctx.fillRect(10, 5, 3, 6);                               // muzzle housing
-    const grad = ctx.createRadialGradient(11.5, 8, 0, 11.5, 8, 3.2);                    // void orb + halo
-    grad.addColorStop(0, '#000'); grad.addColorStop(0.45, '#000');
-    grad.addColorStop(0.7, '#9b6bff'); grad.addColorStop(1, 'rgba(123,63,242,0)');
-    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(11.5, 8, 3.2, 0, Math.PI * 2); ctx.fill();
+    gunBody(ctx, 2, 6, 9, 4, '#241a33');                                                // dark launcher
+    gunBody(ctx, 3, 9.5, 3, 3.5, '#1d1429');                                            // grip
+    ctx.fillStyle = '#140d1f'; ctx.fillRect(9.6, 5, 3.4, 6);                            // muzzle housing
+    ctx.fillStyle = '#3a2a52'; ctx.fillRect(9.6, 5, 3.4, 0.7);                          // housing top sheen
+    const grad = ctx.createRadialGradient(11.5, 8, 0, 11.5, 8, 3.4);                    // void orb + halo
+    grad.addColorStop(0, '#000'); grad.addColorStop(0.42, '#000');
+    grad.addColorStop(0.62, '#9b6bff'); grad.addColorStop(0.8, '#c9a8ff'); grad.addColorStop(1, 'rgba(123,63,242,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(11.5, 8, 3.4, 0, Math.PI * 2); ctx.fill();
   } else if (id === LASER_CANNON) {
-    ctx.fillStyle = '#2a2030'; ctx.fillRect(1, 6, 10, 4); ctx.fillRect(3, 9.5, 3, 3.4);   // emitter body + grip
-    ctx.fillStyle = '#140c1c'; ctx.fillRect(10, 5, 3, 6);                                  // muzzle housing
-    ctx.fillStyle = '#ff2e54'; ctx.fillRect(2, 7, 9, 0.9);                                 // energy rail
-    const grad = ctx.createRadialGradient(12.5, 8, 0, 12.5, 8, 4);                         // glowing red lens + beam
-    grad.addColorStop(0, '#fff'); grad.addColorStop(0.4, '#ff516e'); grad.addColorStop(1, 'rgba(255,46,84,0)');
-    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(12.5, 8, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = 'rgba(255,90,120,0.5)'; ctx.fillRect(13, 7.4, 3, 1.2);                 // beam streak
+    gunBody(ctx, 1, 6, 10, 4, '#2a2030');                                                 // emitter body
+    gunBody(ctx, 3, 9.5, 3, 3.4, '#221926');                                              // grip
+    ctx.fillStyle = '#140c1c'; ctx.fillRect(9.6, 5, 3.4, 6);                              // muzzle housing
+    ctx.fillStyle = '#3a1422'; ctx.fillRect(2, 6.8, 9, 1.2);                              // rail channel
+    ctx.fillStyle = '#ff2e54'; ctx.fillRect(2, 7.05, 9, 0.7);                             // energy rail
+    ctx.fillStyle = '#ffd0da'; ctx.fillRect(2, 7.05, 9, 0.22);                            // rail glow line
+    const grad = ctx.createRadialGradient(12.4, 8, 0, 12.4, 8, 4.2);                      // glowing red lens + beam
+    grad.addColorStop(0, '#fff'); grad.addColorStop(0.35, '#ff516e'); grad.addColorStop(1, 'rgba(255,46,84,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(12.4, 8, 4.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,90,120,0.5)'; ctx.fillRect(13, 7.5, 3, 1);                  // beam streak
   } else if (id === HOLLOW_PURPLE) {
     const halo = ctx.createRadialGradient(8, 8, 0, 8, 8, 7);                               // purple imaginary-mass haze
     halo.addColorStop(0, 'rgba(176,96,255,0.9)'); halo.addColorStop(1, 'rgba(120,40,200,0)');
@@ -257,10 +371,14 @@ function drawGun(ctx, id) {
     const blue = ctx.createRadialGradient(10.5, 8, 0, 10.5, 8, 3);                         // limitless blue
     blue.addColorStop(0, '#5a8bff'); blue.addColorStop(1, 'rgba(42,107,255,0)');
     ctx.fillStyle = blue; ctx.beginPath(); ctx.arc(10.5, 8, 3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(8, 8, 1.5, 0, Math.PI * 2); ctx.fill();  // bright purple core
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(8, 8, 1.6, 0, Math.PI * 2); ctx.fill();  // bright purple core
+    ctx.fillStyle = '#e6c8ff'; ctx.beginPath(); ctx.arc(8, 8, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(8, 8, 1.6, 0, Math.PI * 2); ctx.fill();
   } else if (id === SHARINGAN) {
     ctx.fillStyle = '#1a0608'; ctx.beginPath(); ctx.arc(8, 8, 6.6, 0, Math.PI * 2); ctx.fill();   // dark sclera rim
-    ctx.fillStyle = '#d11020'; ctx.beginPath(); ctx.arc(8, 8, 5.6, 0, Math.PI * 2); ctx.fill();    // red iris
+    const iris = ctx.createRadialGradient(6.4, 6.4, 0.5, 8, 8, 5.6);                              // shaded red iris
+    iris.addColorStop(0, '#f0394a'); iris.addColorStop(0.6, '#d11020'); iris.addColorStop(1, '#9c0a16');
+    ctx.fillStyle = iris; ctx.beginPath(); ctx.arc(8, 8, 5.6, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#2a0408'; ctx.beginPath(); ctx.arc(8, 8, 1.8, 0, Math.PI * 2); ctx.fill();    // pupil
     ctx.fillStyle = '#1a0306';
     for (let i = 0; i < 3; i++) {                                                                   // three tomoe
@@ -269,29 +387,80 @@ function drawGun(ctx, id) {
       ctx.lineWidth = 1.2; ctx.strokeStyle = '#1a0306'; ctx.beginPath(); ctx.arc(cx, cy, 2.1, a + 0.5, a + 2.2); ctx.stroke();
     }
   } else { // PORTAL_GUN
-    ctx.fillStyle = '#d6d6d6'; ctx.fillRect(2, 6, 9, 3.6); ctx.fillRect(3, 9, 3, 4);
-    ctx.fillStyle = '#ff8c2b'; ctx.fillRect(10, 6, 2, 1.8);
-    ctx.fillStyle = '#2b8cff'; ctx.fillRect(10, 7.8, 2, 1.8);
+    gunBody(ctx, 2, 6, 9, 3.6, '#d6d6d6');
+    gunBody(ctx, 3, 9.4, 3, 3.6, '#c4c4c4');     // grip
+    ctx.fillStyle = '#9a9a9a'; ctx.fillRect(9.6, 5.4, 3, 5);     // muzzle prongs housing
+    const og = ctx.createRadialGradient(11, 6.9, 0, 11, 6.9, 1.6); // orange portal glow
+    og.addColorStop(0, '#ffd9a0'); og.addColorStop(0.5, '#ff8c2b'); og.addColorStop(1, 'rgba(255,140,43,0)');
+    ctx.fillStyle = og; ctx.beginPath(); ctx.arc(11, 6.9, 1.6, 0, Math.PI * 2); ctx.fill();
+    const bg = ctx.createRadialGradient(11, 9.1, 0, 11, 9.1, 1.6); // blue portal glow
+    bg.addColorStop(0, '#bfe0ff'); bg.addColorStop(0.5, '#2b8cff'); bg.addColorStop(1, 'rgba(43,140,255,0)');
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(11, 9.1, 1.6, 0, Math.PI * 2); ctx.fill();
   }
 }
 
+// Derive a lighter sheen and darker shade from a base head color for a
+// consistent top-left light direction across the whole tool set.
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.max(0, Math.min(255, r + amt));
+  g = Math.max(0, Math.min(255, g + amt));
+  b = Math.max(0, Math.min(255, b + amt));
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+
+function woodHandle(ctx, x0, y0, x1, y1) {
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#5e3a1a'; ctx.lineWidth = 3; // dark edge
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.strokeStyle = HANDLE; ctx.lineWidth = 2; // wood
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  ctx.strokeStyle = '#b98b54'; ctx.lineWidth = 0.7; // highlight
+  ctx.beginPath(); ctx.moveTo(x0 + 0.3, y0 - 0.3); ctx.lineTo(x1 + 0.3, y1 - 0.3); ctx.stroke();
+}
+
 function drawTool(ctx, type, headColor) {
-  // common wooden handle
-  ctx.strokeStyle = HANDLE; ctx.lineWidth = 2.2;
-  ctx.beginPath(); ctx.moveTo(4, 13); ctx.lineTo(11, 5); ctx.stroke();
-  ctx.fillStyle = headColor;
+  const hi = shade(headColor, 55), lo = shade(headColor, -45);
+  const edge = 'rgba(20,14,8,0.5)';
   if (type === 'pickaxe') {
-    ctx.lineWidth = 2; ctx.strokeStyle = headColor;
-    ctx.beginPath(); ctx.moveTo(6, 3); ctx.quadraticCurveTo(11, 4, 14, 6); ctx.stroke();
+    woodHandle(ctx, 4.5, 13.5, 9.5, 6);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = lo; ctx.lineWidth = 2.6; // head underlay (shadow)
+    ctx.beginPath(); ctx.moveTo(5.5, 3.4); ctx.quadraticCurveTo(10.5, 3.6, 14, 6.2); ctx.stroke();
+    ctx.strokeStyle = headColor; ctx.lineWidth = 1.9;
+    ctx.beginPath(); ctx.moveTo(5.5, 3.4); ctx.quadraticCurveTo(10.5, 3.6, 14, 6.2); ctx.stroke();
+    ctx.strokeStyle = hi; ctx.lineWidth = 0.8; // top sheen
+    ctx.beginPath(); ctx.moveTo(5.8, 2.8); ctx.quadraticCurveTo(10.4, 3, 13.6, 5.4); ctx.stroke();
   } else if (type === 'axe') {
-    ctx.beginPath(); ctx.moveTo(9, 3); ctx.lineTo(14, 5); ctx.lineTo(12, 9); ctx.lineTo(8, 6); ctx.closePath(); ctx.fill();
+    woodHandle(ctx, 4.5, 13.5, 9.5, 5);
+    ctx.beginPath(); ctx.moveTo(9, 2.8); ctx.lineTo(14, 5); ctx.quadraticCurveTo(13.4, 7.6, 12, 9.4); ctx.lineTo(8, 6.4); ctx.closePath();
+    ctx.fillStyle = headColor; ctx.fill();
+    outline(ctx, edge, 0.9);
+    ctx.fillStyle = hi; // bevel highlight along the back
+    ctx.beginPath(); ctx.moveTo(9, 2.8); ctx.lineTo(14, 5); ctx.lineTo(12.4, 5.8); ctx.lineTo(9.2, 4.2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = lo; // shadowed edge near blade
+    ctx.beginPath(); ctx.moveTo(8, 6.4); ctx.lineTo(12, 9.4); ctx.lineTo(10.4, 9.2); ctx.lineTo(8.2, 7.2); ctx.closePath(); ctx.fill();
   } else if (type === 'shovel') {
-    ctx.beginPath(); ctx.moveTo(9, 3); ctx.lineTo(13, 4); ctx.lineTo(11.5, 8); ctx.lineTo(8, 6.5); ctx.closePath(); ctx.fill();
+    woodHandle(ctx, 4.5, 13.5, 9.5, 5.5);
+    ctx.beginPath(); ctx.moveTo(8.8, 2.8); ctx.lineTo(13, 4); ctx.quadraticCurveTo(12.4, 6.8, 10.6, 8.4); ctx.lineTo(7.4, 6.6); ctx.closePath();
+    ctx.fillStyle = headColor; ctx.fill();
+    outline(ctx, edge, 0.9);
+    ctx.fillStyle = hi; // scoop highlight
+    ctx.beginPath(); ctx.moveTo(8.8, 2.8); ctx.lineTo(13, 4); ctx.lineTo(11, 4.8); ctx.lineTo(8.4, 4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = lo; // scoop hollow shadow
+    ctx.beginPath(); ctx.ellipse(10.2, 6, 1.6, 1.2, -0.6, 0, Math.PI * 2); ctx.fill();
   } else { // sword
-    ctx.strokeStyle = headColor; ctx.lineWidth = 2.6;
-    ctx.beginPath(); ctx.moveTo(5, 12); ctx.lineTo(13, 3); ctx.stroke();
-    ctx.strokeStyle = '#6a4520'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(3, 13); ctx.lineTo(6, 10); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(4, 9); ctx.lineTo(7, 12); ctx.stroke();
+    woodHandle(ctx, 3, 13.5, 6, 10.2); // grip
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = lo; ctx.lineWidth = 3; // blade edge (shadow)
+    ctx.beginPath(); ctx.moveTo(5.4, 11.6); ctx.lineTo(13, 3); ctx.stroke();
+    ctx.strokeStyle = headColor; ctx.lineWidth = 2; // blade
+    ctx.beginPath(); ctx.moveTo(5.4, 11.6); ctx.lineTo(13, 3); ctx.stroke();
+    ctx.strokeStyle = hi; ctx.lineWidth = 0.8; // central fuller / sheen
+    ctx.beginPath(); ctx.moveTo(6, 11); ctx.lineTo(12.6, 3.4); ctx.stroke();
+    ctx.strokeStyle = '#7a5020'; ctx.lineWidth = 2.4; // crossguard
+    ctx.beginPath(); ctx.moveTo(4, 9.4); ctx.lineTo(7.4, 12.8); ctx.stroke();
+    ctx.fillStyle = '#caa44a'; ctx.beginPath(); ctx.arc(3, 13.6, 1, 0, Math.PI * 2); ctx.fill(); // pommel
   }
 }

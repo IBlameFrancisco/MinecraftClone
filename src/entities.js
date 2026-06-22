@@ -118,12 +118,19 @@ class Mob {
     this.walk = 0;
     this.wanderTimer = 0;
     this.wx = 0; this.wz = 0;        // wander direction
+    this.wanderYaw = this.yaw;       // wander aims drift smoothly toward this heading
     this.fleeTimer = 0;
     this.attackCD = 0;
     this.shootCD = 1 + Math.random();
     this.fuse = 0;
+    this.hiss = 0;                   // creeper: 0..1 charge while armed and near
+    this.startleCD = 0;             // passive: cooldown before it can startle again
     this.hurtFlash = 0;
     this.dead = false;
+    // Per-individual temperament so a herd/horde doesn't move in lockstep.
+    this.bias = 0.85 + Math.random() * 0.3;        // personal speed multiplier
+    this.boldness = Math.random();                 // 0 timid .. 1 bold (flee distance, kite range)
+    this.restless = 0.4 + Math.random() * 0.8;     // how often it changes its mind while wandering
     const built = buildModel(kind);
     this.mesh = built.group;
     this.legs = built.group.userData.legs;
@@ -148,8 +155,14 @@ class Mob {
     const dx = this.pos.x - fromX, dz = this.pos.z - fromZ;
     const d = Math.hypot(dx, dz) || 1;
     this.vel.x += (dx / d) * 6; this.vel.z += (dz / d) * 6; this.vel.y = 5;
-    if (!this.hostile) this.fleeTimer = 4;
-    else { this.aggro = true; }
+    if (!this.hostile) {
+      // Timid animals bolt for longer; bold ones recover their nerve quicker.
+      this.fleeTimer = 3 + (1 - this.boldness) * 2.5;
+    } else {
+      this.aggro = true;
+      // A struck creeper is already committed — prime its fuse a little.
+      if (this.def.bomb) this.hiss = Math.max(this.hiss, 0.35);
+    }
     if (this.health <= 0) this.dead = true;
   }
 
@@ -160,44 +173,105 @@ class Mob {
     const toPz = ctx.player.pos.z - this.pos.z;
     const distP = Math.hypot(toPx, toPz);
 
+    this.startleCD -= dt;
+
+    // Passive animals spook if the player closes in fast, even without a hit.
+    if (!this.hostile && this.fleeTimer <= 0 && this.startleCD <= 0) {
+      const startleAt = 2.6 + this.boldness * 2.0;  // bolder animals let you get closer
+      if (distP < startleAt) { this.fleeTimer = 1.4 + Math.random() * 1.1; this.startleCD = 4; }
+    }
+
     if (this.fleeTimer > 0) {
       this.fleeTimer -= dt;
-      desiredX = -toPx; desiredZ = -toPz; speed = this.speed * 2.2;
+      // Bolt away, but veer rather than running in a dead-straight line.
+      const veer = Math.sin(this.idlePhase * 1.7 + this.bias * 5) * 0.5;
+      desiredX = -toPx + -toPz * veer;
+      desiredZ = -toPz + toPx * veer;
+      speed = this.speed * (2.0 + this.boldness * 0.4);
     } else if (this.hostile && distP < 24 && (ctx.isNight || this.aggro || this.def.bomb)) {
       if (distP < 12) this.aggro = true;
       this.yaw = Math.atan2(toPx, toPz); // face the player
       if (this.def.ranged) {
-        if (distP < 5) { desiredX = -toPx; desiredZ = -toPz; }
-        else if (distP > 11) { desiredX = toPx; desiredZ = toPz; }
-        speed = this.speed;
+        // Skeleton kiting: hold a stand-off band, backing off when crowded and
+        // closing only when the player drifts out of range. Bolder ones press closer.
+        const near = 4.5 - this.boldness, far = 9 + this.boldness * 3;
+        if (distP < near) { desiredX = -toPx; desiredZ = -toPz; speed = this.speed * 1.15; }
+        else if (distP > far) { desiredX = toPx; desiredZ = toPz; speed = this.speed; }
+        else {
+          // In the sweet spot: strafe sideways for a lively, hard-to-hit shuffle.
+          const side = (this.bias > 1 ? 1 : -1);
+          desiredX = -toPz * side; desiredZ = toPx * side; speed = this.speed * 0.6;
+        }
         this.shootCD -= dt;
-        if (this.shootCD <= 0 && distP < 16 && this._canSee(world, ctx.player)) { this._shoot(ctx); this.shootCD = 1.6 + Math.random() * 0.8; }
+        if (this.shootCD <= 0 && distP < 16 && this._canSee(world, ctx.player)) {
+          this._shoot(ctx);
+          // Quick double-tap occasionally, otherwise a measured reload.
+          this.shootCD = (Math.random() < 0.25 ? 0.5 : 1.6 + Math.random() * 0.8);
+        }
       } else if (this.def.bomb) {
-        desiredX = toPx; desiredZ = toPz; speed = this.speed * 0.95;
-        if (distP < 2.4) { this.fuse += dt; if (this.fuse >= 1.4) { ctx.explode(this.pos.x, this.pos.y + 0.6, this.pos.z); this.dead = true; } }
-        else this.fuse = Math.max(0, this.fuse - dt);
+        // Creeper: rush in, then freeze and swell once point-blank. If the player
+        // breaks contact mid-charge it eases off (visible relief) before re-arming.
+        if (distP < 1.9) {
+          desiredX = 0; desiredZ = 0; speed = 0;     // plant feet and detonate
+          this.hiss = Math.min(1, this.hiss + dt / 1.4);
+          this.fuse += dt;
+          if (this.fuse >= 1.4) { ctx.explode(this.pos.x, this.pos.y + 0.6, this.pos.z); this.dead = true; }
+        } else if (distP < 3.2 && this.hiss > 0.05) {
+          // Within the danger ring while already charging — creep forward warily.
+          desiredX = toPx; desiredZ = toPz; speed = this.speed * 0.45;
+          this.hiss = Math.max(0, this.hiss - dt * 0.6);
+          this.fuse = Math.max(0, this.fuse - dt * 1.5);
+        } else {
+          desiredX = toPx; desiredZ = toPz; speed = this.speed * 0.95;
+          this.hiss = Math.max(0, this.hiss - dt * 1.5);
+          this.fuse = Math.max(0, this.fuse - dt * 2);
+        }
       } else {
-        desiredX = toPx; desiredZ = toPz; speed = this.speed;
-        if (distP < 1.5 && this.attackCD <= 0) { ctx.damagePlayer(3 * (ctx.dmgMul || 1), this.pos.x, this.pos.z); this.attackCD = 1.0; }
+        // Zombie pursuit: lunge in for a swing, recover a beat, then press again
+        // so it reads as deliberate rather than a constant shove.
+        if (distP < 1.5 && this.attackCD <= 0) {
+          ctx.damagePlayer(3 * (ctx.dmgMul || 1), this.pos.x, this.pos.z);
+          this.attackCD = 0.9 + Math.random() * 0.3;
+        }
+        desiredX = toPx; desiredZ = toPz;
+        // Brief hesitation right after a swing reads as a wind-up between hits.
+        speed = (this.attackCD > 0.55 && distP < 2.2) ? this.speed * 0.35 : this.speed;
       }
     } else {
+      // Wandering: ease toward fresh headings and take real pauses, with the
+      // cadence varying per individual so a herd doesn't move as one.
+      this.hiss = Math.max(0, this.hiss - dt);
+      this.fuse = Math.max(0, this.fuse - dt);
+      // Hostiles that lost the player far away (out of the 24-block band) slowly
+      // lose interest, so a daytime-aggroed mob doesn't chase forever.
+      if (this.aggro && distP > 30) this.aggro = false;
       this.wanderTimer -= dt;
       if (this.wanderTimer <= 0) {
-        this.wanderTimer = 2 + Math.random() * 3;
-        if (Math.random() < 0.3) { this.wx = 0; this.wz = 0; }
-        else { const a = Math.random() * TWO_PI; this.wx = Math.cos(a); this.wz = Math.sin(a); }
+        if (Math.random() < 0.4) {                     // settle and graze/idle a while
+          this.wx = 0; this.wz = 0;
+          this.wanderTimer = (1.5 + Math.random() * 3.5) / this.restless;
+        } else {
+          // Nudge the heading rather than teleporting it, for gentle turns.
+          this.wanderYaw += (Math.random() - 0.5) * 2.2;
+          this.wx = Math.sin(this.wanderYaw); this.wz = Math.cos(this.wanderYaw);
+          this.wanderTimer = (1.5 + Math.random() * 2.5) / this.restless;
+        }
       }
       desiredX = this.wx; desiredZ = this.wz; speed = this.speed * 0.5;
     }
     this.attackCD -= dt;
 
     const dl = Math.hypot(desiredX, desiredZ);
-    const moving = dl > 0.01;
+    const moving = dl > 0.01 && speed > 0.01;
     if (moving) {
       desiredX /= dl; desiredZ /= dl;
+      speed *= this.bias;                     // personal pace
       this.yaw = Math.atan2(desiredX, desiredZ);
-      this.vel.x += (desiredX * speed - this.vel.x) * Math.min(1, 8 * dt);
-      this.vel.z += (desiredZ * speed - this.vel.z) * Math.min(1, 8 * dt);
+      // Heavier mobs and calmer states accelerate a little more gently; fleeing
+      // and charging snap to speed faster so reactions feel urgent.
+      const accel = this.fleeTimer > 0 || this.aggro ? 11 : 7;
+      this.vel.x += (desiredX * speed - this.vel.x) * Math.min(1, accel * dt);
+      this.vel.z += (desiredZ * speed - this.vel.z) * Math.min(1, accel * dt);
       // Hop over a one-block step.
       if (this.onGround) {
         const fx = this.pos.x + desiredX * (this.half + 0.3);
@@ -208,7 +282,9 @@ class Mob {
         if (blocked && headClear) this.vel.y = 7.2;
       }
     } else {
-      this.vel.x *= 0.8; this.vel.z *= 0.8;
+      // Ease to a stop instead of cutting motion abruptly.
+      const damp = Math.max(0, 1 - 9 * dt);
+      this.vel.x *= damp; this.vel.z *= damp;
     }
 
     this.vel.y -= GRAVITY * dt;
@@ -285,6 +361,13 @@ class Mob {
 
     let er = 0, eg = 0, eb = 0;
     if (this.hurtFlash > 0) { this.hurtFlash -= dt; er = 0.5; }
+    else if (this.def.bomb && (this.hiss > 0.05 || this.fuse > 0)) {
+      // Pulse quickens as the creeper charges (hiss) and again on the live fuse.
+      const charge = Math.max(this.hiss, this.fuse / 1.4);
+      const rate = 6 + charge * 26 + this.fuse * 22;
+      const f = (Math.sin(performance.now() * 0.001 * rate) * 0.5 + 0.5) * (0.4 + charge * 0.6);
+      er = f * 0.95; eg = f * 0.95; eb = f * 0.2;
+    }
     else if (this.fuse > 0) { const f = Math.sin(this.fuse * 22) * 0.5 + 0.5; er = f * 0.9; eg = f * 0.9; eb = f * 0.2; }
     else if (this.burning) { const f = Math.sin(performance.now() * 0.02) * 0.35 + 0.6; er = f; eg = f * 0.4; eb = 0; }   // smouldering glow
     this.mesh.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(er, eg, eb); });
@@ -417,6 +500,7 @@ export class Mobs {
     const mobCtx = {
       player, isNight, damagePlayer: ctx.damagePlayer, dmgMul: ctx.dmgMul || 1,
       explode: ctx.explode || (() => {}),
+      fire: ctx.fire,
       spawnArrow: (x, y, z, vx, vy, vz) => this.spawnArrow(x, y, z, vx, vy, vz),
     };
 
