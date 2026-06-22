@@ -37,8 +37,9 @@ export const RASENGAN = 284;
 export const RASENSHURIKEN = 285;
 export const LASER_CANNON = 286;
 export const HOLLOW_PURPLE = 287;
+export const SHARINGAN = 288;
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -95,6 +96,12 @@ export const ITEMS = {
   // erase a wide corridor with an imaginary-mass purple beam. A charged jutsu (draws
   // chakra); a fuller charge means a wider, longer, more annihilating blast.
   [HOLLOW_PURPLE]: { name: 'Hollow Purple', gun: { kind: 'hollowpurple', charge: 1.9, rate: 0.4, damage: 120, radius: 4.2, range: 110, knockback: 30, recoil: 0.06, color: 0x9a3cff } },
+  // Mangekyo Sharingan — an all-in-one dojutsu. LMB: the gaze, igniting whoever you
+  // look at in spreading Amaterasu black flames (`dot`/s for `ignite`s) and, after
+  // holding it `ensnare`s on one target, locking them in Genjutsu (`stun`s). RMB:
+  // Precognition — bullet-time where enemies slow + glow through walls and you take
+  // less damage. Draws the chakra reserve. Bots fire it as a weak hitscan bolt.
+  [SHARINGAN]: { name: 'Sharingan', gun: { kind: 'sharingan', range: 80, drain: 9, dot: 7, ignite: 3.5, ensnare: 1.0, stun: 2.4, precogDur: 4.0, precogCost: 45, precogCD: 9, rate: 0.6, damage: 14, recoil: 0.008, color: 0xe01020 } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
@@ -251,6 +258,16 @@ function drawGun(ctx, id) {
     blue.addColorStop(0, '#5a8bff'); blue.addColorStop(1, 'rgba(42,107,255,0)');
     ctx.fillStyle = blue; ctx.beginPath(); ctx.arc(10.5, 8, 3, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(8, 8, 1.5, 0, Math.PI * 2); ctx.fill();  // bright purple core
+  } else if (id === SHARINGAN) {
+    ctx.fillStyle = '#1a0608'; ctx.beginPath(); ctx.arc(8, 8, 6.6, 0, Math.PI * 2); ctx.fill();   // dark sclera rim
+    ctx.fillStyle = '#d11020'; ctx.beginPath(); ctx.arc(8, 8, 5.6, 0, Math.PI * 2); ctx.fill();    // red iris
+    ctx.fillStyle = '#2a0408'; ctx.beginPath(); ctx.arc(8, 8, 1.8, 0, Math.PI * 2); ctx.fill();    // pupil
+    ctx.fillStyle = '#1a0306';
+    for (let i = 0; i < 3; i++) {                                                                   // three tomoe
+      const a = i * 2.094 - 1.1, cx = 8 + Math.cos(a) * 3.3, cy = 8 + Math.sin(a) * 3.3;
+      ctx.beginPath(); ctx.arc(cx, cy, 1.15, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 1.2; ctx.strokeStyle = '#1a0306'; ctx.beginPath(); ctx.arc(cx, cy, 2.1, a + 0.5, a + 2.2); ctx.stroke();
+    }
   } else { // PORTAL_GUN
     ctx.fillStyle = '#d6d6d6'; ctx.fillRect(2, 6, 9, 3.6); ctx.fillRect(3, 9, 3, 4);
     ctx.fillStyle = '#ff8c2b'; ctx.fillRect(10, 6, 2, 1.8);

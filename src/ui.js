@@ -22,6 +22,9 @@ export class HUD {
     ui.appendChild(this.modeInfoEl);
     this.announceEl = document.createElement('div'); this.announceEl.id = 'announce';
     this.dmgDirEl = document.createElement('div'); this.dmgDirEl.id = 'dmgdir'; this.dmgDirEl.innerHTML = '<div class="wedge"></div>';
+    this.precogEl = document.createElement('div'); this.precogEl.id = 'precog';
+    this.precogEl.innerHTML = '<div class="precog-tag">三 SHARINGAN · PRECOGNITION</div>';
+    ui.appendChild(this.precogEl);
     this.kcEl = document.createElement('div'); this.kcEl.id = 'killcam';
     this.kcEl.innerHTML = '<div class="kc-bar kc-top"></div><div class="kc-bar kc-bot"></div>'
       + '<div class="kc-label"><div class="kc-tag">★ FINAL KILL</div><div class="kc-line"></div></div>';
@@ -45,6 +48,9 @@ export class HUD {
     }
   }
   hideKillCam() { this.kcEl.classList.remove('show'); this.kcEl.style.display = 'none'; }
+
+  // Sharingan Precognition: a red-rimmed bullet-time overlay.
+  setPrecog(on) { if (this.precogEl) this.precogEl.classList.toggle('show', !!on); }
 
   // Big fading announcer banner (First Blood, multikills, round win…). Queued so two
   // banners fired in the same frame (e.g. multikill + killstreak) both show in turn
@@ -460,6 +466,12 @@ export class HUD {
       #killcam .kc-line b { background:linear-gradient(180deg,#ffe08a,#ff8f3a); -webkit-background-clip:text;
         background-clip:text; -webkit-text-fill-color:transparent; }
       #killcam .kc-arrow { color:#ff6a6a; margin:0 4px; }
+      #precog { display:none; position:absolute; inset:0; pointer-events:none; z-index:18; opacity:0;
+        transition:opacity 0.3s; box-shadow:inset 0 0 200px 30px rgba(200,12,28,0.42), inset 0 0 60px rgba(255,40,60,0.3);
+        background:radial-gradient(ellipse at 50% 50%, rgba(255,0,20,0) 52%, rgba(150,0,16,0.28) 100%); }
+      #precog.show { display:block; opacity:1; }
+      #precog .precog-tag { position:absolute; left:50%; top:7%; transform:translateX(-50%); color:#ff3142;
+        font-size:13px; font-weight:900; letter-spacing:3px; text-shadow:0 0 12px rgba(255,40,60,0.8), 0 2px 4px #000; }
     `;
     document.head.appendChild(s);
   }
