@@ -698,6 +698,13 @@ function toggleMode() {
 function damagePlayer(dmg, srcX, srcZ, pvp) {
   if ((mode !== SURVIVAL && mode !== BATTLE) || dead || !player.locked) return;
   if (!pvp && invuln > 0) return;
+  // Channelling chakra raises a protective shield: it soaks most of the hit, draining
+  // chakra to do so (no chakra → no shield).
+  if (chargingChakra && chakraEnergy > 0 && dmg > 0) {
+    dmg = Math.max(0, Math.ceil(dmg * 0.35));
+    chakraEnergy = Math.max(0, chakraEnergy - 12);
+    particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [120, 200, 255], 10);
+  }
   health -= dmg; if (!pvp) invuln = 0.5;
   hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.hurt(); addShake(0.12 + dmg * 0.004);
   if (srcX !== undefined) {
@@ -1288,16 +1295,24 @@ window.addEventListener('keydown', (e) => {
   } else if (e.code === 'KeyR') {
     const g2 = gunOf(inventory.selectedId());
     if (g2 && g2.mag && player.locked && !dead) startReload(g2, inventory.selectedId());
+  } else if (e.code === 'KeyQ') {
+    if (!dead && !inventory.open) { keyBreak = true; breakCD = 0; attackCD = 0; triggerConsumed = false; }   // break/attack without a mouse
+  } else if (e.code === 'KeyF') {
+    if (!dead && !inventory.open) { keyPlace = true; placeCD = 0; }                                          // place/use without a mouse
   } else if (e.code === 'KeyC') {
     if (!dead && !inventory.open && player.locked) chargingChakra = true;   // hold to channel chakra
   } else if (e.code === 'KeyT' || e.code === 'Enter') {
     if (player.locked && !inventory.open && !dead && !hud.isChatOpen()) { e.preventDefault(); player.keys.clear(); hud.openChat(); }
   }
 });
-window.addEventListener('keyup', (e) => { if (e.code === 'KeyC') chargingChakra = false; });
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'KeyC') chargingChakra = false;
+  else if (e.code === 'KeyQ') { keyBreak = false; triggerConsumed = false; resetBreak(); }
+  else if (e.code === 'KeyF') keyPlace = false;
+});
 
 // ---------- Mouse ----------
-let mouseLeft = false, mouseRight = false;
+let mouseLeft = false, mouseRight = false, keyBreak = false, keyPlace = false;   // Q/F mirror the mouse buttons for mouseless play
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== renderer.domElement) return;
   if (e.button === 0) { mouseLeft = true; breakCD = 0; attackCD = 0; triggerConsumed = false; }
@@ -2104,6 +2119,7 @@ function frame() {
   // Interaction
   invuln -= sdt; breakCD -= sdt; placeCD -= sdt; attackCD -= sdt; fireCD -= sdt; fire2CD -= sdt;  // sdt freezes these on a single-player pause
   const gun = gunOf(inventory.selectedId());
+  const lmb = mouseLeft || keyBreak, rmb = mouseRight || keyPlace;   // Q/F are keyboard stand-ins for the mouse buttons
   // Chakra jutsu: hold to gather chakra (charge), release to unleash. Cancel the charge
   // whenever we're not actively holding a charge weapon.
   if (!(active && gun && gun.charge)) { chargeT = 0; vmCharge = 0; }
@@ -2114,19 +2130,19 @@ function frame() {
       if (chargeGunId !== id) { chargeT = 0; chargeGunId = id; }   // switched weapon mid-charge
       const reloading = gun.mag && reloadingGun === id;
       const empty = gun.mag && ammoFor(gun, id) <= 0;
-      if (mouseLeft && !reloading && !empty) {                      // can't gather while empty/reloading
+      if (lmb && !reloading && !empty) {                            // can't gather while empty/reloading
         const was = chargeT;
         chargeT = Math.min(gun.charge, chargeT + dt);
         if (was === 0 && chargeT > 0) sfx.chakraCharge();           // rising hum on gather start
         if (was < gun.charge && chargeT >= gun.charge) sfx.chakraReady();  // ping at full charge
-      } else if (!mouseLeft && chargeT > 0.06) {
+      } else if (!lmb && chargeT > 0.06) {
         const fired = releaseCharge(gun, Math.min(1, chargeT / gun.charge)); chargeT = 0;
         if (fired && gun.mag) { ammo[id]--; if (ammoFor(gun, id) <= 0) startReload(gun, id); }   // only spend ammo if it actually fired
       } else { chargeT = 0; if (empty && !reloading) startReload(gun, id); }
       vmCharge = chargeT / gun.charge;
     }
     // Auto guns fire while held; the rest fire once per click.
-    else if (mouseLeft && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
+    else if (lmb && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
       if (gun.mag && reloadingGun === id) { /* busy reloading */ }
       else if (gun.mag && ammoFor(gun, id) <= 0) { startReload(gun, id); fireCD = 0.25; triggerConsumed = true; }
       else {
@@ -2144,12 +2160,12 @@ function frame() {
         if (!gun.auto) triggerConsumed = true;
       }
     }
-    if (gun.kind === 'portal' && mouseRight && fire2CD <= 0) { fireGun(gun, true); vmRecoil = Math.min(1, vmRecoil + 0.3); fire2CD = gun.rate; }
+    if (gun.kind === 'portal' && rmb && fire2CD <= 0) { fireGun(gun, true); vmRecoil = Math.min(1, vmRecoil + 0.3); fire2CD = gun.rate; }
   } else if (active) {
-    if (mouseLeft) attackOrBreak(dt); else resetBreak();
-    if (mouseRight && placeCD <= 0) { handleUse(); placeCD = 0.25; }
+    if (lmb) attackOrBreak(dt); else resetBreak();
+    if (rmb && placeCD <= 0) { handleUse(); placeCD = 0.25; }
   }
-  setScoped(active && !!gun && !!gun.zoom && mouseRight);
+  setScoped(active && !!gun && !!gun.zoom && rmb);
 
   // ---- Chakra reserve: hold C to channel (the Naruto power-up), else slow regen. ----
   const chakraOn = (mode === BATTLE || mode === CREATIVE);
@@ -2212,7 +2228,7 @@ function frame() {
   mp.update(dt);
   // Keep broadcasting in-game even while dead so peers can hide our avatar (alive flag);
   // only the home menu suppresses it.
-  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated, wep: gunOf(inventory.selectedId()) ? inventory.selectedId() : 0 });
+  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated, wep: gunOf(inventory.selectedId()) ? inventory.selectedId() : 0, ch: +chakraAuraI.toFixed(2) });
 
   // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
   shakeAmt *= Math.max(0, 1 - 9 * dt);

@@ -266,6 +266,23 @@ export class Multiplayer {
     r.target = { x: d.x, y: d.y, z: d.z, yaw: d.yaw };
     r.group.visible = d.alive !== false;          // hide dead/spectating players (mirrors _updateBot)
     this._setHeldWeapon(r, d.wep | 0);
+    r.ch = d.ch || 0;                              // chakra-channel intensity (the protective aura)
+  }
+
+  // A glowing chakra shield bubble + spinning ground ring shown around a remote
+  // player while they channel chakra.
+  _ensureAvatarAura(r) {
+    if (r.aura) return r.aura;
+    const a = new THREE.Group();
+    const sph = new THREE.Mesh(new THREE.SphereGeometry(0.95, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0x4aa3ff, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false }));
+    sph.position.y = 1.05;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.06, 8, 32),
+      new THREE.MeshBasicMaterial({ color: 0x8fd0ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.06;
+    a.add(sph, ring); r.group.add(a);
+    r.aura = { g: a, sph, ring };
+    return r.aura;
   }
 
   // Show the gun/jutsu a remote player is holding in their hand (rebuild on change).
@@ -326,6 +343,15 @@ export class Multiplayer {
       while (dy < -Math.PI) dy += Math.PI * 2;
       r.group.rotation.y += dy * k;
       if (r.weapon && r.weapon.userData.chakraAnim) r.weapon.userData.chakraAnim(0.7, dt, this._t);   // spin the held jutsu orb
+      // Chakra channel aura (visible to everyone) — also reads as the protective shield.
+      const ch = r.ch || 0;
+      if (ch > 0.05 || r.aura) {
+        const a = this._ensureAvatarAura(r); a.g.visible = ch > 0.05;
+        if (a.g.visible) {
+          a.sph.material.opacity = 0.1 + 0.28 * ch; a.sph.scale.setScalar(1 + 0.07 * Math.sin(this._t * 8));
+          a.ring.material.opacity = 0.25 + 0.55 * ch; a.ring.rotation.z += dt * 2.2; a.ring.scale.setScalar(0.9 + 0.18 * Math.sin(this._t * 6));
+        }
+      }
     }
   }
 
