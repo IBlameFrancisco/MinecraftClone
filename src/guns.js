@@ -6,15 +6,19 @@ import * as THREE from 'three';
 import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN } from './items.js';
 import { isSolid } from './blocks.js';
 
-// A soft white radial sprite texture, tinted per-use for additive glows.
+// A soft white radial sprite texture, tinted per-use for additive glows. A tight,
+// bright center falling to a smooth wide skirt reads cleanly under bloom without
+// a hard edge.
 function softGlowTexture() {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
   grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.35, 'rgba(255,255,255,0.65)');
+  grad.addColorStop(0.18, 'rgba(255,255,255,0.92)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.42)');
+  grad.addColorStop(0.75, 'rgba(255,255,255,0.10)');
   grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 const GLOW_TEX = softGlowTexture();
@@ -28,7 +32,9 @@ function ghostBurst(group, pos, color = 0xffd27a) {
   const tick = () => {
     const k = (performance.now() - t0) / 350;
     if (k >= 1) { group.remove(s); s.material.dispose(); return; }
-    s.scale.setScalar(0.5 + k * 2.4); s.material.opacity = 1 - k;
+    const ease = 1 - (1 - k) * (1 - k);                 // ease-out expansion
+    s.scale.setScalar(0.5 + ease * 2.6); s.material.opacity = (1 - k) * (1 - k);
+    s.material.rotation += 0.12;
     requestAnimationFrame(tick);
   };
   tick();
@@ -45,11 +51,11 @@ export class Tracers {
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
     const g = new THREE.Group();
     const core = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.04, 0.04, len, 6),
+      new THREE.CylinderGeometry(0.028, 0.028, len, 6),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, fog: false, blending: THREE.AdditiveBlending, depthWrite: false }));
     const glow = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.13, 0.13, len, 8),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, fog: false, blending: THREE.AdditiveBlending, depthWrite: false }));
+      new THREE.CylinderGeometry(0.1, 0.1, len, 8),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, fog: false, blending: THREE.AdditiveBlending, depthWrite: false }));
     g.add(core, glow);
     g.position.copy(start).add(end).multiplyScalar(0.5);
     g.quaternion.copy(q);
@@ -57,7 +63,7 @@ export class Tracers {
     this.group.add(g);
     // A travelling spark at the leading edge sells the "bullet".
     const spark = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    spark.scale.setScalar(0.5); spark.position.copy(end);
+    spark.scale.setScalar(0.55); spark.position.copy(end);
     this.group.add(spark);
     this.list.push({ g, core, glow, spark, start: start.clone(), end: end.clone(), life: 0.16, max: 0.16 });
   }
@@ -71,11 +77,12 @@ export class Tracers {
         this.list.splice(i, 1);
       } else {
         const k = t.life / t.max;
+        const k2 = k * k;                         // sharper fall-off so streaks snap out
         t.core.material.opacity = k;
-        t.glow.material.opacity = 0.55 * k;
-        const s = 0.5 + 0.5 * k; t.g.scale.set(s, 1, s);
+        t.glow.material.opacity = 0.5 * k2;
+        const s = 0.35 + 0.65 * k; t.g.scale.set(s, 1, s);   // thin out as it fades
         t.spark.material.opacity = k;
-        t.spark.scale.setScalar(0.5 * k + 0.1);
+        t.spark.scale.setScalar(0.55 * k + 0.08);
       }
     }
   }
@@ -88,30 +95,37 @@ export class Plasmas {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.trail = []; }
   spawn(pos, dir, speed, damage, range, ghost) {
     const g = new THREE.Group();
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0xeafffb, fog: false }));
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 14),
+      new THREE.MeshBasicMaterial({ color: 0xf2fffd, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0x3affd0, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x52ffd8, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    halo.scale.setScalar(1.2);
-    g.add(core, halo);
+    halo.scale.setScalar(1.3);
+    g.add(shell, core, halo);
     g.position.copy(pos);
     this.group.add(g);
     this.list.push({ m: g, halo, vel: dir.clone().multiplyScalar(speed), pos: pos.clone(), damage, range, travelled: 0, t: 0, ghost });
   }
   _spawnTrail(pos) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x44e8c8, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    s.scale.setScalar(0.5); s.position.copy(pos);
-    this.group.add(s); this.trail.push({ s, life: 0.25, max: 0.25 });
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x44e8c8, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    s.scale.setScalar(0.55); s.position.copy(pos);
+    this.group.add(s); this.trail.push({ s, life: 0.28, max: 0.28 });
   }
   update(dt, world, mobs, bots, mp, portals, onImpact) {
     for (let i = this.trail.length - 1; i >= 0; i--) {
       const tr = this.trail[i]; tr.life -= dt;
       if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
-      else { const k = tr.life / tr.max; tr.s.material.opacity = 0.6 * k; tr.s.scale.setScalar(0.5 * k); }
+      else {
+        const k = tr.life / tr.max;
+        tr.s.material.opacity = 0.55 * k * k;            // fade fast so the trail stays a tight wake
+        tr.s.scale.setScalar(0.55 * k + 0.06);
+        tr.s.material.color.setRGB(0.27 * k, 0.91, 0.78 + 0.12 * (1 - k));  // cool toward white as it fades
+      }
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.t += dt;
-      p.halo.scale.setScalar(1.1 + Math.sin(p.t * 34) * 0.2);
+      p.halo.scale.setScalar(1.2 + Math.sin(p.t * 34) * 0.22);
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
       if (portals) portals.redirect(p, dt);      // fly through portals
@@ -152,36 +166,49 @@ export class Rockets {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.trail = []; }
   spawn(pos, dir, gun, ownerId, ghost) {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.34, 8),
-      new THREE.MeshBasicMaterial({ color: 0x3a3a3a, fog: false }));
-    body.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.16, 8),
+    const nd = dir.clone().normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), nd);
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.32, 10),
+      new THREE.MeshBasicMaterial({ color: 0x46474c, fog: false }));
+    body.quaternion.copy(q);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.18, 10),
       new THREE.MeshBasicMaterial({ color: 0xd23a2a, fog: false }));
-    head.position.copy(dir).multiplyScalar(0.22);
-    head.quaternion.copy(body.quaternion);
-    g.add(body, head);
+    head.position.copy(nd).multiplyScalar(0.24);
+    head.quaternion.copy(q);
+    // Exhaust glow at the tail so the missile reads as thrusting.
+    const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    flame.scale.setScalar(0.5); flame.position.copy(nd).multiplyScalar(-0.22);
+    g.add(body, head, flame);
     g.position.copy(pos);
     this.group.add(g);
-    this.list.push({ m: g, vel: dir.clone().multiplyScalar(gun.speed), pos: pos.clone(), gun, ownerId, travelled: 0, ghost });
+    this.list.push({ m: g, flame, vel: dir.clone().multiplyScalar(gun.speed), pos: pos.clone(), gun, ownerId, travelled: 0, t: 0, ghost });
   }
-  _puff(pos) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffa84a, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    s.scale.setScalar(0.4); s.position.copy(pos);
-    this.group.add(s); this.trail.push({ s, life: 0.3, max: 0.3 });
+  _puff(pos, hot) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: hot ? 0xffb05a : 0x9a9088, transparent: true, opacity: hot ? 0.7 : 0.4, blending: hot ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite: false, fog: false }));
+    s.scale.setScalar(hot ? 0.34 : 0.46); s.position.copy(pos);
+    s.material.rotation = Math.random() * 6.28;
+    this.group.add(s); this.trail.push({ s, life: 0.34, max: 0.34, hot });
   }
   update(dt, world, mobs, bots, mp, portals, onImpact) {
     for (let i = this.trail.length - 1; i >= 0; i--) {
       const tr = this.trail[i]; tr.life -= dt;
       if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
-      else { const k = tr.life / tr.max; tr.s.material.opacity = 0.7 * k; tr.s.scale.setScalar(0.4 + (1 - k) * 0.5); }
+      else {
+        const k = tr.life / tr.max;
+        if (tr.hot) { tr.s.material.opacity = 0.7 * k; tr.s.scale.setScalar(0.34 + (1 - k) * 0.2); }
+        else { tr.s.material.opacity = 0.4 * k; tr.s.scale.setScalar(0.46 + (1 - k) * 0.7); tr.s.material.rotation += dt * 0.8; }
+      }
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
+      p.t = (p.t || 0) + dt;
+      if (p.flame) p.flame.scale.setScalar(0.42 + Math.abs(Math.sin(p.t * 60)) * 0.22);
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
       if (portals) portals.redirect(p, dt);      // fly through portals
       p.m.position.copy(p.pos);
-      this._puff(p.pos);
+      this._puff(p.pos, true);                    // bright fire core...
+      this._puff(p.pos, false);                   // ...wrapped in lingering smoke
       let hit = p.travelled > p.gun.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
       if (!hit && !p.ghost) {                      // ghosts (replicated remote shots) hit only blocks/range
         for (const mob of mobs.list) {
@@ -214,10 +241,16 @@ export class Rockets {
 export class Grenades {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; }
   spawn(pos, vel, fuse, onExplode, ghost) {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshLambertMaterial({ color: 0x39402c }));
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshLambertMaterial({ color: 0x39402c, emissive: 0x0a0c06 }));
     m.position.copy(pos);
+    // A little metal cap + spoon so the frag reads as ordnance, and a blinking fuse
+    // glow that quickens as the timer runs down (parented to the body so it tumbles).
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.05, 8), new THREE.MeshLambertMaterial({ color: 0x6a6f5a }));
+    cap.position.y = 0.12; m.add(cap);
+    const fuseGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff5a2a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    fuseGlow.scale.setScalar(0.22); fuseGlow.position.y = 0.16; m.add(fuseGlow);
     this.group.add(m);
-    this.list.push({ m, pos: pos.clone(), vel: vel.clone(), fuse, onExplode, ghost, spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8) });
+    this.list.push({ m, cap, fuseGlow, pos: pos.clone(), vel: vel.clone(), fuse, fuse0: Math.max(0.01, fuse), onExplode, ghost, spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8) });
   }
   update(dt, world) {
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -233,9 +266,17 @@ export class Grenades {
       }
       g.m.position.copy(g.pos);
       g.m.rotation.x += g.spin.x * dt; g.m.rotation.y += g.spin.y * dt; g.m.rotation.z += g.spin.z * dt;  // tumble on all axes
+      if (g.fuseGlow) {                       // blink faster and hotter as the fuse runs out
+        const left = Math.max(0, g.fuse / g.fuse0);
+        const rate = 6 + (1 - left) * 26;
+        g.fuseGlow.material.opacity = (0.4 + 0.6 * (1 - left)) * (0.5 + 0.5 * Math.sin(performance.now() * 0.001 * rate));
+        g.fuseGlow.scale.setScalar(0.2 + (1 - left) * 0.16);
+      }
       if (g.fuse <= 0) {
         if (g.ghost) ghostBurst(this.group, g.pos, 0xffa84a); else g.onExplode(g.pos.clone());
-        this.group.remove(g.m); g.m.geometry.dispose(); g.m.material.dispose(); this.list.splice(i, 1);
+        this.group.remove(g.m);
+        g.m.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+        this.list.splice(i, 1);
       }
     }
   }
@@ -252,17 +293,21 @@ function accretionTexture() {
     const dx = x - cx, dy = y - cy, r = Math.hypot(dx, dy) / cx, th = Math.atan2(dy, dx);
     let a = 0;
     if (r > 0.28 && r < 1.0) {
-      const inner = Math.min(1, (r - 0.28) / 0.10);
-      const outer = Math.min(1, (1.0 - r) / 0.55);
-      const band = 0.45 + 0.55 * Math.pow(Math.max(0, Math.sin(th * 6 + r * 26)), 1.5);  // spiral streaks
+      const inner = Math.min(1, (r - 0.28) / 0.08);
+      const outer = Math.min(1, (1.0 - r) / 0.5);
+      // Two interleaved spiral arms at different pitches give a denser, churned disk.
+      const s1 = Math.pow(Math.max(0, Math.sin(th * 7 + r * 30)), 1.6);
+      const s2 = Math.pow(Math.max(0, Math.sin(th * 4 - r * 18 + 1.0)), 2.0);
+      const band = 0.35 + 0.5 * s1 + 0.25 * s2;
       a = inner * outer * band;
     }
     const t = Math.min(1, Math.max(0, (r - 0.28) / 0.72));   // hot -> cool
+    const t2 = t * t;
     const idx = (y * S + x) * 4;
-    d[idx] = 255 * (1 - 0.25 * t);
-    d[idx + 1] = 220 * (1 - t) + 50 * t;
-    d[idx + 2] = 110 * (1 - t) + 255 * t;
-    d[idx + 3] = Math.min(255, a * 340);
+    d[idx] = 255 * (1 - 0.18 * t);
+    d[idx + 1] = 230 * (1 - t2) + 60 * t2;
+    d[idx + 2] = 90 * (1 - t) + 255 * t;
+    d[idx + 3] = Math.min(255, a * 360);
   }
   g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
@@ -341,19 +386,23 @@ export class BlackHoles {
         if (h.c >= 0.5) { if (hooks.onCollapse) hooks.onCollapse(h.pos.clone(), gun); this._dispose(h); this.list.splice(i, 1); continue; } }
       h.g.scale.setScalar(Math.max(0.001, s));
       h.disk.rotation.z += dt * 2.6; h.disk2.rotation.z -= dt * 3.4;
+      h.disk2.rotation.x = -1.18 + 0.08 * Math.sin(h.t * 3);   // slight precession for depth
       h.ring.material.rotation += dt * 0.6;
       const pulse = 0.9 + 0.1 * Math.sin(h.t * 7);
-      h.ring.material.opacity = pulse; h.glow.material.opacity = 0.85 * pulse;
+      h.ring.material.opacity = pulse;
+      h.glow.material.opacity = 0.85 * pulse;
+      h.glow.scale.setScalar(7 * (0.96 + 0.04 * Math.sin(h.t * 5)));   // breathing event-horizon halo
       if (h.t < 0.6 && h.phase !== 'collapse') { const k = Math.min(1, h.t / 0.55); h.shock.scale.setScalar(2 + k * 11); h.shock.material.opacity = (1 - k) * 0.7; }
       else h.shock.material.opacity = 0;
       for (const p of h.parts) {
-        p.ang += p.spd * dt; p.rad -= p.fall * dt;
+        p.ang += p.spd * dt * (1 + (1 - Math.min(1, p.rad / 4)) * 1.5);   // speed up as they spiral in
+        p.rad -= p.fall * dt;
         if (p.rad < 0.25) { p.rad = 2.4 + Math.random() * 2.4; p.y = (Math.random() - 0.5) * 1.6; }
         p.s.position.set(Math.cos(p.ang) * p.rad, p.y * Math.min(1, p.rad / 1.6), Math.sin(p.ang) * p.rad);
-        const cl = Math.min(1, p.rad / 4);
-        p.s.material.color.setRGB(1, 0.45 + 0.45 * cl, 0.3 + 0.6 * cl);
-        p.s.scale.setScalar(0.22 + (1 - cl) * 0.4);
-        p.s.material.opacity = 0.75;
+        const cl = Math.min(1, p.rad / 4);                                // hot (white) near core -> cool (violet) at rim
+        p.s.material.color.setRGB(1, 0.4 + 0.5 * cl, 0.28 + 0.62 * cl);
+        p.s.scale.setScalar(0.18 + (1 - cl) * 0.5);                       // brighter + larger as they fall in
+        p.s.material.opacity = 0.55 + 0.35 * (1 - cl);
       }
       if (hooks.onField) hooks.onField(h.pos, dt, gun, h.phase);
     }
@@ -368,12 +417,13 @@ function shurikenTexture() {
   for (let i = 0; i < 4; i++) {
     g.rotate(Math.PI / 2);
     const grad = g.createLinearGradient(0, 0, S * 0.5, 0);
-    grad.addColorStop(0, 'rgba(255,255,255,0.95)'); grad.addColorStop(0.6, 'rgba(150,215,255,0.85)'); grad.addColorStop(1, 'rgba(110,200,255,0)');
+    grad.addColorStop(0, 'rgba(255,255,255,0.98)'); grad.addColorStop(0.5, 'rgba(170,225,255,0.9)'); grad.addColorStop(0.85, 'rgba(120,205,255,0.35)'); grad.addColorStop(1, 'rgba(110,200,255,0)');
     g.fillStyle = grad;
-    g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(S * 0.3, -S * 0.16, S * 0.5, 0); g.quadraticCurveTo(S * 0.3, S * 0.06, 0, 0); g.fill();
+    // Swept, hooked blade with a keen trailing edge — reads as a fan blade in spin.
+    g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(S * 0.28, -S * 0.2, S * 0.5, -S * 0.02); g.quadraticCurveTo(S * 0.32, S * 0.07, 0, 0); g.fill();
   }
-  const cg = g.createRadialGradient(0, 0, 0, 0, 0, S * 0.18); cg.addColorStop(0, '#fff'); cg.addColorStop(1, 'rgba(140,210,255,0)');
-  g.fillStyle = cg; g.beginPath(); g.arc(0, 0, S * 0.18, 0, Math.PI * 2); g.fill();
+  const cg = g.createRadialGradient(0, 0, 0, 0, 0, S * 0.2); cg.addColorStop(0, '#fff'); cg.addColorStop(0.55, 'rgba(200,235,255,0.85)'); cg.addColorStop(1, 'rgba(140,210,255,0)');
+  g.fillStyle = cg; g.beginPath(); g.arc(0, 0, S * 0.2, 0, Math.PI * 2); g.fill();
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 const SHURIKEN_TEX = shurikenTexture();
@@ -400,11 +450,13 @@ export class ChakraFx {
     const spinner = new THREE.Group(); pivot.add(spinner);                                // spins about the vertical axle
     const disc = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4),
       new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xbfe9ff, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.06, 8, 56),
-      new THREE.MeshBasicMaterial({ color: 0xeaffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    disc.rotation.x = -Math.PI / 2; rim.rotation.x = -Math.PI / 2;                        // lay the saw flat under the axle
-    spinner.add(disc, rim);
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.05, 8, 64),
+      new THREE.MeshBasicMaterial({ color: 0xeaffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const rim2 = new THREE.Mesh(new THREE.TorusGeometry(1.22, 0.018, 6, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    disc.rotation.x = -Math.PI / 2; rim.rotation.x = -Math.PI / 2; rim2.rotation.x = -Math.PI / 2;   // lay the saw flat under the axle
+    spinner.add(disc, rim, rim2);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 14), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x8fd6ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); glow.scale.setScalar(2.8);
     g.add(core, glow);
     this.group.add(g);
@@ -474,10 +526,16 @@ export class ChakraFx {
     g.add(dome, flash);
     let lines = null;
     if (needles) {
-      const N = 90, arr = new Float32Array(N * 6);
-      for (let i = 0; i < N; i++) { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize(); arr.set([v.x * 0.15, v.y * 0.15, v.z * 0.15, v.x, v.y, v.z], i * 6); }
+      // Razor wind-blades radiating from a thin inner shell to varied lengths — the
+      // Rasenshuriken's countless cutting needles.
+      const N = 120, arr = new Float32Array(N * 6);
+      for (let i = 0; i < N; i++) {
+        const v = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
+        const len = 0.85 + Math.random() * 0.4;
+        arr.set([v.x * 0.2, v.y * 0.2, v.z * 0.2, v.x * len, v.y * len, v.z * len], i * 6);
+      }
       const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
-      lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xdff2ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xeafaff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
       g.add(lines);
     }
     this.group.add(g);
@@ -555,9 +613,9 @@ export class LaserBeam {
     const cyl = (r, c, o) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 14, 1, true),
       new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
     this.beam = new THREE.Group();
-    this.core = cyl(0.08, 0xffffff, 1);
-    this.glow = cyl(0.24, 0xff2e54, 0.7);
-    this.outer = cyl(0.52, 0xff5570, 0.28);
+    this.core = cyl(0.06, 0xffffff, 1);
+    this.glow = cyl(0.2, 0xff2e54, 0.75);
+    this.outer = cyl(0.46, 0xff5570, 0.24);
     this.beam.add(this.outer, this.glow, this.core);
     this.beam.renderOrder = 999;
     const sprite = (c) => new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
@@ -582,12 +640,15 @@ export class LaserBeam {
   update(dt) {
     if (!this.group.visible) return;
     this.t += dt;
-    const p = 1 + Math.sin(this.t * 55) * 0.3;
+    const p = 1 + Math.sin(this.t * 55) * 0.22;
     this.core.scale.set(p, 1, p);
-    const gp = 1 + Math.sin(this.t * 33) * 0.35; this.glow.scale.set(gp, 1, gp);
-    this.outer.material.opacity = 0.16 + Math.abs(Math.sin(this.t * 20)) * 0.12;
+    const gp = 1 + Math.sin(this.t * 33) * 0.3; this.glow.scale.set(gp, 1, gp);
+    this.outer.material.opacity = 0.14 + Math.abs(Math.sin(this.t * 20)) * 0.14;
+    this.outer.scale.set(1 + 0.08 * Math.sin(this.t * 12), 1, 1 + 0.08 * Math.sin(this.t * 12));
     this.impact.scale.setScalar(1.4 + Math.sin(this.t * 46) * 0.4);
+    this.impact.material.rotation += dt * 4;          // shimmer at the burn point
     this.flare.scale.setScalar(0.9 + Math.sin(this.t * 70) * 0.25);
+    this.flare.material.rotation -= dt * 6;
   }
 }
 
@@ -604,11 +665,11 @@ export class HollowPurple {
     const beam = new THREE.Group(); beam.quaternion.copy(q); beam.position.copy(start).add(end).multiplyScalar(0.5);
     const cyl = (r, c, o) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 20, 1, true),
       new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
-    const core = cyl(radius * 0.3, 0xffffff, 1);
-    const mid = cyl(radius * 0.66, 0x9a3cff, 0.85);
-    const outer = cyl(radius * 1.0, 0xb060ff, 0.4);
-    const red = cyl(radius * 1.12, 0xff2a44, 0.22);
-    const blue = cyl(radius * 1.2, 0x2a6bff, 0.18);
+    const core = cyl(radius * 0.26, 0xffffff, 1);
+    const mid = cyl(radius * 0.6, 0x9a3cff, 0.9);
+    const outer = cyl(radius * 1.0, 0xb060ff, 0.42);
+    const red = cyl(radius * 1.14, 0xff2a44, 0.28);     // the limitless-red fringe
+    const blue = cyl(radius * 1.24, 0x2a6bff, 0.24);    // the limitless-blue fringe
     beam.add(outer, blue, red, mid, core);
     g.add(beam);
     const sprite = (c, s, pos) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); sp.scale.setScalar(s); sp.position.copy(pos); g.add(sp); return sp; };
@@ -620,13 +681,17 @@ export class HollowPurple {
   update(dt) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const f = this.list[i]; f.t += dt; const k = Math.min(1, f.t / f.max), fade = 1 - k;
-      const grow = 0.32 + 0.68 * (1 - Math.pow(1 - k, 3));
+      const punch = Math.min(1, f.t / 0.12);                    // snap to full width almost instantly
+      const grow = 0.3 + 0.7 * (1 - Math.pow(1 - punch, 3));
       f.beam.scale.set(grow, 1, grow);
-      f.core.material.opacity = fade; f.mid.material.opacity = 0.85 * fade; f.outer.material.opacity = 0.4 * fade;
-      f.red.material.opacity = 0.22 * fade; f.blue.material.opacity = 0.18 * fade;
+      f.core.material.opacity = fade; f.mid.material.opacity = 0.9 * fade; f.outer.material.opacity = 0.42 * fade;
+      // The red/blue fringes flicker against each other as the corridor erases.
+      f.red.material.opacity = (0.28 + 0.06 * Math.sin(f.t * 40)) * fade;
+      f.blue.material.opacity = (0.24 + 0.06 * Math.sin(f.t * 40 + 2)) * fade;
       f.beam.rotation.y += dt * 4.5;
       f.flash.material.opacity = Math.max(0, 1 - k * 2.2); f.flash.scale.setScalar(f.radius * (2.6 + k * 2.4));
-      f.shock.material.opacity = Math.max(0, 1 - k * 1.5); f.shock.scale.setScalar(f.radius * (1.2 + k * 7));
+      f.shock.material.opacity = Math.max(0, (1 - k * 1.5) * 0.9); f.shock.scale.setScalar(f.radius * (1.2 + k * 8));
+      f.shock.material.rotation += dt * 2;
       if (f.t >= f.max) { this._dispose(f.g); this.list.splice(i, 1); }
     }
   }
@@ -637,12 +702,16 @@ export class HollowPurple {
 // A red tomoe ring + commas, drawn on transparent for the genjutsu/gaze marker.
 function tomoeRingTexture() {
   const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
-  const g = c.getContext('2d'); g.translate(S / 2, S / 2);
-  g.strokeStyle = 'rgba(235,22,34,0.95)'; g.lineWidth = 7; g.beginPath(); g.arc(0, 0, S * 0.36, 0, Math.PI * 2); g.stroke();
+  const g = c.getContext('2d'); g.translate(S / 2, S / 2); g.lineCap = 'round';
+  // Bright outer rim + a thin inner pupil ring for the Sharingan iris.
+  g.strokeStyle = 'rgba(245,30,42,0.98)'; g.lineWidth = 8; g.beginPath(); g.arc(0, 0, S * 0.36, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = 'rgba(18,2,4,0.98)'; g.lineWidth = 3; g.beginPath(); g.arc(0, 0, S * 0.13, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = 'rgba(120,6,12,0.9)'; g.beginPath(); g.arc(0, 0, S * 0.12, 0, Math.PI * 2); g.fill();
   for (let i = 0; i < 3; i++) {
     g.rotate(Math.PI * 2 / 3);
-    g.fillStyle = 'rgba(28,4,8,0.96)'; g.beginPath(); g.arc(0, -S * 0.36, S * 0.075, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = 'rgba(28,4,8,0.96)'; g.lineWidth = 6; g.beginPath(); g.arc(0, -S * 0.30, S * 0.11, -0.5, 1.7); g.stroke();
+    // Comma-shaped tomoe: a teardrop head with a curved tail hooking toward the pupil.
+    g.fillStyle = 'rgba(20,2,5,0.97)'; g.beginPath(); g.arc(0, -S * 0.34, S * 0.085, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = 'rgba(20,2,5,0.97)'; g.lineWidth = 7; g.beginPath(); g.arc(0, -S * 0.27, S * 0.13, -0.4, 1.9); g.stroke();
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
@@ -676,6 +745,7 @@ export class SharinganFx {
     if (!this.group.visible) return; this.t += dt;
     this.ring.material.rotation += dt * 3.2;
     this.beam.material.opacity = 0.35 + Math.abs(Math.sin(this.t * 24)) * 0.4;
+    this.flash.material.opacity = 0.5 + 0.35 * Math.abs(Math.sin(this.t * 9));   // pulsing gaze glow
   }
 }
 
@@ -689,9 +759,13 @@ export class Portals {
   }
   _mesh(color) {
     const g = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.12, 12, 28), new THREE.MeshBasicMaterial({ color, fog: false }));
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.58, 28), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, side: THREE.DoubleSide, fog: false }));
-    g.add(ring, disc);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.08, 14, 40), new THREE.MeshBasicMaterial({ color, fog: false }));
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.16, 12, 40),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.56, 32), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.DoubleSide, fog: false }));
+    const swirl = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    swirl.scale.setScalar(1.0); swirl.position.z = 0.02;
+    g.add(disc, halo, ring, swirl);
     return g;
   }
   set(slot, pos, normal) {
@@ -766,13 +840,25 @@ export class Portals {
 
 // ---------------- Muzzle flash ----------------
 function flashTexture() {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(255,250,210,1)');
-  grad.addColorStop(0.4, 'rgba(255,200,90,0.7)');
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'); const cx = S / 2;
+  // Radiating spikes give the flash a sharp, photographic star-burst...
+  g.translate(cx, cx);
+  g.strokeStyle = 'rgba(255,235,170,0.85)'; g.lineCap = 'round';
+  for (let i = 0; i < 6; i++) {
+    g.rotate(Math.PI / 3);
+    const len = i % 2 === 0 ? cx * 0.92 : cx * 0.6;
+    g.lineWidth = i % 2 === 0 ? 5 : 3;
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -len); g.stroke();
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // ...over a hot radial core.
+  const grad = g.createRadialGradient(cx, cx, 0, cx, cx, cx);
+  grad.addColorStop(0, 'rgba(255,252,225,1)');
+  grad.addColorStop(0.28, 'rgba(255,210,110,0.85)');
+  grad.addColorStop(0.6, 'rgba(255,160,50,0.3)');
   grad.addColorStop(1, 'rgba(255,150,40,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = grad; g.fillRect(0, 0, S, S);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
@@ -812,25 +898,36 @@ export class DamageNumbers {
     const c = document.createElement('canvas'); c.width = 128; c.height = 64;
     const g = c.getContext('2d');
     g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 6; g.strokeStyle = 'rgba(0,0,0,0.8)'; g.strokeText(text, 64, 32);
-    g.fillStyle = color; g.fillText(text, 64, 32);
+    g.lineJoin = 'round';
+    g.lineWidth = 8; g.strokeStyle = 'rgba(0,0,0,0.85)'; g.strokeText(text, 64, 33);   // fat dark outline for legibility on any background
+    g.fillStyle = color; g.fillText(text, 64, 33);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
     this.cache.set(key, t); return t;
   }
   spawn(pos, amount, head) {
     const tex = this._tex(head ? `${amount}!` : `${amount}`, head ? '#ffd23a' : '#ffffff');
     const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, fog: false }));
-    spr.scale.set(head ? 0.9 : 0.7, head ? 0.45 : 0.35, 1);
+    const base = head ? 0.9 : 0.7;
+    spr.scale.set(base, base * 0.5, 1);
     spr.position.copy(pos); spr.position.y += 0.4 + Math.random() * 0.3;
     spr.renderOrder = 1001;
     this.group.add(spr);
-    this.list.push({ spr, life: 0.9, max: 0.9, vx: (Math.random() - 0.5) * 0.5 });
+    this.list.push({ spr, life: 0.9, max: 0.9, vx: (Math.random() - 0.5) * 0.5, vy: 1.7, base, head });
   }
   update(dt) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const d = this.list[i]; d.life -= dt;
       if (d.life <= 0) { this.group.remove(d.spr); d.spr.material.dispose(); this.list.splice(i, 1); }
-      else { d.spr.position.y += dt * 1.1; d.spr.position.x += d.vx * dt; d.spr.material.opacity = Math.min(1, d.life / d.max * 1.5); }
+      else {
+        d.vy -= 3.2 * dt;                                   // arc up then settle
+        d.spr.position.y += d.vy * dt; d.spr.position.x += d.vx * dt;
+        const k = d.life / d.max;
+        // Quick pop on spawn (overshoot), then linger; crits punch a touch bigger.
+        const age = 1 - k;
+        const pop = age < 0.16 ? 1 + (1 - age / 0.16) * (d.head ? 0.7 : 0.45) : 1;
+        d.spr.scale.set(d.base * pop, d.base * 0.5 * pop, 1);
+        d.spr.material.opacity = Math.min(1, k * 1.8);
+      }
     }
   }
 }
@@ -933,67 +1030,87 @@ export function makeViewModel(id) {
   const g = new THREE.Group();
   const box = (w, h, d, c, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: c, fog: false })); m.position.set(x, y, z); g.add(m); return m; };
   if (id === HANDGUN) {
-    box(0.12, 0.12, 0.5, 0x3a3f47, 0, 0, -0.2);
-    box(0.1, 0.22, 0.14, 0x2b2f36, 0, -0.16, 0.0);
+    box(0.11, 0.13, 0.5, 0x3a3f47, 0, 0, -0.2);          // slide
+    box(0.06, 0.05, 0.14, 0x23262c, 0, 0.05, -0.42);     // front sight rib
+    box(0.1, 0.22, 0.13, 0x2b2f36, 0, -0.16, 0.02);      // grip
+    box(0.05, 0.07, 0.1, 0x1a1d22, 0, -0.05, 0.02);      // trigger guard nub
   } else if (id === SMG) {
-    box(0.13, 0.14, 0.55, 0x44464f, 0, 0, -0.22);
-    box(0.1, 0.26, 0.12, 0x2c2e35, 0, -0.2, -0.02);   // magazine
-    box(0.1, 0.2, 0.14, 0x23252b, 0, -0.15, 0.06);
+    box(0.12, 0.14, 0.55, 0x44464f, 0, 0, -0.22);        // receiver
+    box(0.05, 0.05, 0.2, 0x23252b, 0, 0.06, -0.42);      // barrel shroud
+    box(0.09, 0.28, 0.11, 0x2c2e35, 0, -0.21, -0.02);    // magazine
+    box(0.1, 0.2, 0.14, 0x23252b, 0, -0.15, 0.08);       // grip
   } else if (id === ASSAULT_RIFLE) {
-    box(0.12, 0.13, 0.8, 0x3a4a36, 0, 0, -0.34);
-    box(0.1, 0.3, 0.12, 0x26301f, 0.0, -0.22, -0.08);  // curved mag
-    box(0.1, 0.2, 0.14, 0x1f2719, 0, -0.15, 0.06);
-    box(0.05, 0.09, 0.12, 0x12160e, 0, 0.11, -0.36);   // sight
+    box(0.11, 0.13, 0.82, 0x3a4a36, 0, 0, -0.34);        // receiver/barrel
+    box(0.06, 0.06, 0.22, 0x1f2719, 0, 0.04, -0.62);     // handguard
+    box(0.1, 0.3, 0.11, 0x26301f, 0.0, -0.23, -0.08);    // curved mag
+    box(0.1, 0.2, 0.14, 0x1f2719, 0, -0.15, 0.08);       // grip
+    box(0.05, 0.09, 0.12, 0x12160e, 0, 0.12, -0.34);     // rear sight
+    box(0.04, 0.08, 0.05, 0x12160e, 0, 0.1, -0.66);      // front sight post
   } else if (id === SHOTGUN) {
-    box(0.14, 0.14, 0.78, 0x7a7d85, 0, 0.02, -0.32);
-    box(0.13, 0.1, 0.34, 0x3a3c42, 0, -0.06, -0.18);   // pump
-    box(0.1, 0.18, 0.26, 0x5a3a26, 0, -0.12, 0.12);    // wood stock
+    box(0.13, 0.14, 0.8, 0x7a7d85, 0, 0.03, -0.32);      // barrel
+    box(0.1, 0.1, 0.74, 0x5d6068, 0, -0.07, -0.3);       // tube magazine
+    box(0.13, 0.11, 0.32, 0x3a3c42, 0, -0.04, -0.16);    // pump
+    box(0.11, 0.18, 0.26, 0x6b4427, 0, -0.13, 0.14);     // wood stock
   } else if (id === SNIPER) {
-    box(0.1, 0.1, 1.1, 0x23262b, 0, 0, -0.5);
-    box(0.1, 0.2, 0.16, 0x17191d, 0, -0.15, 0.02);
+    box(0.1, 0.1, 1.1, 0x23262b, 0, 0, -0.5);        // long barrel/receiver
+    box(0.1, 0.2, 0.16, 0x17191d, 0, -0.15, 0.04);   // grip
+    box(0.11, 0.1, 0.22, 0x2b2e33, 0, -0.02, 0.16);  // cheek riser stock
     box(0.06, 0.06, 0.35, 0x0c0d10, 0, 0, -0.95);    // muzzle/barrel tip
-    box(0.13, 0.13, 0.4, 0x111317, 0, 0.16, -0.28);  // scope body
-    box(0.04, 0.04, 0.06, 0x2b8cff, 0, 0.16, -0.49); // front lens (blue)
+    box(0.13, 0.13, 0.42, 0x111317, 0, 0.17, -0.28); // scope body
+    box(0.14, 0.14, 0.04, 0x05060a, 0, 0.17, -0.07); // scope rear bell
+    box(0.05, 0.05, 0.06, 0x2b8cff, 0, 0.17, -0.5);  // front lens (blue)
     box(0.16, 0.06, 0.06, 0x17191d, 0, 0.27, -0.28); // scope mount
   } else if (id === RAILGUN) {
-    box(0.14, 0.16, 0.95, 0x342b4a, 0, 0, -0.4);
-    const rail = box(0.04, 0.04, 0.8, 0x9b6bff, 0, 0.1, -0.34);
-    rail.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
-    box(0.1, 0.2, 0.14, 0x231d33, 0, -0.16, 0.04);
-    box(0.1, 0.1, 0.16, 0x141021, 0, 0.13, -0.18);    // scope nub
+    box(0.14, 0.16, 0.95, 0x342b4a, 0, 0, -0.4);     // body
+    const rail = box(0.035, 0.035, 0.84, 0x9b6bff, 0, 0.1, -0.34);
+    rail.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });   // glowing accelerator rail (top)
+    const rail2 = box(0.035, 0.035, 0.84, 0x9b6bff, 0, -0.02, -0.34);
+    rail2.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });  // lower rail
+    box(0.1, 0.2, 0.14, 0x231d33, 0, -0.18, 0.04);   // grip
+    box(0.1, 0.1, 0.16, 0x141021, 0, 0.15, -0.16);   // scope nub
   } else if (id === PLASMA_GUN) {
-    box(0.18, 0.18, 0.55, 0x2a6f68, 0, 0, -0.22);
-    const tip = box(0.12, 0.12, 0.12, 0x9bfff2, 0, 0, -0.52);
-    tip.material = new THREE.MeshBasicMaterial({ color: 0xbafff5, fog: false });
-    box(0.1, 0.2, 0.14, 0x1f524d, 0, -0.16, 0.02);
+    box(0.18, 0.18, 0.55, 0x2a6f68, 0, 0, -0.22);    // emitter body
+    box(0.2, 0.2, 0.1, 0x18403c, 0, 0, -0.46);       // muzzle collar
+    const tip = box(0.12, 0.12, 0.12, 0x9bfff2, 0, 0, -0.53);
+    tip.material = new THREE.MeshBasicMaterial({ color: 0xbafff5, fog: false });    // glowing plasma lens
+    const cell = box(0.06, 0.1, 0.3, 0x46ffe0, 0.0, 0.13, -0.2);
+    cell.material = new THREE.MeshBasicMaterial({ color: 0x7afff0, fog: false });   // energy cell
+    box(0.1, 0.2, 0.14, 0x1f524d, 0, -0.17, 0.02);   // grip
   } else if (id === ROCKET_LAUNCHER) {
-    box(0.22, 0.22, 0.95, 0x556b2f, 0, 0, -0.38);
+    box(0.22, 0.22, 0.95, 0x556b2f, 0, 0, -0.38);    // tube
+    box(0.26, 0.26, 0.1, 0x3f5022, 0, 0, 0.06);      // rear blast collar
     const warhead = box(0.16, 0.16, 0.18, 0xd23a2a, 0, 0, -0.86);
-    warhead.material = new THREE.MeshBasicMaterial({ color: 0xe04a36, fog: false });
-    box(0.1, 0.2, 0.14, 0x3f5022, 0, -0.16, 0.06);
+    warhead.material = new THREE.MeshBasicMaterial({ color: 0xe04a36, fog: false });  // warhead tip
+    box(0.08, 0.16, 0.2, 0x2f3d1a, 0, 0.18, -0.5);   // top sight rail
+    box(0.1, 0.2, 0.14, 0x3f5022, 0, -0.17, 0.06);   // grip
   } else if (id === HEAVY_MG) {
-    box(0.14, 0.14, 0.95, 0x2b2b2f, 0, 0, -0.4);           // long receiver
-    box(0.17, 0.17, 0.3, 0x46484e, 0, 0, -0.82);           // barrel shroud
-    box(0.1, 0.22, 0.14, 0x23252b, 0, -0.16, 0.04);        // grip
+    box(0.15, 0.15, 0.95, 0x2b2b2f, 0, 0, -0.4);           // long receiver
+    box(0.18, 0.18, 0.32, 0x46484e, 0, 0, -0.82);          // barrel shroud
+    box(0.08, 0.08, 0.18, 0x141416, 0, 0, -1.02);          // muzzle
+    box(0.1, 0.22, 0.14, 0x23252b, 0, -0.18, 0.04);        // grip
     box(0.16, 0.1, 0.18, 0x6a4a2a, 0, -0.04, 0.18);        // wooden stock
-    box(0.05, 0.05, 0.5, 0x1c1c20, 0.12, 0.06, -0.4); box(0.05, 0.05, 0.5, 0x1c1c20, -0.12, 0.06, -0.4);  // bipod-ish rails
+    box(0.07, 0.16, 0.2, 0x33342f, 0, 0.16, -0.04);        // ammo box / feed
+    box(0.05, 0.05, 0.5, 0x1c1c20, 0.13, 0.07, -0.4); box(0.05, 0.05, 0.5, 0x1c1c20, -0.13, 0.07, -0.4);  // bipod-ish rails
   } else if (id === BLACK_HOLE_BOMB) {
     box(0.22, 0.22, 0.62, 0x241a33, 0, 0, -0.26);          // dark body
-    box(0.27, 0.27, 0.16, 0x140d1f, 0, 0, -0.54);          // muzzle housing
+    box(0.28, 0.28, 0.16, 0x140d1f, 0, 0, -0.54);          // muzzle housing
     const orb = box(0.16, 0.16, 0.16, 0x000000, 0, 0, -0.6); orb.material = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false }); // void orb
-    const e1 = box(0.04, 0.04, 0.5, 0x9b6bff, 0.12, 0.07, -0.26); e1.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
-    const e2 = box(0.04, 0.04, 0.5, 0x9b6bff, -0.12, 0.07, -0.26); e2.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
-    box(0.1, 0.2, 0.14, 0x1c1430, 0, -0.16, 0.04);         // grip
+    const e1 = box(0.035, 0.035, 0.52, 0x9b6bff, 0.13, 0.08, -0.26); e1.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });  // containment coils
+    const e2 = box(0.035, 0.035, 0.52, 0x9b6bff, -0.13, 0.08, -0.26); e2.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
+    const e3 = box(0.035, 0.035, 0.52, 0x9b6bff, 0, 0.14, -0.26); e3.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
+    box(0.1, 0.2, 0.14, 0x1c1430, 0, -0.17, 0.04);         // grip
   } else if (id === RASENGAN) {
     // The spinning chakra sphere cupped in the hand — a self-animating 3D orb
     // (see buildChakraOrb), driven by vmCharge via g.userData.chakraAnim.
-    box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.12, -0.34);        // cupped hand
-    g.userData.chakraAnim = buildChakraOrb(g, new THREE.Vector3(0, 0.02, -0.42), { haloColor: 0x4aa3ff, wisps: 16 });
+    box(0.18, 0.07, 0.16, 0xe8b89a, 0, -0.18, -0.34);        // cupped palm
+    for (const fx of [-0.07, 0, 0.07]) box(0.045, 0.16, 0.05, 0xe8b89a, fx, -0.1, -0.42);  // cupping fingers
+    g.userData.chakraAnim = buildChakraOrb(g, new THREE.Vector3(0, 0.0, -0.42), { haloColor: 0x4aa3ff, wisps: 16 });
   } else if (id === RASENSHURIKEN) {
     // A chakra orb wrapped in the four-bladed wind shuriken — a big buzzsaw blade
     // spinning about the vertical axis, framed by a glowing wind-rim, gathering and
     // accelerating with charge.
-    box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.14, -0.36);        // hand
+    box(0.18, 0.07, 0.16, 0xe8b89a, 0, -0.2, -0.36);         // cupped palm
+    for (const fx of [-0.07, 0, 0.07]) box(0.045, 0.16, 0.05, 0xe8b89a, fx, -0.12, -0.44);  // cupping fingers
     const P = new THREE.Vector3(0, 0.02, -0.52);
     const orbAnim = buildChakraOrb(g, P, { haloColor: 0xbfe9ff, wisps: 14, saw: 0.66 });
     const pivot = new THREE.Group(); pivot.position.copy(P); pivot.rotation.x = -Math.PI / 2 + 0.5; g.add(pivot);  // same tilted vertical axle as the saw
@@ -1016,31 +1133,41 @@ export function makeViewModel(id) {
   } else if (id === HOLLOW_PURPLE) {
     // A cursed-energy gauntlet cupping the red + blue spheres that clap into purple.
     box(0.17, 0.15, 0.2, 0xe8b89a, 0, -0.13, -0.32);        // hand
-    box(0.2, 0.12, 0.16, 0x241a33, 0, -0.2, -0.18);         // dark gauntlet
-    const red = box(0.12, 0.12, 0.12, 0xff2a44, 0.1, 0.0, -0.42); red.material = new THREE.MeshBasicMaterial({ color: 0xff3a54, fog: false });
-    const blue = box(0.12, 0.12, 0.12, 0x2a6bff, -0.1, 0.0, -0.42); blue.material = new THREE.MeshBasicMaterial({ color: 0x3a7bff, fog: false });
+    box(0.21, 0.13, 0.18, 0x2a1f3d, 0, -0.2, -0.18);        // dark gauntlet
+    box(0.23, 0.04, 0.04, 0x7b3ff2, 0, -0.14, -0.26);       // cursed-energy seam (purple)
+    const red = new THREE.Mesh(new THREE.SphereGeometry(0.08, 14, 12), new THREE.MeshBasicMaterial({ color: 0xff3a54, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    red.position.set(0.1, 0.0, -0.42); g.add(red);          // limitless red
+    const blue = new THREE.Mesh(new THREE.SphereGeometry(0.08, 14, 12), new THREE.MeshBasicMaterial({ color: 0x3a7bff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    blue.position.set(-0.1, 0.0, -0.42); g.add(blue);       // limitless blue
     const haze = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xb060ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     haze.scale.setScalar(0.5); haze.position.set(0, 0.0, -0.42); g.add(haze);
     g.userData.chakraAnim = (charge, dt, t) => {
       const c = Math.max(0, Math.min(1, charge)), conv = 0.1 * (1 - c);   // red+blue converge as it charges
       red.position.x = conv; blue.position.x = -conv;
-      const s = 0.7 + 0.6 * c; red.scale.setScalar(s); blue.scale.setScalar(s);
-      haze.material.opacity = 0.2 + 0.6 * c; haze.scale.setScalar(0.4 + 0.7 * c);
+      const s = 0.7 + 0.7 * c; red.scale.setScalar(s); blue.scale.setScalar(s);
+      haze.material.opacity = 0.2 + 0.6 * c; haze.scale.setScalar(0.4 + 0.8 * c);
     };
   } else if (id === SHARINGAN) {
     // An open hand held up in a seal, a glowing red tomoe eye hovering in the palm.
     box(0.26, 0.06, 0.2, 0xe8b89a, 0, -0.16, -0.32);          // palm
     for (const hx of [-0.11, -0.04, 0.04, 0.11]) box(0.05, 0.22, 0.06, 0xe8b89a, hx, 0.0, -0.34);  // fingers
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), new THREE.MeshBasicMaterial({ color: 0xe01020, fog: false }));
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 14), new THREE.MeshBasicMaterial({ color: 0xe01020, fog: false }));
     eye.position.set(0, 0.02, -0.42); g.add(eye);
+    const tomoe = new THREE.Sprite(new THREE.SpriteMaterial({ map: TOMOE_TEX, color: 0xff3040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    tomoe.scale.setScalar(0.3); tomoe.position.set(0, 0.02, -0.41); g.add(tomoe);   // spinning tomoe iris over the eye
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff2838, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    halo.scale.setScalar(0.5); halo.position.set(0, 0.02, -0.42); g.add(halo);
-    g.userData.chakraAnim = (charge, dt, t) => { const p = 1 + Math.sin(t * 6) * 0.12; eye.scale.setScalar(p); halo.material.opacity = 0.5 + 0.3 * Math.abs(Math.sin(t * 4)); };
+    halo.scale.setScalar(0.5); halo.position.set(0, 0.02, -0.43); g.add(halo);
+    g.userData.chakraAnim = (charge, dt, t) => {
+      const p = 1 + Math.sin(t * 6) * 0.12; eye.scale.setScalar(p);
+      tomoe.material.rotation += dt * 2.4;
+      halo.material.opacity = 0.5 + 0.3 * Math.abs(Math.sin(t * 4));
+    };
   } else { // PORTAL_GUN
-    box(0.16, 0.16, 0.5, 0xd6d6d6, 0, 0, -0.2);
-    box(0.06, 0.06, 0.12, 0xff8c2b, 0.05, 0, -0.48);
-    box(0.06, 0.06, 0.12, 0x2b8cff, -0.05, 0, -0.48);
-    box(0.1, 0.2, 0.14, 0xb8b8b8, 0, -0.16, 0.02);
+    box(0.16, 0.16, 0.5, 0xe2e2e6, 0, 0, -0.2);            // white chassis
+    box(0.18, 0.18, 0.1, 0xbcbcc2, 0, 0, -0.42);           // emitter ring
+    const o1 = box(0.06, 0.06, 0.14, 0xff8c2b, 0.05, 0, -0.5); o1.material = new THREE.MeshBasicMaterial({ color: 0xffa64a, fog: false });  // orange prong
+    const o2 = box(0.06, 0.06, 0.14, 0x2b8cff, -0.05, 0, -0.5); o2.material = new THREE.MeshBasicMaterial({ color: 0x57a8ff, fog: false }); // blue prong
+    box(0.1, 0.2, 0.14, 0xc4c4c8, 0, -0.16, 0.02);         // grip
   }
   g.scale.setScalar(1.7);
   g.position.set(0.42, -0.5, -0.85);
