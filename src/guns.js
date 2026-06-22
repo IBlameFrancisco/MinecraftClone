@@ -19,6 +19,21 @@ function softGlowTexture() {
 }
 const GLOW_TEX = softGlowTexture();
 
+// A quick visual-only burst (no damage) — used when replaying another player's
+// projectiles in co-op. Self-animates via rAF so it needs no manager update loop.
+function ghostBurst(group, pos, color = 0xffd27a) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  s.position.copy(pos); s.scale.setScalar(0.5); group.add(s);
+  const t0 = performance.now();
+  const tick = () => {
+    const k = (performance.now() - t0) / 350;
+    if (k >= 1) { group.remove(s); s.material.dispose(); return; }
+    s.scale.setScalar(0.5 + k * 2.4); s.material.opacity = 1 - k;
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
 // ---------------- Tracers ----------------
 // A bright additive bullet streak: a white-hot core inside a coloured glow shell,
 // fading + thinning over ~0.16s so rounds are clearly readable and bloom-lit.
@@ -71,7 +86,7 @@ export class Tracers {
 // fading trail. Damages mobs and (in co-op) remote players, directly or by splash.
 export class Plasmas {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.trail = []; }
-  spawn(pos, dir, speed, damage, range) {
+  spawn(pos, dir, speed, damage, range, ghost) {
     const g = new THREE.Group();
     const core = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 12),
       new THREE.MeshBasicMaterial({ color: 0xeafffb, fog: false }));
@@ -80,7 +95,7 @@ export class Plasmas {
     g.add(core, halo);
     g.position.copy(pos);
     this.group.add(g);
-    this.list.push({ m: g, halo, vel: dir.clone().multiplyScalar(speed), pos: pos.clone(), damage, range, travelled: 0, t: 0 });
+    this.list.push({ m: g, halo, vel: dir.clone().multiplyScalar(speed), pos: pos.clone(), damage, range, travelled: 0, t: 0, ghost });
   }
   _spawnTrail(pos) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x44e8c8, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
@@ -104,25 +119,25 @@ export class Plasmas {
       this._spawnTrail(p.pos);
       let hit = p.travelled > p.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
       let hitPlayer = null;
-      if (!hit) {
+      if (!hit && !p.ghost) {                      // ghosts (replicated remote shots) hit only blocks/range — never damage
         for (const mob of mobs.list) {
           if (Math.hypot(mob.pos.x - p.pos.x, mob.pos.y + mob.height * 0.5 - p.pos.y, mob.pos.z - p.pos.z) < 0.9) { hit = true; break; }
         }
-      }
-      if (!hit && bots) {                          // arena bots
-        for (const b of bots) {
-          if (!b.alive) continue;
-          if (Math.hypot(b.pos.x - p.pos.x, b.pos.y + 1 - p.pos.y, b.pos.z - p.pos.z) < 0.9) { hit = true; break; }
+        if (!hit && bots) {                        // arena bots
+          for (const b of bots) {
+            if (!b.alive) continue;
+            if (Math.hypot(b.pos.x - p.pos.x, b.pos.y + 1 - p.pos.y, b.pos.z - p.pos.z) < 0.9) { hit = true; break; }
+          }
         }
-      }
-      if (!hit && mp && mp.online) {
-        for (const [id, r] of mp.remotes) {
-          const gp = r.group.position;
-          if (Math.hypot(gp.x - p.pos.x, gp.y + 1.05 - p.pos.y, gp.z - p.pos.z) < 0.85) { hit = true; hitPlayer = id; break; }
+        if (!hit && mp && mp.online) {
+          for (const [id, r] of mp.remotes) {
+            const gp = r.group.position;
+            if (Math.hypot(gp.x - p.pos.x, gp.y + 1.05 - p.pos.y, gp.z - p.pos.z) < 0.85) { hit = true; hitPlayer = id; break; }
+          }
         }
       }
       if (hit) {
-        onImpact(p.pos.clone(), p.damage, hitPlayer);
+        if (p.ghost) ghostBurst(this.group, p.pos, 0x52ffd8); else onImpact(p.pos.clone(), p.damage, hitPlayer);
         this.group.remove(p.m); p.m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
         this.list.splice(i, 1);
       }
@@ -135,7 +150,7 @@ export class Plasmas {
 // AoE explosion (damage + knockback + block destruction) in main.
 export class Rockets {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.trail = []; }
-  spawn(pos, dir, gun, ownerId) {
+  spawn(pos, dir, gun, ownerId, ghost) {
     const g = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.34, 8),
       new THREE.MeshBasicMaterial({ color: 0x3a3a3a, fog: false }));
@@ -147,7 +162,7 @@ export class Rockets {
     g.add(body, head);
     g.position.copy(pos);
     this.group.add(g);
-    this.list.push({ m: g, vel: dir.clone().multiplyScalar(gun.speed), pos: pos.clone(), gun, ownerId, travelled: 0 });
+    this.list.push({ m: g, vel: dir.clone().multiplyScalar(gun.speed), pos: pos.clone(), gun, ownerId, travelled: 0, ghost });
   }
   _puff(pos) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffa84a, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
@@ -168,25 +183,25 @@ export class Rockets {
       p.m.position.copy(p.pos);
       this._puff(p.pos);
       let hit = p.travelled > p.gun.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
-      if (!hit) {
+      if (!hit && !p.ghost) {                      // ghosts (replicated remote shots) hit only blocks/range
         for (const mob of mobs.list) {
           if (Math.hypot(mob.pos.x - p.pos.x, mob.pos.y + mob.height * 0.5 - p.pos.y, mob.pos.z - p.pos.z) < 0.9) { hit = true; break; }
         }
-      }
-      if (!hit && bots) {                          // arena bots — detonate on contact
-        for (const b of bots) {
-          if (!b.alive) continue;
-          if (Math.hypot(b.pos.x - p.pos.x, b.pos.y + 1 - p.pos.y, b.pos.z - p.pos.z) < 0.95) { hit = true; break; }
+        if (!hit && bots) {                        // arena bots — detonate on contact
+          for (const b of bots) {
+            if (!b.alive) continue;
+            if (Math.hypot(b.pos.x - p.pos.x, b.pos.y + 1 - p.pos.y, b.pos.z - p.pos.z) < 0.95) { hit = true; break; }
+          }
         }
-      }
-      if (!hit && mp && mp.online) {
-        for (const [id, r] of mp.remotes) {
-          const gp = r.group.position;
-          if (Math.hypot(gp.x - p.pos.x, gp.y + 1.05 - p.pos.y, gp.z - p.pos.z) < 0.85) { hit = true; break; }
+        if (!hit && mp && mp.online) {
+          for (const [id, r] of mp.remotes) {
+            const gp = r.group.position;
+            if (Math.hypot(gp.x - p.pos.x, gp.y + 1.05 - p.pos.y, gp.z - p.pos.z) < 0.85) { hit = true; break; }
+          }
         }
       }
       if (hit) {
-        onImpact(p.pos.clone(), p.gun, p.ownerId);
+        if (p.ghost) ghostBurst(this.group, p.pos, 0xffa84a); else onImpact(p.pos.clone(), p.gun, p.ownerId);
         this.group.remove(p.m); p.m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
         this.list.splice(i, 1);
       }
@@ -198,11 +213,11 @@ export class Rockets {
 // A thrown, bouncing frag that detonates on a fuse.
 export class Grenades {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; }
-  spawn(pos, vel, fuse, onExplode) {
+  spawn(pos, vel, fuse, onExplode, ghost) {
     const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshLambertMaterial({ color: 0x39402c }));
     m.position.copy(pos);
     this.group.add(m);
-    this.list.push({ m, pos: pos.clone(), vel: vel.clone(), fuse, onExplode, spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8) });
+    this.list.push({ m, pos: pos.clone(), vel: vel.clone(), fuse, onExplode, ghost, spin: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8) });
   }
   update(dt, world) {
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -219,7 +234,7 @@ export class Grenades {
       g.m.position.copy(g.pos);
       g.m.rotation.x += g.spin.x * dt; g.m.rotation.y += g.spin.y * dt; g.m.rotation.z += g.spin.z * dt;  // tumble on all axes
       if (g.fuse <= 0) {
-        g.onExplode(g.pos.clone());
+        if (g.ghost) ghostBurst(this.group, g.pos, 0xffa84a); else g.onExplode(g.pos.clone());
         this.group.remove(g.m); g.m.geometry.dispose(); g.m.material.dispose(); this.list.splice(i, 1);
       }
     }
@@ -376,7 +391,7 @@ export class ChakraFx {
   // Throw a spinning Rasenshuriken; on impact it detonates the dome and calls onImpact.
   // It flies as the charged buzzsaw — a flat saw blade on a (near-)vertical axle,
   // banked back toward the thrower so the spinning face stays readable in flight.
-  throw(pos, dir, gun, ownerId, onImpact) {
+  throw(pos, dir, gun, ownerId, onImpact, guided = true) {
     const g = new THREE.Group(); g.position.copy(pos);
     const d = dir.clone().normalize();
     const dirH = new THREE.Vector3(d.x, 0, d.z); if (dirH.lengthSq() < 1e-4) dirH.set(0, 0, -1); dirH.normalize();
@@ -395,7 +410,7 @@ export class ChakraFx {
     this.group.add(g);
     const speed = gun.speed;
     this.proj.push({ g, pivot, spinner, pos: pos.clone(), vel: d.multiplyScalar(speed), gun, ownerId, onImpact, travelled: 0,
-      guided: true, turn: 3.6, gravity: 4, cruise: speed, maxSpeed: speed * 1.25 });
+      guided, turn: 3.6, gravity: 4, cruise: speed, maxSpeed: speed * 1.25 });
   }
 
   // ---- Chakra charge aura (the Naruto power-up) ----
@@ -867,5 +882,17 @@ export function makeViewModel(id) {
   g.position.set(0.42, -0.5, -0.85);
   g.rotation.set(0.04, -0.13, 0.0);
   g.traverse((o) => { if (o.isMesh) { o.material.depthTest = false; o.renderOrder = 999; } });
+  return g;
+}
+
+// A world-space weapon prop for a remote avatar's hand. Reuses the first-person
+// viewmodel shapes but with normal depth testing and a hand-scale transform so it
+// reads correctly in third person. Carries chakraAnim for the spinning jutsu orbs.
+export function makeHeldWeapon(id) {
+  const g = makeViewModel(id);
+  g.traverse((o) => { if (o.material) o.material.depthTest = true; if (o.isMesh || o.isSprite) o.renderOrder = 0; });
+  g.scale.setScalar(0.85);
+  g.position.set(0.34, 1.12, 0.18);
+  g.rotation.set(0, Math.PI, 0);    // viewmodel points -Z; flip to point along the avatar's forward (+Z)
   return g;
 }
