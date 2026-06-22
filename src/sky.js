@@ -30,9 +30,10 @@ const ARENA_SKIES = {
   // Humid jungle noon: lush green-tinted daylight, soft canopy haze.
   jungle: { top: sc(0.2, 0.5, 0.74), horizon: sc(0.78, 0.92, 0.72), fog: sc(0.72, 0.88, 0.68), tint: new THREE.Color(1.0, 1.12, 0.92),
             sun: new THREE.Vector3(0.28, 0.86, 0.32).normalize(), sunCol: [1.0, 0.99, 0.82], dir: [0.92, 1.04, 0.8], dirI: 1.12, ambI: 0.86, cloud: [0.94, 1.0, 0.9], cloudOp: 0.7 },
-  // Frozen tundra: pale cold blue, a weak low sun, icy white haze.
-  frozen: { top: sc(0.42, 0.58, 0.84), horizon: sc(0.86, 0.93, 1.0), fog: sc(0.85, 0.92, 1.0), tint: new THREE.Color(0.92, 0.99, 1.14),
-            sun: new THREE.Vector3(0.36, 0.62, 0.5).normalize(), sunCol: [0.84, 0.92, 1.0], dir: [0.86, 0.94, 1.08], dirI: 1.0, ambI: 0.92, cloud: [0.96, 0.98, 1.0], cloudOp: 0.82 },
+  // Frozen tundra: pale cold blue, a weak low sun — a cooler, dimmer haze with real
+  // shading contrast so the white snow/ice reads instead of blowing out to a flat glare.
+  frozen: { top: sc(0.34, 0.5, 0.78), horizon: sc(0.64, 0.76, 0.9), fog: sc(0.58, 0.68, 0.8), tint: new THREE.Color(0.88, 0.95, 1.06),
+            sun: new THREE.Vector3(0.36, 0.62, 0.5).normalize(), sunCol: [0.82, 0.9, 1.0], dir: [0.9, 0.98, 1.1], dirI: 1.12, ambI: 0.62, cloud: [0.84, 0.89, 0.97], cloudOp: 0.58 },
   // Scorched desert: hot hazy orange-tan sky, blazing high sun, dust.
   desert: { top: sc(0.3, 0.5, 0.86), horizon: sc(1.0, 0.83, 0.54), fog: sc(0.96, 0.82, 0.58), tint: new THREE.Color(1.18, 1.04, 0.82),
             sun: new THREE.Vector3(0.4, 0.84, 0.26).normalize(), sunCol: [1.0, 0.92, 0.7], dir: [1.08, 0.97, 0.73], dirI: 1.2, ambI: 0.82, cloud: [1.0, 0.94, 0.8], cloudOp: 0.55 },

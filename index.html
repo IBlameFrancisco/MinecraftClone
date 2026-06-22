@@ -192,10 +192,10 @@
       .gclogo .g1 { background-image: linear-gradient(180deg, #ffe08a 8%, #ff7b32 92%); }
       .gclogo .g2 { background-image: linear-gradient(180deg, #c6ef8e 8%, #4f9a2f 92%); }
       #overlay .gclogo { font-size: 52px; letter-spacing: 1px; white-space: nowrap; margin-bottom: 6px; filter: drop-shadow(0 5px 14px rgba(0,0,0,0.6)) drop-shadow(0 0 26px rgba(255,160,70,0.22)); }
-      #overlay .tagline { opacity: 0.62; font-size: 12.5px; letter-spacing: 0.6px; margin-top: 2px; margin-bottom: 4px; }
+      #overlay .tagline { opacity: 0.82; font-size: 12.5px; letter-spacing: 0.6px; margin-top: 2px; margin-bottom: 4px; }
       #overlay .skinrow { margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 8px;
         padding-top: 16px; border-top: 1px solid var(--gc-line-soft); }
-      #overlay .skinlabel { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; opacity: 0.55; font-weight: 700; }
+      #overlay .skinlabel { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; opacity: 0.82; font-weight: 700; }
       #overlay .skinpick { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; max-width: 420px; }
       #overlay .skinchip { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 6px 3px;
         border-radius: var(--gc-r-md); border: 1.5px solid var(--gc-line); background: rgba(255,255,255,0.05); cursor: pointer;
@@ -205,7 +205,7 @@
       #overlay .skinchip canvas { width: 40px; height: 40px; image-rendering: pixelated; border-radius: var(--gc-r-sm); }
       #overlay .skinchip span { font-size: 11px; opacity: 0.85; }
       #overlay .seedrow { margin-top: 18px; display: flex; align-items: center; gap: 8px; justify-content: center; }
-      #overlay .seedrow label { font-size: 13px; opacity: 0.78; }
+      #overlay .seedrow label { font-size: 13px; opacity: 0.92; }
       #overlay #seedInput {
         width: 180px; padding: 9px 11px; font-size: 14px; border-radius: var(--gc-r-sm);
         border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.35); color: #fff; outline: none;
@@ -234,7 +234,7 @@
         transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.12s var(--gc-ease); }
       #overlay .modebtn:hover { background: var(--gc-chip-hi); transform: translateY(-1px); }
       #overlay .modebtn.active { border-color: var(--gc-gold); background: rgba(255,226,122,0.18); box-shadow: 0 0 0 1px rgba(255,226,122,0.4), 0 4px 14px rgba(255,200,90,0.18); }
-      #overlay .diffrow { margin-top: 12px; font-size: 13px; opacity: 0.9; display: flex; gap: 8px; align-items: center; justify-content: center; }
+      #overlay .diffrow { margin-top: 12px; font-size: 13px; opacity: 0.96; display: flex; gap: 8px; align-items: center; justify-content: center; }
       #overlay #diffSelect { padding: 7px 11px; border-radius: var(--gc-r-sm); border: 1px solid rgba(255,255,255,0.2);
         background: rgba(0,0,0,0.4); color: #fff; outline: none; cursor: pointer; }
       #overlay #diffSelect:focus { border-color: var(--gc-gold); }
@@ -242,7 +242,7 @@
         padding: 14px 14px 4px; border-top: 1px solid var(--gc-line-soft); }
       #overlay .battlesetup.show { display: flex; }
       #overlay .bsrow { display: flex; gap: 8px; align-items: center; justify-content: center; font-size: 13px; }
-      #overlay .bsrow label { opacity: 0.82; }
+      #overlay .bsrow label { opacity: 0.95; }
       #overlay .bsrow select { padding: 7px 10px; border-radius: var(--gc-r-sm); border: 1px solid rgba(255,255,255,0.2);
         background: rgba(0,0,0,0.4); color: #fff; outline: none; cursor: pointer; transition: border-color 0.15s; }
       #overlay .bsrow select:focus { border-color: var(--gc-blue); }
@@ -250,7 +250,7 @@
         background: var(--gc-chip); color: #fff; cursor: pointer; transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.12s var(--gc-ease); }
       #overlay .bschip:hover { background: var(--gc-chip-hi); transform: translateY(-1px); }
       #overlay .bschip.active { border-color: #ff8f6a; background: rgba(255,143,106,0.18); box-shadow: 0 0 0 1px rgba(255,143,106,0.4); }
-      #overlay .mptitle { margin-top: 20px; font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; opacity: 0.55; font-weight: 700;
+      #overlay .mptitle { margin-top: 20px; font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; opacity: 0.8; font-weight: 700;
         position: relative; padding-top: 16px; }
       #overlay .mptitle::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 56px; height: 1px; background: var(--gc-line); }
       #overlay .mprow { margin-top: 10px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
@@ -258,6 +258,7 @@
         border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.35); color: #fff; outline: none;
         transition: border-color 0.15s, box-shadow 0.15s; }
       #overlay .mprow input:focus { border-color: var(--gc-blue); box-shadow: 0 0 0 3px rgba(122,208,255,0.14); }
+      #overlay input::placeholder { color: rgba(255,255,255,0.55); }
       #mpStatus { margin-top: 10px; font-size: 13px; min-height: 16px; color: var(--gc-blue); }
       #overlay .settingsbtn { margin-top: 16px; font-size: 13px; opacity: 0.85; padding: 8px 15px; }
 
