@@ -265,6 +265,7 @@ export class Multiplayer {
     if (!r) { r = { group: makeAvatar(d.name || 'Player', getSkin(d.skin)) }; this.group.add(r.group); this.remotes.set(id, r); }
     r.target = { x: d.x, y: d.y, z: d.z, yaw: d.yaw };
     r.group.visible = d.alive !== false;          // hide dead/spectating players (mirrors _updateBot)
+    r.skinId = d.skin;                            // remember their skin (for the kill-cam replay avatar)
     this._setHeldWeapon(r, d.wep | 0);
     r.ch = d.ch || 0;                              // chakra-channel intensity (the protective aura)
   }
