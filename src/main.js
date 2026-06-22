@@ -929,7 +929,8 @@ function setupWar(humans) {
       b.gunId = HEAVY_MG;
     } else {                                                // attackers: push up the beach to the objective
       b.defend = false; b.anchor = null; b.yaw = 0;
-      b.advance = true; b.advanceGoal = new THREE.Vector3(BEACH.OBJ_X + (Math.random() - 0.5) * 10, 0, BEACH.OBJ_Z + 2);
+      b.advance = true; b._goalJitter = (Math.random() - 0.5) * 12;
+      b.advanceGoal = new THREE.Vector3(b.pos.x, 0, 16);   // stage 1: straight ashore off the boat (warTick restages it)
       b.gunId = _pick([ASSAULT_RIFLE, SMG, ASSAULT_RIFLE, SHOTGUN]);
     }
     b.gun = gunOf(b.gunId); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0;
@@ -1038,6 +1039,14 @@ function modeTick(dt) {
 // clock (holding the line) or repelling the assault (Allied reinforcements spent).
 function warTick(dt) {
   warTimer -= dt;
+  // Keep the attackers storming: while still at sea, drive each one STRAIGHT ashore
+  // (no sideways pull that snags them on the boat walls); once on the beach, converge
+  // on the bunker objective so they actually push past the Axis instead of milling.
+  for (const b of botMgr.bots) {
+    if (!b.alive || !b.advance) continue;
+    if (b.pos.z > 20) b.advanceGoal.set(b.pos.x, 0, 14);
+    else b.advanceGoal.set(BEACH.OBJ_X + (b._goalJitter || 0), 0, BEACH.OBJ_Z + 2);
+  }
   const ox = BEACH.OBJ_X, oz = BEACH.OBJ_Z, r2 = BEACH.OBJ_R * BEACH.OBJ_R;
   const inObj = (x, z) => (x - ox) ** 2 + (z - oz) ** 2 < r2;
   let allied = 0, axis = 0;

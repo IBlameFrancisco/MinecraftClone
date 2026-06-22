@@ -458,7 +458,10 @@ export class WorldGen {
         if (dx === 2 || wz === 36) { set(DECK + 1, PLANK); set(DECK + 2, PLANK); }   // low hull walls (sides + stern) — open bow
         if (wz === 36 && dx === 0) set(DECK + 3, COAL_ORE);        // a small gun tub on the stern
       }
-      if (dx <= 2 && wz >= 28 && wz <= 30) set(DECK - (31 - wz), PLANK);   // lowered bow ramp down to the surf
+      // Flat boarding gangway from the bow STRAIGHT to the beach at deck level — so the
+      // troops storm ashore over the surf instead of dropping into deep water and
+      // getting stuck at a 2-block step (which left the whole assault milling at sea).
+      if (dx <= 1 && wz >= 25 && wz <= 30) set(DECK, PLANK);
     }
     // A couple of wrecked, half-sunk craft for atmosphere.
     for (const [cx, cz] of [[-40, 30], [40, 28]]) {
@@ -478,8 +481,9 @@ export class WorldGen {
     // Barbed-wire stake lines strung across the beach.
     if ((wz === 9 || wz === 16) && (((wx % 3) + 3) % 3) === 0) set(F + 1, IRON_ORE);
 
-    // ---- Seawall at the top of the beach: 3 high, with climb gaps ~every 15. ----
-    if (wz === 6 && (((wx % 15) + 15) % 15) >= 3) { set(F + 1, COBBLE); set(F + 2, COBBLE); set(F + 3, GRAVEL); }
+    // ---- Seawall at the top of the beach: 2 high, with frequent wide breaches so the
+    // assault can actually pour through onto the bluff (4-wide gap every 11). ----
+    if (wz === 6 && (((wx % 11) + 11) % 11) >= 4) { set(F + 1, COBBLE); set(F + 2, GRAVEL); }
 
     // ---- MG nests on the shelf: sandbag horseshoe facing the beach, gun behind. ----
     for (const [nx] of BEACH_NESTS) {

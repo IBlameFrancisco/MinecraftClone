@@ -204,7 +204,7 @@ export class BotManager {
       b.pitch += (wantPitch - b.pitch) * Math.min(1, b.D.turn * dt);
 
       // Movement: keep preferred range, strafe, seek cover when reloading / low.
-      const seekCover = (b.reloadTimer > 0 || b.health < 7) && Math.random() < b.D.cover && !b.defend;
+      const seekCover = (b.reloadTimer > 0 || b.health < 7) && Math.random() < b.D.cover && !b.defend && !b.advance;
       const toX = (tx - b.pos.x) / dist, toZ = (tz - b.pos.z) / dist;
       if (seekCover && ctx.coverPoints && ctx.coverPoints.length) {
         if (!b.coverGoal || b.coverTimer <= 0) { b.coverGoal = nearestCover(ctx.coverPoints, b.pos); b.coverTimer = 2.5; }
