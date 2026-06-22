@@ -109,7 +109,10 @@ export class World {
   update(playerX, playerZ) {
     this.pcx = Math.floor(playerX / CHUNK_SIZE);
     this.pcz = Math.floor(playerZ / CHUNK_SIZE);
-    const genR = this.renderDistance + 1;
+    // Generate two rings past the render distance: meshing a chunk needs all 8
+    // neighbours generated, and a chunk at the meshing edge has diagonal neighbours
+    // beyond renderDistance+1 — so +1 left a ring that could never mesh.
+    const genR = this.renderDistance + 2;
 
     // Schedule any missing chunk in range for generation.
     for (let dz = -genR; dz <= genR; dz++) {

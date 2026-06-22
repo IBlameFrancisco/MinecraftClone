@@ -463,7 +463,7 @@ function fillSizeOptions() {
 function refreshBattleSetup() {
   const m = battleCfg.mode, war = m === 'war';
   bsTeamRow.style.display = (FORCES_FFA[m] || FORCES_COOP[m]) ? 'none' : 'flex';
-  bsScoreRow.style.display = (m === 'gungame' || m === 'br' || war) ? 'none' : 'flex';   // auto win conditions
+  bsScoreRow.style.display = (m === 'gungame' || m === 'br' || m === 'wave' || war) ? 'none' : 'flex';   // auto win conditions
   // For War the FFA/Teams chips become an Allied/Axis side picker.
   bsFFA.textContent = war ? '⚔ Storm (Allied)' : 'Free-for-all';
   bsTeam.textContent = war ? '🛡 Hold (Axis)' : 'Teams';
@@ -940,8 +940,13 @@ function brTick(dt) {
   }
   const aliveBots = botMgr.bots.filter((b) => b.alive).length;
   const meAlive = (!eliminated && health > 0) ? 1 : 0;
-  if (aliveBots + meAlive <= 1 && !matchWinner) {
-    endMatch(meAlive ? myName() : (botMgr.bots.find((b) => b.alive)?.name || 'Nobody'));
+  const aliveRemotes = mp.online ? [...mp.remotes].filter(([, r]) => !r.bot && r.group.visible) : [];
+  if (aliveBots + meAlive + aliveRemotes.length <= 1 && !matchWinner) {
+    const winner = meAlive ? myName()
+      : (botMgr.bots.find((b) => b.alive)?.name
+         || (aliveRemotes[0] && mp.roster.get(aliveRemotes[0][0]))
+         || 'Nobody');
+    endMatch(winner);
   }
 }
 function startWave(n) {
@@ -991,7 +996,8 @@ function warTick(dt) {
   }
   if (warCapture >= 100) { endMatch('Allied — beachhead secured'); return; }
   if (warTimer <= 0) { endMatch('Axis — the line held'); return; }
-  const alliedAlive = (myTeam === WAR_ALLIED && !eliminated && health > 0 ? 1 : 0) + botMgr.bots.filter((b) => b.alive && b.team === WAR_ALLIED).length;
+  const alliedRemotes = mp.online ? [...mp.remotes].filter(([id, r]) => !r.bot && r.group.visible && teamOf(id) === WAR_ALLIED).length : 0;
+  const alliedAlive = (myTeam === WAR_ALLIED && !eliminated && health > 0 ? 1 : 0) + botMgr.bots.filter((b) => b.alive && b.team === WAR_ALLIED).length + alliedRemotes;
   if (warTickets <= 0 && alliedAlive === 0) endMatch('Axis — assault repelled');
 }
 
@@ -1137,7 +1143,7 @@ function applyPickup(kind) {
 // Build the combatant target list bots reason about (players + bots).
 function buildTargets() {
   const list = [{ id: selfId(), team: myTeam, pos: player.pos, vel: player.vel, alive: !eliminated && health > 0 }];
-  if (mp.online) for (const [id, r] of mp.remotes) { if (botMgr.get(id)) continue; list.push({ id, team: teamOf(id), pos: r.group.position, alive: true }); }
+  if (mp.online) for (const [id, r] of mp.remotes) { if (botMgr.get(id)) continue; list.push({ id, team: teamOf(id), pos: r.group.position, alive: r.group.visible }); }
   for (const b of botMgr.bots) list.push({ id: b.id, team: b.team, pos: b.pos, vel: b.vel, alive: b.alive });
   return list;
 }
@@ -1924,7 +1930,7 @@ function frame() {
     player.update(0);   // paused (inventory / death) after playing
   }
 
-  if (reloadingGun >= 0) { reloadTimer -= dt; if (reloadTimer <= 0) { const rg = gunOf(reloadingGun); if (rg) ammo[reloadingGun] = rg.mag; reloadingGun = -1; sfx.place(); } }
+  if (reloadingGun >= 0) { reloadTimer -= sdt; if (reloadTimer <= 0) { const rg = gunOf(reloadingGun); if (rg) ammo[reloadingGun] = rg.mag; reloadingGun = -1; sfx.place(); } }
 
   sky.update(sdt);
   hud.setClock(sky.clockString());
@@ -1984,7 +1990,7 @@ function frame() {
   } else hud.setModeInfo(null);
 
   // Interaction
-  invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt; fireCD -= dt; fire2CD -= dt;
+  invuln -= sdt; breakCD -= sdt; placeCD -= sdt; attackCD -= sdt; fireCD -= sdt; fire2CD -= sdt;  // sdt freezes these on a single-player pause
   const gun = gunOf(inventory.selectedId());
   // Chakra jutsu: hold to gather chakra (charge), release to unleash. Cancel the charge
   // whenever we're not actively holding a charge weapon.
@@ -1994,13 +2000,17 @@ function frame() {
     const id = inventory.selectedId();
     if (gun.charge) {
       if (chargeGunId !== id) { chargeT = 0; chargeGunId = id; }   // switched weapon mid-charge
-      if (mouseLeft) {
+      const reloading = gun.mag && reloadingGun === id;
+      const empty = gun.mag && ammoFor(gun, id) <= 0;
+      if (mouseLeft && !reloading && !empty) {                      // can't gather while empty/reloading
         const was = chargeT;
         chargeT = Math.min(gun.charge, chargeT + dt);
         if (was === 0 && chargeT > 0) sfx.chakraCharge();           // rising hum on gather start
         if (was < gun.charge && chargeT >= gun.charge) sfx.chakraReady();  // ping at full charge
-      } else if (chargeT > 0.06) { releaseCharge(gun, Math.min(1, chargeT / gun.charge)); chargeT = 0; }
-      else chargeT = 0;
+      } else if (!mouseLeft && chargeT > 0.06) {
+        releaseCharge(gun, Math.min(1, chargeT / gun.charge)); chargeT = 0;
+        if (gun.mag) { ammo[id]--; if (ammoFor(gun, id) <= 0) startReload(gun, id); }   // mag weapons (Rasenshuriken) consume + reload
+      } else { chargeT = 0; if (empty && !reloading) startReload(gun, id); }
       vmCharge = chargeT / gun.charge;
     }
     // Auto guns fire while held; the rest fire once per click.
@@ -2060,10 +2070,12 @@ function frame() {
   blackholes.update(sdt, world, blackHoleHooks);
   chakra.update(sdt, world, chakraHooks);
   grenades.update(sdt, world);
-  grenadeCD -= dt;
+  grenadeCD -= sdt;
   portals.update(dt, portalBodies());
   mp.update(dt);
-  if (active) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw });
+  // Keep broadcasting in-game even while dead so peers can hide our avatar (alive flag);
+  // only the home menu suppresses it.
+  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated });
 
   // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
   shakeAmt *= Math.max(0, 1 - 9 * dt);

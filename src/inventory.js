@@ -27,6 +27,7 @@ export class Inventory {
     this.cMain = new Array(27).fill(null);
     this.sHotbar = new Array(9).fill(null);
     this.sMain = new Array(27).fill(null);
+    this.fixedLoadout = false;       // Battle modes: a fixed gun loadout — skip empty hotbar slots when cycling
 
     this.selected = 0;
     this.open = false;
@@ -84,6 +85,14 @@ export class Inventory {
     return count;
   }
 
+  // Next slot to scroll to in direction `dir` (±1). With a fixed battle loadout,
+  // skip empty slots so the wheel never lands you on "nothing".
+  _scrollTarget(dir) {
+    if (!this.fixedLoadout) return (this.selected + dir + 9) % 9;
+    for (let k = 1; k <= 9; k++) { const i = (this.selected + dir * k + 90) % 9; if (this.hotbar[i]) return i; }
+    return this.selected;
+  }
+
   select(i) {
     this.selected = i;
     [...this.hotbarEl.children].forEach((el, k) => el.classList.toggle('active', k === i));
@@ -93,6 +102,7 @@ export class Inventory {
 
   setMode(creative) {
     this.creative = creative;
+    this.fixedLoadout = false;       // sandbox: free hotbar (empty slots are selectable)
     this.renderHotbar();
     if (this.open) this.renderScreen();
     this.select(this.selected);
@@ -101,6 +111,7 @@ export class Inventory {
   // Replace the (creative-set) hotbar with a fixed loadout — used for Battle mode.
   setLoadout(ids) {
     this.cHotbar = ids.map((id) => ({ id, count: 1 }));
+    this.fixedLoadout = true;
     this.renderHotbar();
     if (this.open) this.renderScreen();
     this.select(0);
@@ -347,12 +358,12 @@ export class Inventory {
     window.addEventListener('keydown', (e) => {
       const a = document.activeElement;
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
-      if (e.code.startsWith('Digit')) { const n = parseInt(e.code.slice(5), 10) - 1; if (n >= 0 && n < 9) this.select(n); }
+      if (e.code.startsWith('Digit')) { const n = parseInt(e.code.slice(5), 10) - 1; if (n >= 0 && n < 9 && !(this.fixedLoadout && !this.hotbar[n])) this.select(n); }
     });
     window.addEventListener('wheel', (e) => {
       if (this.open) return;
-      if (e.deltaY > 0) this.select((this.selected + 1) % 9);
-      else if (e.deltaY < 0) this.select((this.selected + 8) % 9);
+      const dir = e.deltaY > 0 ? 1 : (e.deltaY < 0 ? -1 : 0);
+      if (dir) this.select(this._scrollTarget(dir));
     }, { passive: true });
     window.addEventListener('mousemove', (e) => {
       if (this.cursor) { this.cursorEl.style.left = e.clientX + 'px'; this.cursorEl.style.top = e.clientY + 'px'; }
