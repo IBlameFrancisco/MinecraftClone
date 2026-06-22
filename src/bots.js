@@ -30,7 +30,10 @@ export const BOT_DIFF = {
 };
 
 const NAMES = ['Vortex', 'Blaze', 'Specter', 'Rogue', 'Talon', 'Cipher', 'Nova', 'Onyx',
-  'Razor', 'Echo', 'Ghost', 'Striker', 'Havoc', 'Saber', 'Vandal', 'Wraith'];
+  'Razor', 'Echo', 'Ghost', 'Striker', 'Havoc', 'Saber', 'Vandal', 'Wraith',
+  'Reaper', 'Falcon', 'Viper', 'Hawk', 'Titan', 'Maverick', 'Diesel', 'Bishop',
+  'Slate', 'Comet', 'Jagger', 'Phoenix', 'Crow', 'Steel', 'Banshee', 'Orion',
+  'Dagger', 'Fox', 'Grizzly', 'Cobra', 'Ranger', 'Bolt', 'Hunter', 'Ace'];
 
 // Weapon pools by difficulty. Bots use hitscan-class guns only (instant, clean
 // damage attribution); projectile guns stay player-exclusive.
@@ -131,6 +134,7 @@ export class BotManager {
     for (let i = 0; i < count; i++) {
       let nm = pick(NAMES); let guard = 0;
       while (used.has(nm) && guard++ < 30) nm = pick(NAMES);
+      if (used.has(nm)) { const base = nm; let n = 2; while (used.has(nm)) nm = `${base} ${n++}`; }   // guarantee uniqueness (kills are credited by name)
       used.add(nm);
       const team = teams[i % teams.length];
       const b = new Bot(nm, team, difficulty);
