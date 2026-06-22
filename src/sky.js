@@ -11,14 +11,14 @@ function sc(r, g, b) {
 }
 
 // Palettes (authored in sRGB 0..1): [skyTop, horizon].
-const DAY = [sc(0.27, 0.52, 0.92), sc(0.66, 0.80, 0.95)];
-const NIGHT = [sc(0.02, 0.03, 0.09), sc(0.05, 0.08, 0.18)];
-const DUSK = [sc(0.21, 0.24, 0.46), sc(0.95, 0.49, 0.26)];
+const DAY = [sc(0.25, 0.50, 0.93), sc(0.70, 0.84, 0.97)];
+const NIGHT = [sc(0.015, 0.025, 0.075), sc(0.04, 0.07, 0.17)];
+const DUSK = [sc(0.20, 0.22, 0.48), sc(0.98, 0.46, 0.24)];
 
 // Light tints applied to the world (already ~linear multipliers).
 const LIGHT_DAY = new THREE.Color(1.0, 0.99, 0.96);
-const LIGHT_NIGHT = new THREE.Color(0.17, 0.21, 0.34);
-const LIGHT_DUSK = new THREE.Color(1.0, 0.66, 0.45);
+const LIGHT_NIGHT = new THREE.Color(0.16, 0.20, 0.34);
+const LIGHT_DUSK = new THREE.Color(1.02, 0.64, 0.42);
 
 // ---- Battle arena: per-theme cinematic atmospheres — each map gets its own time-of-day mood,
 // sun colour and fog so it reads as a wholly different place. (sky top/horizon/fog
@@ -45,16 +45,18 @@ const WAR_HORIZON = sc(0.54, 0.49, 0.43);
 const WAR_FOG = sc(0.52, 0.49, 0.46);
 const WAR_TINT = new THREE.Color(0.70, 0.67, 0.63);
 
-function radialSprite(inner, outer) {
+function radialSprite(inner, outer, mid) {
   const c = document.createElement('canvas');
-  c.width = c.height = 64;
+  c.width = c.height = 128;
   const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
   grad.addColorStop(0, inner);
-  grad.addColorStop(0.4, inner);
+  grad.addColorStop(0.22, inner);
+  // A softer mid falloff gives the disc a luminous corona instead of a hard ring.
+  grad.addColorStop(0.42, mid || inner);
   grad.addColorStop(1, outer);
   g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
+  g.fillRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -89,8 +91,13 @@ export class Sky {
         varying vec3 vDir;
         void main() {
           float h = vDir.y;
-          float t = pow(clamp(h, 0.0, 1.0), 0.55);
+          // Smoother zenith->horizon falloff; the slightly higher exponent keeps
+          // the upper sky a clean deep colour while the horizon band stays wide.
+          float t = pow(clamp(h, 0.0, 1.0), 0.42);
           vec3 col = mix(horizonColor, topColor, t);
+          // Soft haze glow hugging the horizon for atmospheric depth.
+          float haze = exp(-abs(h) * 7.0) * 0.18;
+          col += horizonColor * haze;
           // slight darkening below the horizon
           col = mix(col, horizonColor * 0.55, clamp(-h * 1.5, 0.0, 1.0));
           // colour is consumed by the post pipeline (OutputPass) in linear space
@@ -106,17 +113,19 @@ export class Sky {
     this.fog = new THREE.Fog(DAY[1].clone(), far * 0.45, far);
     scene.fog = this.fog;
 
-    // Sun + moon billboards.
+    // Sun + moon billboards. The sun gets a warm white core fading through a
+    // golden corona; the moon a cool bright disc with a faint blue halo.
     this.sun = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: radialSprite('rgba(255,250,230,1)', 'rgba(255,240,200,0)'),
+      map: radialSprite('rgba(255,252,240,1)', 'rgba(255,234,180,0)', 'rgba(255,243,205,0.85)'),
       transparent: true, depthWrite: false, depthTest: false, fog: false,
+      blending: THREE.AdditiveBlending,
     }));
-    this.sun.scale.setScalar(60);
+    this.sun.scale.setScalar(64);
     this.moon = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: radialSprite('rgba(220,228,245,1)', 'rgba(180,195,230,0)'),
+      map: radialSprite('rgba(235,240,252,1)', 'rgba(170,188,228,0)', 'rgba(205,216,242,0.8)'),
       transparent: true, depthWrite: false, depthTest: false, fog: false,
     }));
-    this.moon.scale.setScalar(40);
+    this.moon.scale.setScalar(42);
     scene.add(this.sun, this.moon);
 
     // Drifting cloud layer.
@@ -156,8 +165,8 @@ export class Sky {
 
   _restoreSky() {
     this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1];
-    this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(40);
-    this.sun.material.color.setRGB(1, 1, 1); this.sun.scale.setScalar(60); this.clouds.material.opacity = 0.8;
+    this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(42);
+    this.sun.material.color.setRGB(1, 1, 1); this.sun.scale.setScalar(64); this.clouds.material.opacity = 0.8;
   }
 
   // Toggle the bright battle-arena atmosphere.
@@ -187,9 +196,10 @@ export class Sky {
     const sunDir = new THREE.Vector3(Math.cos(ang), Math.sin(ang), 0.25).normalize();
     const e = sunDir.y; // elevation -1..1
 
-    // Blend weights between day / dusk / night.
-    const dayW = smooth(0.04, 0.32, e);
-    const nightW = smooth(0.04, 0.30, -e);
+    // Blend weights between day / dusk / night. The dusk band is widened a touch
+    // around the horizon so sunrise/sunset linger and read more cinematically.
+    const dayW = smooth(0.05, 0.34, e);
+    const nightW = smooth(0.05, 0.32, -e);
     let duskW = 1 - dayW - nightW;
     if (duskW < 0) duskW = 0;
     const sum = dayW + nightW + duskW || 1;
@@ -216,16 +226,26 @@ export class Sky {
     this.dome.position.copy(cam);
     this.sun.position.copy(cam).addScaledVector(sunDir, 480);
     this.moon.position.copy(cam).addScaledVector(sunDir, -480);
-    this.sun.material.opacity = THREE.MathUtils.clamp(e * 4 + 0.4, 0, 1);
-    this.moon.material.opacity = THREE.MathUtils.clamp(-e * 4 + 0.2, 0, 1);
 
-    // Clouds drift and follow the camera; tinted by the day/night light.
+    // Golden-hour swell + warm tint as the sun nears the horizon; it returns to a
+    // crisp white disc when high. `horizonNear` peaks at the horizon (e≈0).
+    const horizonNear = THREE.MathUtils.clamp(1 - Math.abs(e) * 3.2, 0, 1);
+    this.sun.scale.setScalar(64 + 26 * horizonNear);
+    this.sun.material.color.setRGB(1.0, 1.0 - 0.18 * horizonNear, 1.0 - 0.42 * horizonNear);
+    this.sun.material.opacity = smooth(-0.10, 0.06, e);
+    this.moon.material.color.setRGB(1, 1, 1);
+    this.moon.material.opacity = smooth(-0.04, -0.14, e);
+
+    // Clouds drift and follow the camera; tinted by the day/night light, and they
+    // catch a warm dusk stain as the sun grazes the horizon.
     this.clouds.position.x = cam.x;
     this.clouds.position.z = cam.z;
     this.clouds.material.map.offset.x += dt * 0.004;
     this.clouds.material.map.offset.y += dt * 0.0016;
+    this._tmpLight.r += 0.10 * horizonNear;
+    this._tmpLight.g += 0.02 * horizonNear;
     this.clouds.material.color.copy(this._tmpLight);
-    this.clouds.material.opacity = 0.8 * THREE.MathUtils.clamp(e * 3 + 0.5, 0.25, 1);
+    this.clouds.material.opacity = 0.8 * THREE.MathUtils.clamp(e * 3 + 0.5, 0.22, 1);
 
     return this.time;
   }
@@ -316,14 +336,23 @@ function cloudTexture() {
   c.width = c.height = 256;
   const g = c.getContext('2d');
   g.clearRect(0, 0, 256, 256);
-  for (let i = 0; i < 110; i++) {
-    const x = Math.random() * 256, y = Math.random() * 256, r = 8 + Math.random() * 42;
-    const a = 0.06 + Math.random() * 0.16;
-    const grad = g.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, `rgba(255,255,255,${a})`);
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grad;
-    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  // Build clouds in clumps: a few large soft cores with smaller puffs clustered
+  // around them, so the layer reads as billowing masses rather than even noise.
+  for (let cl = 0; cl < 14; cl++) {
+    const cx = Math.random() * 256, cy = Math.random() * 256;
+    const puffs = 5 + (Math.random() * 6 | 0);
+    for (let i = 0; i < puffs; i++) {
+      const x = cx + (Math.random() - 0.5) * 70;
+      const y = cy + (Math.random() - 0.5) * 50;
+      const r = 14 + Math.random() * 40;
+      const a = 0.05 + Math.random() * 0.13;
+      const grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, `rgba(255,255,255,${a})`);
+      grad.addColorStop(0.5, `rgba(255,255,255,${a * 0.55})`);
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grad;
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    }
   }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;

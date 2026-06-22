@@ -16,9 +16,15 @@ const PHH = CHUNK_HEIGHT + 2;    // padded height
 const pIndex = (px, py, pz) => (py * PW + pz) * PW + px;
 
 // Per-direction face shading (Minecraft-style): top brightest, bottom darkest.
-const FACE_SHADE = [0.60, 0.60, 1.0, 0.5, 0.80, 0.80]; // +X -X +Y -Y +Z -Z
-const AO_LEVEL = [0.42, 0.62, 0.81, 1.0];
-const SKY_DARK = 0.40;           // ambient floor for sky-occluded cells
+// Softened so vertical faces keep clear directional definition without reading
+// as flat-grey or near-black — the +X/-X and +Z/-Z pairs are lifted slightly and
+// the bottom is no longer punishingly dark.
+const FACE_SHADE = [0.66, 0.66, 1.0, 0.58, 0.83, 0.83]; // +X -X +Y -Y +Z -Z
+// Ambient occlusion ramp. Raised, perceptually-eased floor so creases read as a
+// soft shadow rather than a hard black gradient; the step from full-light (1.0)
+// to one-occluder is gentler so flat ground doesn't look noisy.
+const AO_LEVEL = [0.55, 0.72, 0.88, 1.0];
+const SKY_DARK = 0.46;           // ambient floor for sky-occluded cells (softer caves/overhangs)
 
 // Face table. For each direction: normal, tile selector dir, and 4 corners with
 // position offset, tile-space uv (v=0 is the canvas-top so side textures stand
@@ -183,9 +189,13 @@ export function buildChunkGeometry(world, cx, cz) {
             const aoF = AO_LEVEL[aoLvl];
             aoOut[k] = aoF;
 
-            let bright = shade * aoF * skyFactor;
+            // Soften how AO bites into the directional shade: a sky-occluded face
+            // keeps a little more of its base tone so caves/overhangs read as dim
+            // rather than crushed, while open faces are unaffected.
+            const ao = aoF * (0.86 + 0.14 * skyFactor);
+            let bright = shade * ao * skyFactor;
             if (emissive) bright = Math.max(bright, 0.92);
-            if (bright < 0.05) bright = 0.05;
+            if (bright < 0.08) bright = 0.08;
 
             const vy = ly + c.pos[1] - (waterSurface && c.pos[1] === 1 ? 0.12 : 0);
             buf.pos.push(lx + c.pos[0], vy, lz + c.pos[2]);
