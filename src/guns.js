@@ -584,6 +584,99 @@ export class DamageNumbers {
   }
 }
 
+// A spinning 3D chakra orb (the Rasengan body) built into group `g` at local
+// point `P`. Returns a per-frame animator(charge, dt, t). Everything spins about
+// the VERTICAL axis — like a buzzsaw around a vertical pole, clockwise from the
+// player's view:
+//  - a bright core inside a translucent containment sphere;
+//  - a flat equatorial "saw" disc (the 4-bladed pinwheel) spinning about vertical;
+//  - a cage of longitude rings (great circles through the poles) sweeping round;
+//  - `wisps` of chakra that continuously stream inward, circling the vertical axis
+//    and spiralling onto the orb — the "energy charging in, in a circle".
+// `charge` (0→1) grows, brightens and spins everything up: a faint forming orb
+// when uncharged, a dense fast vortex at full charge.
+function buildChakraOrb(g, P, opts = {}) {
+  const wispN = opts.wisps ?? 16;
+  const haloColor = opts.haloColor ?? 0x4aa3ff;
+  const sawSize = opts.saw ?? 0.38;
+  const add = (m) => { m.position.copy(P); g.add(m); return m; };
+
+  const core = add(new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xeaf6ff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+  const body = add(new THREE.Mesh(new THREE.SphereGeometry(0.2, 22, 22),
+    new THREE.MeshBasicMaterial({ color: 0x3f9bff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false })));
+
+  // The buzzsaw: a flat pinwheel disc whose axle is (near-)vertical, tilted a touch
+  // toward the player so the spinning blades read. Spins about the vertical.
+  const sawPivot = new THREE.Group(); sawPivot.position.copy(P); sawPivot.rotation.x = -Math.PI / 2 + 0.5; g.add(sawPivot);
+  const saw = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xcdeeff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false, fog: false }));
+  sawPivot.add(saw);
+
+  // Longitude-ring cage: great circles through the poles, offset around vertical.
+  const bands = [];
+  for (let i = 0; i < 4; i++) {
+    const band = add(new THREE.Mesh(new THREE.TorusGeometry(0.205, 0.01, 8, 48),
+      new THREE.MeshBasicMaterial({ color: 0xddf3ff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+    band.rotation.y = i * (Math.PI / 4); bands.push(band);
+  }
+
+  // Inward-spiralling chakra streams that circle the vertical axis (near-horizontal,
+  // slightly tilted orbits) as the orb gathers.
+  const _u = new THREE.Vector3(), _w = new THREE.Vector3();
+  const wisps = [];
+  for (let i = 0; i < wispN; i++) {
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xaadcff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    g.add(spr);
+    const n = new THREE.Vector3((Math.random() * 2 - 1) * 0.5, 1, (Math.random() * 2 - 1) * 0.5).normalize();  // near-vertical orbit normal
+    const tmp = Math.abs(n.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const u = new THREE.Vector3().crossVectors(n, tmp).normalize();
+    const v = new THREE.Vector3().crossVectors(n, u).normalize();
+    wisps.push({ spr, u, v, prog: Math.random(), turns: 2.5 + (i % 3), speed: 0.6 + Math.random() * 0.5, ph: Math.random() * 6.28 });
+  }
+
+  const halo = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: haloColor, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+
+  const ROUT = 0.62;
+  return (charge, dt, t) => {
+    const c = Math.max(0, Math.min(1, charge));
+    const grow = 0.34 + 0.66 * c;
+    const pulse = 1 + 0.05 * Math.sin(t * 22) * c;
+    const spin = (1.4 + 7.0 * c) * dt;                   // fast saw; ramps hard with charge
+
+    core.scale.setScalar((0.55 + 0.6 * c) * pulse); core.material.opacity = 0.4 + 0.38 * c;
+    body.scale.setScalar(grow * pulse); body.material.opacity = 0.12 + 0.22 * c;
+    body.rotation.y += spin * 0.8;                       // gentle counter-drift for depth
+
+    saw.scale.setScalar(sawSize * grow * 2.0); saw.material.opacity = 0.35 + 0.6 * c;   // the blade should read, not the glow
+    saw.rotation.z -= spin * 1.5;                        // clockwise about the (near-vertical) axle
+
+    for (let i = 0; i < bands.length; i++) {
+      const b = bands[i];
+      b.scale.setScalar(grow * (0.97 + 0.03 * Math.sin(t * 7 + i)));
+      b.material.opacity = 0.1 + 0.55 * c;
+      b.rotation.y -= spin;                              // sweep the longitude cage about vertical
+    }
+
+    const surf = 0.22 * grow;
+    for (const wi of wisps) {
+      wi.prog += dt * (0.4 + 1.7 * c) * wi.speed;
+      if (wi.prog >= 1) wi.prog -= 1;
+      const p = wi.prog;
+      const ang = wi.ph - p * wi.turns * 6.2832;         // clockwise spiral inward
+      const rad = ROUT * (1 - p) + surf * p;
+      const ca = Math.cos(ang) * rad, sa = Math.sin(ang) * rad;
+      _u.copy(wi.u).multiplyScalar(ca); _w.copy(wi.v).multiplyScalar(sa);
+      wi.spr.position.copy(P).add(_u).add(_w);
+      wi.spr.scale.setScalar(0.045 + 0.05 * c);
+      wi.spr.material.opacity = (0.12 + 0.8 * c) * Math.sin(p * Math.PI);
+    }
+
+    halo.scale.setScalar((0.5 + 0.5 * c) * grow * 1.55);
+    halo.material.opacity = 0.13 + 0.3 * c;
+  };
+}
+
 // ---------------- First-person viewmodels ----------------
 export function makeViewModel(id) {
   const g = new THREE.Group();
@@ -641,31 +734,26 @@ export function makeViewModel(id) {
     const e2 = box(0.04, 0.04, 0.5, 0x9b6bff, -0.12, 0.07, -0.26); e2.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
     box(0.1, 0.2, 0.14, 0x1c1430, 0, -0.16, 0.04);         // grip
   } else if (id === RASENGAN) {
-    // A chakra orb cupped in the hand; grows + brightens + spins up while charging,
-    // with rings of chakra gathering inward (animated in animateViewModel by vmCharge).
+    // The spinning chakra sphere cupped in the hand — a self-animating 3D orb
+    // (see buildChakraOrb), driven by vmCharge via g.userData.chakraAnim.
     box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.12, -0.34);        // cupped hand
-    const P = new THREE.Vector3(0, 0.02, -0.42);
-    const tag = (m, base, kind) => { m.position.copy(P); m.userData.chakra = kind; m.userData.base = base; g.add(m); };
-    tag(new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 16), new THREE.MeshBasicMaterial({ color: 0xcdecff, transparent: true, opacity: 0.95, fog: false })), 1, 'core');
-    const swirl = new THREE.Mesh(new THREE.SphereGeometry(0.19, 16, 16), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0x6fc8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
-    swirl.userData.spinRate = 16; tag(swirl, 1, 'swirl');
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x4aa3ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    glow.scale.setScalar(0.8); tag(glow, 0.8, 'glow');
-    for (let i = 0; i < 3; i++) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.012, 6, 30), new THREE.MeshBasicMaterial({ color: 0xbfe9ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      ring.position.copy(P); ring.rotation.set(i * 0.7, i * 1.1, 0); ring.userData.gatherRing = i; g.add(ring);
-    }
+    g.userData.chakraAnim = buildChakraOrb(g, new THREE.Vector3(0, 0.02, -0.42), { haloColor: 0x4aa3ff, wisps: 16 });
   } else if (id === RASENSHURIKEN) {
+    // A chakra orb wrapped in the four-bladed wind shuriken — a big buzzsaw blade
+    // spinning about the vertical axis, framed by a glowing wind-rim, gathering and
+    // accelerating with charge.
     box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.14, -0.36);        // hand
-    const P = new THREE.Vector3(0, 0.02, -0.5);
-    const disc = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xbfe9ff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false, fog: false }));
-    disc.position.copy(P); disc.userData.spinRate = 22; disc.userData.chakra = 'swirl'; disc.userData.base = 1; g.add(disc);
-    const core2 = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, fog: false }));
-    core2.position.copy(P); core2.userData.chakra = 'core'; core2.userData.base = 1; g.add(core2);
-    for (let i = 0; i < 2; i++) {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.012, 6, 30), new THREE.MeshBasicMaterial({ color: 0xdff2ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      ring.position.copy(P); ring.rotation.set(i * 0.9, 0.4, 0); ring.userData.gatherRing = i; g.add(ring);
-    }
+    const P = new THREE.Vector3(0, 0.02, -0.52);
+    const orbAnim = buildChakraOrb(g, P, { haloColor: 0xbfe9ff, wisps: 14, saw: 0.66 });
+    const pivot = new THREE.Group(); pivot.position.copy(P); pivot.rotation.x = -Math.PI / 2 + 0.5; g.add(pivot);  // same tilted vertical axle as the saw
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.018, 8, 44),
+      new THREE.MeshBasicMaterial({ color: 0xeaffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    pivot.add(rim);
+    g.userData.chakraAnim = (charge, dt, t) => {
+      orbAnim(charge, dt, t);
+      const c = Math.max(0, Math.min(1, charge));
+      rim.scale.setScalar(0.7 + 0.75 * c); rim.material.opacity = 0.18 + 0.6 * c;
+    };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xd6d6d6, 0, 0, -0.2);
     box(0.06, 0.06, 0.12, 0xff8c2b, 0.05, 0, -0.48);

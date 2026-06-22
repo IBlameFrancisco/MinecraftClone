@@ -286,7 +286,7 @@ function menuCamera(dt) {
   camera.lookAt(cx, ty + 1 + Math.sin(t * 0.07) * 1.5, cz);
 }
 function hideViewModel() {
-  if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); viewModel = null; viewGunId = -1; }
+  if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } else if (o.isSprite && o.material) o.material.dispose(); }); viewModel = null; viewGunId = -1; }
 }
 
 function startWorld() {
@@ -1418,7 +1418,7 @@ function updateViewModel() {
   const gid = gunOf(inventory.selectedId()) ? inventory.selectedId() : -1;
   if (gid === viewGunId) return;
   viewGunId = gid;
-  if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); viewModel = null; }
+  if (viewModel) { camera.remove(viewModel); viewModel.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } else if (o.isSprite && o.material) o.material.dispose(); }); viewModel = null; }
   if (gid !== -1) { viewModel = makeViewModel(gid); camera.add(viewModel); vmEquip = 1; }
 }
 
@@ -1461,27 +1461,10 @@ function animateViewModel(dt) {
   viewModel.position.set(px, py, pz);
   viewModel.rotation.set(rx, ry, rz);
 
-  // Chakra charge-up: gather the orb up while the trigger is held. `vmCharge`
-  // (0→1) drives a brighter, faster-spinning, swelling orb with rings of chakra
-  // visibly converging inward — "channeling your chakra" before the release.
-  const cg = vmCharge;
-  const pulse = 1 + 0.06 * Math.sin(now * 16) * cg;               // subtle high-energy throb
-  viewModel.traverse((o) => {
-    const ud = o.userData;
-    if (ud.spinRate) o.rotation.z += ud.spinRate * (0.55 + 1.7 * cg) * dt;  // spin up while charging
-    if (ud.chakra) {
-      o.scale.setScalar(ud.base * (0.42 + 0.62 * cg) * pulse);    // small/dim at rest → big at full charge
-      if (o.material) o.material.opacity = (ud.chakra === 'glow' ? 0.25 : 0.55) + 0.45 * cg;
-    }
-    if (ud.gatherRing != null && o.material) {
-      // Each ring sweeps from far out (scale 1.4) collapsing into the orb
-      // (scale 0.2), brightening at mid-flight then snuffing as it arrives.
-      const ph = (now * 0.95 + ud.gatherRing * 0.37) % 1;
-      o.scale.setScalar(1.4 - 1.2 * ph);
-      o.material.opacity = cg * Math.sin(ph * Math.PI) * 0.95;
-      o.rotation.z += 3.2 * dt;
-    }
-  });
+  // Chakra charge-up: the Rasengan/Rasenshuriken orb self-animates by vmCharge
+  // (0→1) — chakra streams spiral inward on tilted orbits and the orb grows,
+  // brightens and spins up. "Channelling your chakra" before the release.
+  if (viewModel.userData.chakraAnim) viewModel.userData.chakraAnim(vmCharge, dt, now);
 }
 
 // Sniper scope: narrow the FOV, swap the crosshair for the scope overlay, and
@@ -1686,9 +1669,10 @@ function releaseCharge(gun, cf) {
   if (gun.kind === 'rasengan') fireRasengan(gun, cf);
   else if (gun.kind === 'rasenshuriken') {
     const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
-    const scaled = { ...gun, radius: gun.radius * (0.55 + 0.45 * cf), splash: Math.round(gun.splash * (0.5 + 0.5 * cf)) };
+    // Longer charge → faster throw, a bigger dome and far more splash.
+    const scaled = { ...gun, radius: gun.radius * (0.5 + 0.5 * cf), splash: Math.round(gun.splash * (0.35 + 0.65 * cf)), speed: gun.speed * (0.7 + 0.3 * cf) };
     chakra.throw(muzzle, _dir.clone(), scaled, mp.myId || 'me', rasenshurikenImpact);
-    sfx.rasenshuriken(); addShake(0.06 + 0.16 * cf);
+    sfx.rasenshuriken(); addShake(0.06 + 0.2 * cf);
   }
   vmRecoil = Math.min(1, vmRecoil + 0.6);
 }
@@ -1701,8 +1685,9 @@ function fireRasengan(gun, cf = 1) {
   const blockDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
   const dist = Math.min(blockDist, enemy ? enemy.dist : Infinity, mobHit ? mobHit.dist : Infinity, gun.range);
   const end = _eye.clone().addScaledVector(_dir, dist);
-  const dmg = Math.max(1, Math.round(gun.damage * (0.45 + 0.55 * cf)));
-  const R = 2.2 + 0.6 * cf, KB = (gun.knockback || 14) * (0.4 + 0.6 * cf);
+  // Longer charge → much bigger hit, reach and knockback (a quick tap barely stings).
+  const dmg = Math.max(1, Math.round(gun.damage * (0.25 + 0.75 * cf)));
+  const R = 1.8 + 1.5 * cf, KB = (gun.knockback || 14) * (0.3 + 0.7 * cf);
   let struck = false;
   if (isAuthority()) for (const b of botMgr.bots) {
     if (!b.alive || friendly(b.id)) continue;
@@ -1717,9 +1702,9 @@ function fireRasengan(gun, cf = 1) {
   }
   if (mp.online) for (const { id } of mp.playersNear(end, R)) { if (friendly(id)) continue; mp.sendHit(id, dmg); struck = true; }
   if (struck) hud.hitMarker(false);
-  chakra.burst(end.clone(), 2 + cf, 0x4aa3ff, false);
-  particles.burst(end.x, end.y, end.z, [120, 195, 255], 30 + Math.round(cf * 16));
-  addShake(0.12 + 0.14 * cf); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
+  chakra.burst(end.clone(), 1.6 + 1.8 * cf, 0x4aa3ff, false);
+  particles.burst(end.x, end.y, end.z, [120, 195, 255], 24 + Math.round(cf * 34));
+  addShake(0.1 + 0.2 * cf); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
 }
 function rasenshurikenImpact(pos, gun) {
   particles.burst(pos.x, pos.y, pos.z, [210, 240, 255], 60);
