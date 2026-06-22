@@ -28,8 +28,12 @@ export class HUD {
     this.kcEl = document.createElement('div'); this.kcEl.id = 'killcam';
     this.kcEl.innerHTML = '<div class="kc-bar kc-top"></div><div class="kc-bar kc-bot"></div>'
       + '<div class="kc-label"><div class="kc-tag">★ FINAL KILL</div><div class="kc-line"></div></div>';
+    this.dcEl = document.createElement('div'); this.dcEl.id = 'deathcam';
+    this.dcEl.innerHTML = '<div class="dc-bar dc-top"></div><div class="dc-bar dc-bot"></div>'
+      + '<div class="dc-label"><div class="dc-tag">YOU DIED</div><div class="dc-by"></div></div>'
+      + '<div class="dc-skip">TAP / SPACE to skip · <span class="dc-time"></span></div>';
     ui.appendChild(this.sbEl); ui.appendChild(this.roEl); ui.appendChild(this.radarEl);
-    ui.appendChild(this.announceEl); ui.appendChild(this.dmgDirEl); ui.appendChild(this.kcEl);
+    ui.appendChild(this.announceEl); ui.appendChild(this.dmgDirEl); ui.appendChild(this.kcEl); ui.appendChild(this.dcEl);
   }
 
   // Cinematic final-kill cam overlay: letterbox bars slide in + a "FINAL KILL" tag
@@ -48,6 +52,22 @@ export class HUD {
     }
   }
   hideKillCam() { this.kcEl.classList.remove('show'); this.kcEl.style.display = 'none'; }
+
+  // Your-death cam overlay: "YOU DIED", who got you, and a tap-to-skip countdown.
+  showDeathCam(killer) {
+    const by = this.dcEl.querySelector('.dc-by');
+    by.innerHTML = killer ? `Killed by <b>${escapeHtml(killer)}</b>` : 'You died';
+    if (!this.dcEl.classList.contains('show')) {
+      void this.dcEl.offsetWidth;
+      this.dcEl.style.display = 'block';
+      this.dcEl.classList.add('show');
+    }
+  }
+  setDeathCamTime(sec) {
+    const t = this.dcEl.querySelector('.dc-time');
+    if (t) t.textContent = 'respawn in ' + Math.ceil(sec) + 's';
+  }
+  hideDeathCam() { this.dcEl.classList.remove('show'); this.dcEl.style.display = 'none'; }
 
   // Sharingan Precognition: a red-rimmed bullet-time overlay.
   setPrecog(on) { if (this.precogEl) this.precogEl.classList.toggle('show', !!on); }
@@ -502,6 +522,25 @@ export class HUD {
       #killcam .kc-line b { background:linear-gradient(180deg,#ffe08a,#ff8f3a); -webkit-background-clip:text;
         background-clip:text; -webkit-text-fill-color:transparent; }
       #killcam .kc-arrow { color:#ff6a6a; margin:0 4px; }
+      #deathcam { display:none; position:absolute; inset:0; pointer-events:none; z-index:22; overflow:hidden; }
+      #deathcam .dc-bar { position:absolute; left:0; right:0; height:12vh; background:#000;
+        box-shadow:0 0 50px rgba(0,0,0,0.95); transition:transform 0.4s cubic-bezier(.2,.7,.2,1); }
+      #deathcam .dc-top { top:0; transform:translateY(-100%); }
+      #deathcam .dc-bot { bottom:0; transform:translateY(100%); }
+      #deathcam.show .dc-top, #deathcam.show .dc-bot { transform:translateY(0); }
+      #deathcam .dc-label { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+        text-align:center; opacity:0; transition:opacity 0.5s 0.2s; }
+      #deathcam.show .dc-label { opacity:1; }
+      #deathcam .dc-tag { font-size:46px; font-weight:900; letter-spacing:6px; color:#ff3b3b;
+        text-transform:uppercase; text-shadow:0 0 26px rgba(255,30,30,0.7), 0 3px 6px #000; }
+      #deathcam .dc-by { margin-top:8px; font-size:22px; font-weight:700; color:#e8e8e8;
+        text-shadow:0 2px 8px rgba(0,0,0,0.9); }
+      #deathcam .dc-by b { color:#ffd27a; }
+      #deathcam .dc-skip { position:absolute; left:50%; bottom:13vh; transform:translateX(-50%);
+        opacity:0; transition:opacity 0.5s 0.35s; font-size:13px; font-weight:800; letter-spacing:2px;
+        text-transform:uppercase; color:#cfcfcf; text-shadow:0 2px 6px #000; white-space:nowrap; }
+      #deathcam.show .dc-skip { opacity:0.9; }
+      #deathcam .dc-time { color:#ff8f6a; }
       #precog { display:none; position:absolute; inset:0; pointer-events:none; z-index:18; opacity:0;
         transition:opacity 0.3s; box-shadow:inset 0 0 200px 30px rgba(200,12,28,0.42), inset 0 0 60px rgba(255,40,60,0.3);
         background:radial-gradient(ellipse at 50% 50%, rgba(255,0,20,0) 52%, rgba(150,0,16,0.28) 100%); }
