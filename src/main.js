@@ -186,6 +186,11 @@ let lastHitBy = null, lastHitTime = -100;   // for PvP kill attribution
 let shakeAmt = 0;                  // screen-shake magnitude
 let combo = 0, comboTimer = 0, firstBlood = true;   // announcer multikill tracking
 function addShake(a) { shakeAmt = Math.min(0.6, shakeAmt + a); }
+// Screen shake from an explosion at a world point, falling off to 0 by `dist` metres.
+function shockShake(pos, intensity, dist) {
+  const d = Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z);
+  addShake(Math.max(0, intensity * (1 - d / dist)));
+}
 function announceKill(head) {
   comboTimer = 3.2; combo++; streak++;
   let txt = null, snd = 'first';
@@ -236,6 +241,7 @@ scene.add(crackMesh);
 let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
 let triggerConsumed = false;   // for semi-auto guns: one shot per click
+let chargeT = 0, chargeGunId = -1, vmCharge = 0;   // chakra jutsu charge-up (hold to gather)
 let grenadeCount = 0, grenadeCD = 0, streak = 0;   // grenades + killstreaks
 const ammo = {};
 let reloadingGun = -1, reloadTimer = 0, reloadDur = 1, recoilPitch = 0, recoilYaw = 0, vmRecoil = 0;
@@ -352,7 +358,10 @@ refreshOverlays();
 
 // Resume from the pause menu; Main Menu drops back to the home/start screen.
 function resumeGame() { if (loaded && !dead) renderer.domElement.requestPointerLock(); }
-function quitToMenu() { atMenu = true; leaveBattleCleanup(); document.exitPointerLock(); refreshOverlays(); }
+// Returning to the home menu means leaving the match — invalidate the live
+// signature so the next Play re-applies the selected mode (rebuilding its HUD)
+// rather than silently resuming a torn-down battle.
+function quitToMenu() { atMenu = true; leaveBattleCleanup(); liveSig = ''; document.exitPointerLock(); refreshOverlays(); }
 pauseEl.addEventListener('click', (e) => { if (e.target === pauseEl) resumeGame(); });
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('pauseMenuBtn').addEventListener('click', quitToMenu);
@@ -375,11 +384,25 @@ function startSelectedMode(seedStr, forceNew) {
     setDifficultyDirect(menuDiff);
     if (forceNew || arena) loadWorld(seedStr, false);
   }
+  liveSig = menuSig();
 }
+
+// Signature of the live game vs. the current menu selection, so the Play button
+// can tell "resume what's loaded" from "the user changed mode/options, start that".
+function menuSig() {
+  const b = battleCfg;
+  return menuMode === BATTLE
+    ? `B:${b.mode}:${b.team}:${b.side}:${b.size}:${b.botDiff}:${b.scoreLimit}`
+    : `${menuMode}:${menuDiff}`;
+}
+let liveSig = '';
 
 document.getElementById('playBtn').addEventListener('click', () => {
   if (dead) return;
-  if (!everPlayed) startSelectedMode(currentSeedStr, false);
+  // Honour a changed mode/options/seed on the home menu instead of silently
+  // resuming the old world; otherwise just lock back in and resume.
+  const seedChanged = !!seedInput.value.trim() && seedInput.value.trim() !== currentSeedStr;
+  if (!everPlayed || menuSig() !== liveSig || seedChanged) startSelectedMode(seedInput.value, seedChanged);
   renderer.domElement.requestPointerLock(); sfx.ensure();
 });
 document.getElementById('diceBtn').addEventListener('click', () => { seedInput.value = randomSeedStr(); });
@@ -579,7 +602,7 @@ const mpHandlers = {
     hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo()); mp.recolorBots(colorForBot);
   },
   onRoundOver: (winner) => { hud.showRoundOver(winner); hud.showScoreboard(); },
-  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
+  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
   botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
@@ -629,6 +652,7 @@ function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0;
   matchWinner = null; matchOverTimer = 0;
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
+  hud.setBattle(false); hud.showRadar(false); hud.setGrenades(0);   // battle chrome must not linger on the menu
 }
 function toggleMode() {
   if (mode === BATTLE) return;                      // locked while in the arena
@@ -1430,13 +1454,34 @@ function animateViewModel(dt) {
 
   px += vmSwayX * hip; ry += vmSwayX * 0.7; py += vmSwayY * hip; rx -= vmSwayY * 0.7;
   pz += vmRecoil * 0.14; rx -= vmRecoil * 0.42; py += vmRecoil * 0.03;
-  const rl = reloadingGun >= 0 ? Math.sin(Math.min(1, 1 - reloadTimer / reloadDur) * Math.PI) : 0;
+  const rl = (reloadingGun >= 0 && reloadingGun === inventory.selectedId()) ? Math.sin(Math.min(1, 1 - reloadTimer / reloadDur) * Math.PI) : 0;
   py -= rl * 0.28; rx += rl * 0.95; rz += rl * 0.6; px += rl * 0.06;
   py -= vmEquip * 0.45; rx += vmEquip * 0.7;
 
   viewModel.position.set(px, py, pz);
   viewModel.rotation.set(rx, ry, rz);
-  viewModel.traverse((o) => { if (o.userData.spinRate) o.rotation.z += o.userData.spinRate * dt; });  // spin chakra orbs/discs
+
+  // Chakra charge-up: gather the orb up while the trigger is held. `vmCharge`
+  // (0→1) drives a brighter, faster-spinning, swelling orb with rings of chakra
+  // visibly converging inward — "channeling your chakra" before the release.
+  const cg = vmCharge;
+  const pulse = 1 + 0.06 * Math.sin(now * 16) * cg;               // subtle high-energy throb
+  viewModel.traverse((o) => {
+    const ud = o.userData;
+    if (ud.spinRate) o.rotation.z += ud.spinRate * (0.55 + 1.7 * cg) * dt;  // spin up while charging
+    if (ud.chakra) {
+      o.scale.setScalar(ud.base * (0.42 + 0.62 * cg) * pulse);    // small/dim at rest → big at full charge
+      if (o.material) o.material.opacity = (ud.chakra === 'glow' ? 0.25 : 0.55) + 0.45 * cg;
+    }
+    if (ud.gatherRing != null && o.material) {
+      // Each ring sweeps from far out (scale 1.4) collapsing into the orb
+      // (scale 0.2), brightening at mid-flight then snuffing as it arrives.
+      const ph = (now * 0.95 + ud.gatherRing * 0.37) % 1;
+      o.scale.setScalar(1.4 - 1.2 * ph);
+      o.material.opacity = cg * Math.sin(ph * Math.PI) * 0.95;
+      o.rotation.z += 3.2 * dt;
+    }
+  });
 }
 
 // Sniper scope: narrow the FOV, swap the crosshair for the scope overlay, and
@@ -1630,43 +1675,57 @@ function rocketImpact(pos, gun) {
   particles.burst(pos.x, pos.y, pos.z, [255, 150, 60], 44);
   particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 22);
   sfx.explosionAt(pos.x, pos.y, pos.z);
-  addShake(Math.max(0, 0.5 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 24)));
+  shockShake(pos, 0.5, 24);
   explodeDamage(pos, gun.radius, gun.splash, 0.45);
   blastCover(pos, 2);
 }
 
+// Unleash a charged jutsu (cf = 0..1 charge fraction).
+function releaseCharge(gun, cf) {
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  if (gun.kind === 'rasengan') fireRasengan(gun, cf);
+  else if (gun.kind === 'rasenshuriken') {
+    const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
+    const scaled = { ...gun, radius: gun.radius * (0.55 + 0.45 * cf), splash: Math.round(gun.splash * (0.5 + 0.5 * cf)) };
+    chakra.throw(muzzle, _dir.clone(), scaled, mp.myId || 'me', rasenshurikenImpact);
+    sfx.rasenshuriken(); addShake(0.06 + 0.16 * cf);
+  }
+  vmRecoil = Math.min(1, vmRecoil + 0.6);
+}
+
 // ---- Rasengan: a point-blank chakra grind — heavy single burst + hard knockback. ----
-function fireRasengan(gun) {
+function fireRasengan(gun, cf = 1) {
   const block = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
   const enemy = raycastEnemies(_eye, _dir, gun.range);
   const mobHit = mobs.raycast(_eye, _dir, gun.range);
   const blockDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
   const dist = Math.min(blockDist, enemy ? enemy.dist : Infinity, mobHit ? mobHit.dist : Infinity, gun.range);
   const end = _eye.clone().addScaledVector(_dir, dist);
-  const R = 2.6, KB = gun.knockback || 14;
+  const dmg = Math.max(1, Math.round(gun.damage * (0.45 + 0.55 * cf)));
+  const R = 2.2 + 0.6 * cf, KB = (gun.knockback || 14) * (0.4 + 0.6 * cf);
   let struck = false;
   if (isAuthority()) for (const b of botMgr.bots) {
     if (!b.alive || friendly(b.id)) continue;
     if (Math.hypot(b.pos.x - end.x, b.pos.y + 1 - end.y, b.pos.z - end.z) > R) continue;
-    botHurt(b.id, gun.damage, myName(), false);
+    botHurt(b.id, dmg, myName(), false);
     const dx = b.pos.x - player.pos.x, dz = b.pos.z - player.pos.z, dl = Math.hypot(dx, dz) || 1;
     b.vel.x += (dx / dl) * KB; b.vel.z += (dz / dl) * KB; b.vel.y += KB * 0.45; struck = true;
   }
   for (const m of mobs.list) {
     if (Math.hypot(m.pos.x - end.x, m.pos.y + m.height * 0.5 - end.y, m.pos.z - end.z) > R) continue;
-    m.hurt(gun.damage, player.pos.x, player.pos.z); struck = true;
+    m.hurt(dmg, player.pos.x, player.pos.z); struck = true;
   }
-  if (mp.online) for (const { id } of mp.playersNear(end, R)) { if (friendly(id)) continue; mp.sendHit(id, gun.damage); struck = true; }
+  if (mp.online) for (const { id } of mp.playersNear(end, R)) { if (friendly(id)) continue; mp.sendHit(id, dmg); struck = true; }
   if (struck) hud.hitMarker(false);
-  chakra.burst(end.clone(), 2.5, 0x4aa3ff, false);
-  particles.burst(end.x, end.y, end.z, [120, 195, 255], 38);
-  addShake(0.22); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
+  chakra.burst(end.clone(), 2 + cf, 0x4aa3ff, false);
+  particles.burst(end.x, end.y, end.z, [120, 195, 255], 30 + Math.round(cf * 16));
+  addShake(0.12 + 0.14 * cf); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
 }
 function rasenshurikenImpact(pos, gun) {
   particles.burst(pos.x, pos.y, pos.z, [210, 240, 255], 60);
   particles.burst(pos.x, pos.y, pos.z, [150, 210, 255], 30);
   sfx.explosionAt(pos.x, pos.y, pos.z);
-  addShake(Math.max(0, 0.8 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 28)));
+  shockShake(pos, 0.8, 28);
   explodeDamage(pos, gun.radius, gun.splash, 0.35);
   blastCover(pos, 3);
 }
@@ -1732,13 +1791,13 @@ const blackHoleHooks = {
     if (isAuthority()) for (const b of botMgr.bots) if (b.alive && Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z) < 1.5) return true;
     return false;
   },
-  onAnchor: (pos) => { sfx.blackhole(); addShake(Math.max(0, 0.45 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 30))); },
+  onAnchor: (pos) => { sfx.blackhole(); shockShake(pos, 0.45, 30); },
   onField: (pos, dt, gun) => blackHoleField(pos, dt, gun),
   onCollapse: (pos, gun) => {
     particles.burst(pos.x, pos.y, pos.z, [180, 120, 255], 64);
     particles.burst(pos.x, pos.y, pos.z, [255, 230, 200], 32);
     sfx.explosionAt(pos.x, pos.y, pos.z);
-    addShake(Math.max(0, 0.75 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 26)));
+    shockShake(pos, 0.75, 26);
     explodeDamage(pos, gun.radius * 0.5, gun.splash, 0.4);
     blastCover(pos, 3);
   },
@@ -1749,7 +1808,7 @@ function grenadeExplode(pos) {
   particles.burst(pos.x, pos.y, pos.z, [255, 170, 70], 40);
   particles.burst(pos.x, pos.y, pos.z, [120, 120, 120], 18);
   sfx.explosionAt(pos.x, pos.y, pos.z);
-  addShake(Math.max(0, 0.45 * (1 - Math.hypot(player.pos.x - pos.x, player.pos.y - pos.y, player.pos.z - pos.z) / 20)));
+  shockShake(pos, 0.45, 20);
   explodeDamage(pos, 4.5, 46, 0.5);
   blastCover(pos, 2);
 }
@@ -1942,11 +2001,25 @@ function frame() {
   // Interaction
   invuln -= dt; breakCD -= dt; placeCD -= dt; attackCD -= dt; fireCD -= dt; fire2CD -= dt;
   const gun = gunOf(inventory.selectedId());
+  // Chakra jutsu: hold to gather chakra (charge), release to unleash. Cancel the charge
+  // whenever we're not actively holding a charge weapon.
+  if (!(active && gun && gun.charge)) { chargeT = 0; vmCharge = 0; }
   if (active && gun) {
     resetBreak();
     const id = inventory.selectedId();
+    if (gun.charge) {
+      if (chargeGunId !== id) { chargeT = 0; chargeGunId = id; }   // switched weapon mid-charge
+      if (mouseLeft) {
+        const was = chargeT;
+        chargeT = Math.min(gun.charge, chargeT + dt);
+        if (was === 0 && chargeT > 0) sfx.chakraCharge();           // rising hum on gather start
+        if (was < gun.charge && chargeT >= gun.charge) sfx.chakraReady();  // ping at full charge
+      } else if (chargeT > 0.06) { releaseCharge(gun, Math.min(1, chargeT / gun.charge)); chargeT = 0; }
+      else chargeT = 0;
+      vmCharge = chargeT / gun.charge;
+    }
     // Auto guns fire while held; the rest fire once per click.
-    if (mouseLeft && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
+    else if (mouseLeft && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
       if (gun.mag && reloadingGun === id) { /* busy reloading */ }
       else if (gun.mag && ammoFor(gun, id) <= 0) { startReload(gun, id); fireCD = 0.25; triggerConsumed = true; }
       else {
@@ -2042,4 +2115,7 @@ window.__game = {
   get battleState() { return { gameMode, matchWinner, myTeam, warSide, warTickets, warTimer, warCapture, matchOverTimer, eliminated, invuln, flying: player.flying, mode }; },
   __testFire: (id) => fireGun(gunOf(id)),
   __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
+  __trigger: (down) => { mouseLeft = !!down; triggerConsumed = false; },   // drive the charge-up loop in tests
+  get vmCharge() { return vmCharge; },
+  get viewModel() { return viewModel; },
 };

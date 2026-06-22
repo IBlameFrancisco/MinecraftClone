@@ -133,7 +133,6 @@ export class BotManager {
   }
 
   get(id) { return this.bots.find((b) => b.id === id); }
-  recolor(colorFor) { for (const b of this.bots) tintAvatar(b.mesh, colorFor(b.team)); }
 
   // Ray vs all bot avatars → nearest { id, dist, head, bot:true }, excluding `exclude`.
   raycast(origin, dir, maxDist, exclude) {
@@ -215,7 +214,9 @@ export class BotManager {
         const ax = b.anchor.x - b.pos.x, az = b.anchor.z - b.pos.z, ad = Math.hypot(ax, az);
         if (ad > 4.5) { desiredX = ax; desiredZ = az; }
         else { if (b.strafeTimer <= 0) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeTimer = 1.2 + Math.random(); }
-          desiredX = -toZ * b.strafe * 0.35; desiredZ = toX * b.strafe * 0.35; }
+          // Gentle nest shuffle — apply as a slower speed, not a smaller vector (which the
+          // unit-normalisation below would cancel out, making defenders strafe at full tilt).
+          desiredX = -toZ * b.strafe; desiredZ = toX * b.strafe; speed = b.D.speed * 0.35; }
       } else if (b.advance && b.advanceGoal && Math.hypot(b.advanceGoal.x - b.pos.x, b.advanceGoal.z - b.pos.z) > 7) {
         // Attacker: charge the objective, weaving a little, firing on the move.
         if (b.strafeTimer <= 0) { b.strafe = Math.random() < 0.5 ? 1 : -1; b.strafeTimer = 0.6 + Math.random() * 0.6; }
@@ -298,17 +299,6 @@ export class BotManager {
   }
 }
 
-// Apply a flat tint to an avatar's body/limb meshes (keep the head skin tone).
-function tintAvatar(group, color) {
-  let i = 0;
-  group.traverse((o) => {
-    if (o.isMesh && o.material && o.material.color) {
-      i++;
-      if (i !== 2) o.material.color.setHex(color);   // 2nd mesh is the head
-    }
-  });
-}
-
 function nearestCover(points, pos) {
   let best = points[0], bd = Infinity;
   for (const p of points) { const d = (p.x - pos.x) ** 2 + (p.z - pos.z) ** 2; if (d < bd) { bd = d; best = p; } }
@@ -328,5 +318,3 @@ function rayBox(o, d, minX, minY, minZ, maxX, maxY, maxZ) {
   }
   return tmin >= 0 ? tmin : (tmax >= 0 ? 0 : Infinity);
 }
-
-export { tintAvatar };

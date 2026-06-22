@@ -77,10 +77,12 @@ export const ITEMS = {
   [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 8, range: 70, speed: 24, radius: 12, pull: 26, duration: 3.6, splash: 70, mag: 2, reload: 3.0, recoil: 0.05, color: 0x7b3ff2 } },
   // Belt-fed LMG (MG42): a brutal sustained-fire weapon — the bunker nest gun.
   [HEAVY_MG]: { name: 'MG42', gun: { kind: 'hitscan', rate: 0.055, damage: 5, range: 82, auto: true, spread: 0.05, mag: 75, reload: 3.2, recoil: 0.022, color: 0x2b2b2f } },
-  // Ninjutsu: a spinning chakra sphere ground into a foe at point-blank — huge hit + knockback.
-  [RASENGAN]: { name: 'Rasengan', gun: { kind: 'rasengan', rate: 0.55, damage: 30, range: 4.6, recoil: 0.04, knockback: 17, color: 0x4aa3ff } },
-  // A thrown chakra shuriken that detonates into a vast dome of microscopic wind blades (AoE).
-  [RASENSHURIKEN]: { name: 'Rasenshuriken', gun: { kind: 'rasenshuriken', rate: 1.5, damage: 0, splash: 85, radius: 9, speed: 34, range: 90, mag: 1, reload: 2.3, recoil: 0.05, color: 0xbfe9ff } },
+  // Ninjutsu: charge the chakra (hold), then grind the spinning sphere into a foe at
+  // point-blank — a charged release does a huge hit + hard knockback.
+  [RASENGAN]: { name: 'Rasengan', gun: { kind: 'rasengan', charge: 0.65, rate: 0.3, damage: 30, range: 4.6, recoil: 0.04, knockback: 17, color: 0x4aa3ff } },
+  // Charge the wind nature, then hurl a chakra shuriken that detonates into a vast dome
+  // of microscopic wind blades (AoE). A fuller charge throws a bigger, deadlier dome.
+  [RASENSHURIKEN]: { name: 'Rasenshuriken', gun: { kind: 'rasenshuriken', charge: 0.9, rate: 0.3, damage: 0, splash: 85, radius: 9, speed: 34, range: 90, mag: 1, reload: 2.3, recoil: 0.05, color: 0xbfe9ff } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 

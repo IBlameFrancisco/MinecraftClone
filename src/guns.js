@@ -217,7 +217,7 @@ export class Grenades {
         } else g.pos[axis] = test[axis];
       }
       g.m.position.copy(g.pos);
-      g.m.rotation.x += g.spin.x * dt; g.m.rotation.y += g.spin.y * dt;
+      g.m.rotation.x += g.spin.x * dt; g.m.rotation.y += g.spin.y * dt; g.m.rotation.z += g.spin.z * dt;  // tumble on all axes
       if (g.fuse <= 0) {
         g.onExplode(g.pos.clone());
         this.group.remove(g.m); g.m.geometry.dispose(); g.m.material.dispose(); this.list.splice(i, 1);
@@ -641,20 +641,31 @@ export function makeViewModel(id) {
     const e2 = box(0.04, 0.04, 0.5, 0x9b6bff, -0.12, 0.07, -0.26); e2.material = new THREE.MeshBasicMaterial({ color: 0xb98bff, fog: false });
     box(0.1, 0.2, 0.14, 0x1c1430, 0, -0.16, 0.04);         // grip
   } else if (id === RASENGAN) {
-    // A spinning chakra orb cupped in the hand (no gun body).
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 16), new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.95, fog: false }));
-    core.position.set(0, 0.02, -0.42); g.add(core);
-    const swirl = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0x6fc8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
-    swirl.position.copy(core.position); swirl.userData.spinRate = 16; g.add(swirl);
+    // A chakra orb cupped in the hand; grows + brightens + spins up while charging,
+    // with rings of chakra gathering inward (animated in animateViewModel by vmCharge).
+    box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.12, -0.34);        // cupped hand
+    const P = new THREE.Vector3(0, 0.02, -0.42);
+    const tag = (m, base, kind) => { m.position.copy(P); m.userData.chakra = kind; m.userData.base = base; g.add(m); };
+    tag(new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 16), new THREE.MeshBasicMaterial({ color: 0xcdecff, transparent: true, opacity: 0.95, fog: false })), 1, 'core');
+    const swirl = new THREE.Mesh(new THREE.SphereGeometry(0.19, 16, 16), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0x6fc8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    swirl.userData.spinRate = 16; tag(swirl, 1, 'swirl');
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x4aa3ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    glow.scale.setScalar(0.7); glow.position.copy(core.position); g.add(glow);
-    box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.12, -0.34);        // a cupped hand below it
+    glow.scale.setScalar(0.8); tag(glow, 0.8, 'glow');
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.012, 6, 30), new THREE.MeshBasicMaterial({ color: 0xbfe9ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      ring.position.copy(P); ring.rotation.set(i * 0.7, i * 1.1, 0); ring.userData.gatherRing = i; g.add(ring);
+    }
   } else if (id === RASENSHURIKEN) {
-    const disc = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xbfe9ff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false, fog: false }));
-    disc.position.set(0, 0.02, -0.5); disc.userData.spinRate = 22; g.add(disc);
-    const core2 = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, fog: false }));
-    core2.position.copy(disc.position); g.add(core2);
     box(0.16, 0.14, 0.18, 0xe8b89a, 0, -0.14, -0.36);        // hand
+    const P = new THREE.Vector3(0, 0.02, -0.5);
+    const disc = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xbfe9ff, transparent: true, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false, fog: false }));
+    disc.position.copy(P); disc.userData.spinRate = 22; disc.userData.chakra = 'swirl'; disc.userData.base = 1; g.add(disc);
+    const core2 = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, fog: false }));
+    core2.position.copy(P); core2.userData.chakra = 'core'; core2.userData.base = 1; g.add(core2);
+    for (let i = 0; i < 2; i++) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.012, 6, 30), new THREE.MeshBasicMaterial({ color: 0xdff2ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      ring.position.copy(P); ring.rotation.set(i * 0.9, 0.4, 0); ring.userData.gatherRing = i; g.add(ring);
+    }
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xd6d6d6, 0, 0, -0.2);
     box(0.06, 0.06, 0.12, 0xff8c2b, 0.05, 0, -0.48);

@@ -46,8 +46,9 @@ const ARENA_STRUCT = [
 // breach a seawall, and assault a fortified bluff of bunkers, MG nests and a
 // trench (low -Z) to capture the command bunker. Axis defend from the line.
 export const BEACH = { FLOOR: 50, HALF: 38, WALL_H: 9, OBJ_X: 0, OBJ_Z: -20, OBJ_R: 6 };
-// Spawn pools [x, z]: Allied wade in at the surf; Axis hold the bunker line.
-export const BEACH_SPAWN_ALLIED = [[-24, 26], [-16, 27], [-8, 26], [0, 27], [8, 26], [16, 27], [24, 26], [0, 24]];
+// Spawn pools [x, z]: Allied wade in at the surf's edge (z≈24, sand at/above the
+// waterline so the camera never starts submerged); Axis hold the bunker line.
+export const BEACH_SPAWN_ALLIED = [[-24, 24], [-16, 25], [-8, 24], [0, 25], [8, 24], [16, 25], [24, 24], [0, 23]];
 export const BEACH_SPAWN_AXIS = [[-26, 2], [-13, 1], [0, -4], [13, 1], [26, 2], [-20, -5], [20, -5], [0, 2]];
 // Defender hold points: MG nests on the bluff front + the bunkers behind.
 export const BEACH_NESTS = [[-26, 4], [-13, 4], [0, 4], [13, 4], [26, 4], [-20, -4], [0, -4], [20, -4]];
