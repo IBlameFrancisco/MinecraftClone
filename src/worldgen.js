@@ -491,15 +491,23 @@ export class WorldGen {
     }
 
     // ---- Seawall: a substantial concrete wall (3 high) with frequent wide breaches
-    // (6-wide gap every 12) so the assault can pour through onto the bluff. ----
-    if (wz === 6 && (((wx % 12) + 12) % 12) >= 6) { set(F + 1, COBBLE); set(F + 2, COBBLE); set(F + 3, GRAVEL); }
+    // (6-wide gap every 12) so the assault can pour through onto the bluff. A low
+    // firing embrasure is notched in front of every MG nest, otherwise the wall
+    // masks the whole defensive line and the guns can't see the beach to fire. ----
+    if (wz === 6 && (((wx % 12) + 12) % 12) >= 6) {
+      if (BEACH_NESTS.some(([nx]) => Math.abs(wx - nx) <= 1)) set(F + 1, COBBLE);   // embrasure: low lip only — clear field of fire
+      else { set(F + 1, COBBLE); set(F + 2, COBBLE); set(F + 3, GRAVEL); }
+    }
 
-    // ---- MG nests on the shelf: sandbag horseshoe facing the beach, gun behind. ----
+    // ---- MG nests on the shelf: a 1-high sandbag lip + gun across the FRONT (z=5,
+    // toward the beach) with the gunner's slot (z=4) kept clear behind it, so the
+    // defender can actually stand on the nest and fire over the lip. The old layout
+    // put solid blocks where the defender needed to stand, shoving them off the line. ----
     for (const [nx] of BEACH_NESTS) {
-      if (Math.abs(wx - nx) <= 2 && (wz === 4 || wz === 5)) {
-        if (wz === 5 || Math.abs(wx - nx) === 2) set(F + 2, GRAVEL);
-      }
-      if (wx === nx && wz === 4) { set(F + 2, COBBLE); set(F + 3, COAL_ORE); }
+      const dxn = Math.abs(wx - nx);
+      if (dxn <= 2 && wz === 5) set(F + 2, GRAVEL);      // front sandbag lip (toward the beach)
+      if (dxn === 2 && wz === 4) set(F + 2, GRAVEL);     // side sandbags
+      if (wx === nx && wz === 5) set(F + 2, COAL_ORE);   // the MG on the lip — same height, never masks the gunner
     }
 
     // ---- Bunkers on the bluff: taller hollow cobble shells with a beach-facing slit. ----
@@ -518,9 +526,9 @@ export class WorldGen {
       if (wx === cx && wz === -4) { set(F + 3, IRON_ORE); set(F + 4, COAL_ORE); set(F + 5, GLOWSTONE); }
     }
 
-    // ---- Trench tying the line together: 1 deep, sandbag lip toward the beach. ----
+    // ---- Trench tying the line together: 1 deep. (No raised lip — it sat at eye
+    // height and masked the whole second line's field of fire onto the beach.) ----
     if (wz >= -1 && wz <= 1 && Math.abs(wx) <= 40) set(F + 2, AIR);
-    if (wz === 2 && Math.abs(wx) <= 40 && (wx & 1) === 0) set(F + 3, GRAVEL);
 
     this.beachObjective(chunk, lx, lz, wx, wz);
   }

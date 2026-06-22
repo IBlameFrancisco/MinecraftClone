@@ -2958,6 +2958,32 @@ window.__game = {
   __spawnBlackHole: () => { player.eyePosition(_eye); _dir.set(0.15, -0.12, -1).normalize(); const gun = gunOf(BLACK_HOLE_BOMB); blackholes.spawn(_eye.clone(), _dir.clone(), gun, mp.myId || 'me'); return { radius: gun.radius, duration: gun.duration, pull: gun.pull, damage: gun.damage, splash: gun.splash }; },
   __flashStep: (code) => { const before = player.pos.clone(); flashStep(code || 'KeyW'); return { moved: +player.pos.distanceTo(before).toFixed(2), charges: flashCharges, afterImages: afterImages.length }; },
   get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
+  __warDebug: () => {
+    const targets = buildTargets(); const out = [];
+    for (const b of botMgr.bots) {
+      if (b.team !== WAR_AXIS) continue;
+      b.eye(_botEye);
+      let nearest = Infinity, nT = null, anyLoS = false;
+      for (const t of targets) {
+        if (!t.alive || t.id === b.id || t.team === b.team) continue;
+        const d = Math.hypot(t.pos.x - b.pos.x, t.pos.z - b.pos.z);
+        if (losClear(_botEye.x, _botEye.y, _botEye.z, t.pos.x, t.pos.y + 1.62, t.pos.z)) anyLoS = true;
+        if (d < nearest) { nearest = d; nT = t; }
+      }
+      let block = null, tpos = null;
+      if (nT) {
+        tpos = [+nT.pos.x.toFixed(1), +nT.pos.y.toFixed(1), +nT.pos.z.toFixed(1)];
+        const tx = nT.pos.x, ty = nT.pos.y + 1.62, tz = nT.pos.z;
+        const dx = tx - _botEye.x, dy = ty - _botEye.y, dz = tz - _botEye.z, len = Math.hypot(dx, dy, dz);
+        const hit = voxelRaycast(_los.set(_botEye.x, _botEye.y, _botEye.z), _losDir.set(dx / len, dy / len, dz / len), len - 0.6, (x, y, z) => world.getBlock(x, y, z));
+        if (hit.hit) block = [hit.x, hit.y, hit.z];
+      }
+      out.push({ pos: [+b.pos.x.toFixed(1), +b.pos.y.toFixed(1), +b.pos.z.toFixed(1)], eye: +_botEye.y.toFixed(1),
+        anchor: b.anchor ? [+b.anchor.x.toFixed(1), +b.anchor.z.toFixed(1)] : null, ammo: b.ammo, alive: b.alive,
+        nearestDist: +nearest.toFixed(1), nearestPos: tpos, blockedAt: block, anyLoS });
+    }
+    return out;
+  },
   __killSelf: (killer) => { lastHitBy = killer || 'Tester'; lastHitTime = performance.now() / 1000; battleDeath(); },
   __skipDeathCam: () => skipDeathCam(),
   get sharingan() { return { precogT: +precogT.toFixed(2), precogCD: +precogCD.toFixed(2), burns: amaBurn.size, gazeHold: +gazeHold.toFixed(2), gazeId: gazeTargetId, fx: sharinganFx.group.visible }; },
