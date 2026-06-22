@@ -40,8 +40,8 @@ bundle in `dist/`.
 | Sprint               | `Shift` (hold) or double-tap `W`   |
 | Sneak                | `Ctrl`                             |
 | Fly (creative)       | double-tap `Space`                 |
-| Break / attack       | Left click (hold to repeat)        |
-| Place / eat / use    | Right click                        |
+| Break / attack       | Left click (hold to repeat) or `Q` |
+| Place / eat / use    | Right click or `F`                 |
 | Inventory + crafting | `E`                                |
 | Creative ↔ Survival  | `G`                                |
 | Difficulty cycle     | `B`                                |
