@@ -127,10 +127,14 @@ function sizePost() {
 }
 sizePost();
 
-// Lights — used only by mob (Lambert) materials; chunks bake their own lighting.
-const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+// Lights — used only by mob/avatar (Lambert) materials; chunks bake their own lighting.
+// A hemisphere fill (sky tint above, dark ground below) gives blocky mobs even,
+// natural shading instead of a flat ambient.
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x2a2a30, 0.5);
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-scene.add(ambient, sun);
+scene.add(ambient, hemi, sun);
+const _lightDir = new THREE.Vector3();
 
 // ---------- Seeds ----------
 function hashSeed(s) {
@@ -2007,13 +2011,18 @@ function frame() {
   hud.setClock(sky.clockString());
   waterTime.value += sdt;
 
-  // Drive mob lighting from the sun.
-  sun.position.copy(sky.sunDir).multiplyScalar(100);
-  sun.color.copy(sky.dirColor); sun.intensity = sky.dirIntensity;
-  ambient.color.copy(sky.dirColor); ambient.intensity = sky.ambIntensity;
+  // Drive mob lighting from the sky. Keep the key light above the horizon so mobs
+  // are never lit from below (which looked wrong at night), with a brightness floor.
+  _lightDir.copy(sky.sunDir);
+  if (_lightDir.y < 0.35) { _lightDir.y = 0.35; _lightDir.normalize(); }
+  sun.position.copy(_lightDir).multiplyScalar(100);
+  sun.color.copy(sky.dirColor); sun.intensity = Math.max(0.35, sky.dirIntensity);
+  ambient.color.copy(sky.dirColor); ambient.intensity = Math.max(0.25, sky.ambIntensity * 0.6);
+  hemi.color.copy(sky.uniforms.topColor.value); hemi.intensity = Math.max(0.4, sky.ambIntensity + 0.15);
 
   mobs.update(loaded && !dead && mode !== BATTLE && !frozen ? dt : 0, player, sky.isNight, {
     damagePlayer, onKill, explode, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
+    fire: (x, y, z) => { particles.burst(x, y, z, [255, 150, 40], 2); if (Math.random() < 0.5) particles.burst(x, y, z, [90, 90, 90], 1); },
   });
 
   // Bots + match flow: the authority simulates; guests render via broadcasts.
