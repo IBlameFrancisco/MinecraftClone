@@ -88,8 +88,9 @@ export class Inventory {
   // Next slot to scroll to in direction `dir` (±1). With a fixed battle loadout,
   // skip empty slots so the wheel never lands you on "nothing".
   _scrollTarget(dir) {
-    if (!this.fixedLoadout) return (this.selected + dir + 9) % 9;
-    for (let k = 1; k <= 9; k++) { const i = (this.selected + dir * k + 90) % 9; if (this.hotbar[i]) return i; }
+    const N = this.slotCount || 9;
+    if (!this.fixedLoadout) return (this.selected + dir + N) % N;
+    for (let k = 1; k <= N; k++) { const i = (this.selected + dir * k + N * 10) % N; if (this.hotbar[i]) return i; }
     return this.selected;
   }
 
@@ -103,28 +104,31 @@ export class Inventory {
   setMode(creative) {
     this.creative = creative;
     this.fixedLoadout = false;       // sandbox: free hotbar (empty slots are selectable)
+    if (this.slotCount !== 9) this._buildHotbar(9);   // back to the standard 9-slot bar
     this.renderHotbar();
     if (this.open) this.renderScreen();
-    this.select(this.selected);
+    this.select(Math.min(this.selected, 8));
   }
 
   // Replace the (creative-set) hotbar with a fixed loadout — used for Battle mode.
   setLoadout(ids) {
     this.cHotbar = ids.map((id) => ({ id, count: 1 }));
     this.fixedLoadout = true;
+    if (ids.length !== this.slotCount) this._buildHotbar(ids.length);   // grow/shrink the bar to the loadout
     this.renderHotbar();
     if (this.open) this.renderScreen();
     this.select(0);
   }
 
   // ---------- hotbar DOM ----------
-  _buildHotbar() {
+  _buildHotbar(n = 9) {
+    this.slotCount = n;
     this.hotbarEl = document.getElementById('hotbar');
     this.hotbarEl.innerHTML = '';
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < n; i++) {
       const slot = document.createElement('div');
       slot.className = 'slot';
-      slot.innerHTML = `<span class="num">${i + 1}</span><span class="cnt"></span>`;
+      slot.innerHTML = `<span class="num">${(i + 1) % 10}</span><span class="cnt"></span>`;   // 10th slot shows 0
       this.hotbarEl.appendChild(slot);
     }
     this.renderHotbar();
@@ -358,7 +362,7 @@ export class Inventory {
     window.addEventListener('keydown', (e) => {
       const a = document.activeElement;
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
-      if (e.code.startsWith('Digit')) { const n = parseInt(e.code.slice(5), 10) - 1; if (n >= 0 && n < 9 && !(this.fixedLoadout && !this.hotbar[n])) this.select(n); }
+      if (e.code.startsWith('Digit')) { const d = parseInt(e.code.slice(5), 10); const n = d === 0 ? 9 : d - 1; if (n >= 0 && n < (this.slotCount || 9) && !(this.fixedLoadout && !this.hotbar[n])) this.select(n); }
     });
     window.addEventListener('wheel', (e) => {
       if (this.open) return;

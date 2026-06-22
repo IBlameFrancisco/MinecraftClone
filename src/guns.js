@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows.
@@ -633,6 +633,52 @@ export class HollowPurple {
   _dispose(g) { this.group.remove(g); g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
 }
 
+// ---------------- Sharingan (gaze) ----------------
+// A red tomoe ring + commas, drawn on transparent for the genjutsu/gaze marker.
+function tomoeRingTexture() {
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'); g.translate(S / 2, S / 2);
+  g.strokeStyle = 'rgba(235,22,34,0.95)'; g.lineWidth = 7; g.beginPath(); g.arc(0, 0, S * 0.36, 0, Math.PI * 2); g.stroke();
+  for (let i = 0; i < 3; i++) {
+    g.rotate(Math.PI * 2 / 3);
+    g.fillStyle = 'rgba(28,4,8,0.96)'; g.beginPath(); g.arc(0, -S * 0.36, S * 0.075, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = 'rgba(28,4,8,0.96)'; g.lineWidth = 6; g.beginPath(); g.arc(0, -S * 0.30, S * 0.11, -0.5, 1.7); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const TOMOE_TEX = tomoeRingTexture();
+
+// The gaze tether + a spinning tomoe ring on the looked-at target (red when igniting,
+// brighter/locked when the genjutsu snaps shut).
+export class SharinganFx {
+  constructor(scene) {
+    this.group = new THREE.Group(); scene.add(this.group);
+    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xff2030, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    this.ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: TOMOE_TEX, color: 0xff2838, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false }));
+    this.ring.renderOrder = 1000;
+    this.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff3040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    this.group.add(this.beam, this.ring, this.flash);
+    this.group.visible = false; this.t = 0;
+    this._up = new THREE.Vector3(0, 1, 0); this._q = new THREE.Quaternion();
+  }
+  set(active, start, end, lock) {
+    this.group.visible = !!active; if (!active) return;
+    const dir = end.clone().sub(start), len = Math.max(0.1, dir.length());
+    this._q.setFromUnitVectors(this._up, dir.normalize());
+    this.beam.position.copy(start).add(end).multiplyScalar(0.5); this.beam.quaternion.copy(this._q); this.beam.scale.y = len;
+    this.ring.position.copy(end); this.flash.position.copy(end);
+    this.ring.material.color.setHex(lock ? 0xff0018 : 0xff2838);
+    this.ring.scale.setScalar(lock ? 1.8 : 1.1);
+    this.flash.scale.setScalar(lock ? 1.2 : 0.7);
+  }
+  update(dt) {
+    if (!this.group.visible) return; this.t += dt;
+    this.ring.material.rotation += dt * 3.2;
+    this.beam.material.opacity = 0.35 + Math.abs(Math.sin(this.t * 24)) * 0.4;
+  }
+}
+
 // ---------------- Portals ----------------
 export class Portals {
   constructor(scene) {
@@ -981,6 +1027,15 @@ export function makeViewModel(id) {
       const s = 0.7 + 0.6 * c; red.scale.setScalar(s); blue.scale.setScalar(s);
       haze.material.opacity = 0.2 + 0.6 * c; haze.scale.setScalar(0.4 + 0.7 * c);
     };
+  } else if (id === SHARINGAN) {
+    // An open hand held up in a seal, a glowing red tomoe eye hovering in the palm.
+    box(0.26, 0.06, 0.2, 0xe8b89a, 0, -0.16, -0.32);          // palm
+    for (const hx of [-0.11, -0.04, 0.04, 0.11]) box(0.05, 0.22, 0.06, 0xe8b89a, hx, 0.0, -0.34);  // fingers
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), new THREE.MeshBasicMaterial({ color: 0xe01020, fog: false }));
+    eye.position.set(0, 0.02, -0.42); g.add(eye);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff2838, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    halo.scale.setScalar(0.5); halo.position.set(0, 0.02, -0.42); g.add(halo);
+    g.userData.chakraAnim = (charge, dt, t) => { const p = 1 + Math.sin(t * 6) * 0.12; eye.scale.setScalar(p); halo.material.opacity = 0.5 + 0.3 * Math.abs(Math.sin(t * 4)); };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xd6d6d6, 0, 0, -0.2);
     box(0.06, 0.06, 0.12, 0xff8c2b, 0.05, 0, -0.48);

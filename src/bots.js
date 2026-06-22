@@ -169,6 +169,15 @@ export class BotManager {
   _updateBot(b, dt, ctx) {
     b.fireCD -= dt; b.reactTimer -= dt; b.strafeTimer -= dt; b.jumpCD -= dt; b.coverTimer -= dt;
     if (b.reloadTimer > 0) { b.reloadTimer -= dt; if (b.reloadTimer <= 0) b.ammo = b.gun.mag || Infinity; }
+    // Genjutsu (Sharingan): rooted and unable to act — just keep it on the ground.
+    if (b.stunT > 0) {
+      b.stunT -= dt;
+      b.vel.x *= 0.7; b.vel.z *= 0.7;
+      b.vel.y -= GRAVITY * dt; if (b.vel.y < -34) b.vel.y = -34;
+      b.onGround = moveEntity(ctx.world, b.pos, b.vel, HALF, HEIGHT, dt);
+      b.mesh.position.copy(b.pos); b.mesh.rotation.y = b.yaw;
+      return;
+    }
 
     // --- Target selection: nearest living enemy (different team / FFA). Human
     // players are weighted as "closer" so bots prefer hunting people over bots,

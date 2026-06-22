@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -41,8 +41,8 @@ const SURVIVAL = 0, CREATIVE = 1, BATTLE = 2;
 const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
-// Nine-slot deathmatch arsenal (one per hotbar key), one of each weapon class.
-const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE];
+// Deathmatch arsenal (one per hotbar key, slot 10 = key 0), one of each weapon class.
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -166,6 +166,7 @@ const blackholes = new BlackHoles(scene);
 const chakra = new ChakraFx(scene);
 const laser = new LaserBeam(scene);
 const hollowPurple = new HollowPurple(scene);
+const sharinganFx = new SharinganFx(scene);
 const portals = new Portals(scene);
 const botMgr = new BotManager(scene);
 const damageNumbers = new DamageNumbers(scene);
@@ -255,6 +256,11 @@ let chargeT = 0, chargeGunId = -1, vmCharge = 0;   // chakra jutsu charge-up (ho
 const CHAKRA_MAX = 100, CHAKRA_REGEN = 7, CHAKRA_CHANNEL = 52;   // per second
 const RASENGAN_COST = 28, RASENSHURIKEN_COST = 55, HOLLOW_PURPLE_COST = 80;
 let chakraEnergy = CHAKRA_MAX, chargingChakra = false, chakraAuraI = 0, chakraSnd = false, chakraBurstReady = true;
+// Sharingan: gaze tracking, the Amaterasu black-flame burns, and Precognition state.
+let gazeTargetId = null, gazeHold = 0, gazeBcCD = 0;
+let precogT = 0, precogCD = 0, precogXray = false;
+const amaBurn = new Map();     // id ('bot:x' / remote id) -> { t, acc, dps, src }
+const _amaP = new THREE.Vector3();
 let grenadeCount = 0, grenadeCD = 0, streak = 0;   // grenades + killstreaks
 const ammo = {};
 let reloadingGun = -1, reloadTimer = 0, reloadDur = 1, recoilPitch = 0, recoilYaw = 0, vmRecoil = 0;
@@ -629,6 +635,7 @@ const mpHandlers = {
     else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); sfx.rasenshuriken(); }
     else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); sfx.gunAt('rail', d.x, d.y, d.z); }
     else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); sfx.explosionAt(d.x, d.y, d.z); }
+    else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
   },
   onBoard: (d) => {
     board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
@@ -718,6 +725,7 @@ function damagePlayer(dmg, srcX, srcZ, pvp) {
     chakraEnergy = Math.max(0, chakraEnergy - 12);
     particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [120, 200, 255], 10);
   }
+  if (precogT > 0 && dmg > 0) dmg = Math.max(0, Math.ceil(dmg * 0.4));   // Precognition: see it coming, take less
   health -= dmg; if (!pvp) invuln = 0.5;
   hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.hurt(); addShake(0.12 + dmg * 0.004);
   if (srcX !== undefined) {
@@ -788,8 +796,8 @@ const WAR_TIME = 180, WAR_TICKETS = 18;
 // Gun Game ladder — escalates weakest→strongest, finishing on the point-blank
 // Rasengan (the "knife round": you must close to chakra range for the win).
 const GUNGAME_LADDER = [
-  HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, HEAVY_MG, PLASMA_GUN, SNIPER, RAILGUN,
-  LASER_CANNON, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, RASENSHURIKEN, HOLLOW_PURPLE, RASENGAN,
+  HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, HEAVY_MG, PLASMA_GUN, SNIPER, RAILGUN, LASER_CANNON,
+  ROCKET_LAUNCHER, BLACK_HOLE_BOMB, RASENSHURIKEN, SHARINGAN, HOLLOW_PURPLE, RASENGAN,
 ];
 const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
 const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
@@ -850,7 +858,7 @@ function setupMatch() {
   if (gameMode === 'wave' || gameMode === 'war') teamMode = true;
   scoreLimit = gameMode === 'gungame' ? GUNGAME_LADDER.length : battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
-  matchWinner = null; matchOverTimer = 0; endKillCam(false); resetReel(); hud.hideRoundOver();
+  matchWinner = null; matchOverTimer = 0; endKillCam(false); resetReel(); resetSharingan(); hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
@@ -1317,7 +1325,7 @@ function resetMatch() {
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
-  matchWinner = null; endKillCam(false); resetReel(); hud.hideRoundOver(); hud.hideScoreboard();
+  matchWinner = null; endKillCam(false); resetReel(); resetSharingan(); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
     warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
   }
@@ -1470,6 +1478,7 @@ function botFire(bot, dir) {
     : gun.kind === 'plasma' ? 0x7af0e2
     : gun.kind === 'beam' ? 0xff5570
     : gun.kind === 'hollowpurple' ? 0xb060ff
+    : gun.kind === 'sharingan' ? 0xff2838
     : (gun.zoom ? 0xbfe4ff : 0xffd27a);
   const dmg = botEffectiveDamage(gun);
   if (gun.kind === 'shotgun') {
@@ -1986,6 +1995,93 @@ function fireHollowPurple(gun, cf = 1) {
   broadcastFire('hollowpurple', muzzle, _dir, { r: wallDist, rad: radius });
 }
 
+// ---- Sharingan ----
+// Mark a target for the Amaterasu black flames (a spreading damage-over-time).
+function igniteTarget(id, dps, dur, src) {
+  const e = amaBurn.get(id);
+  if (e) { e.t = Math.max(e.t, dur); e.dps = dps; } else amaBurn.set(id, { t: dur, acc: 0, dps, src: src || myName() });
+}
+function amaTargetPos(id, out) {
+  if (String(id).startsWith('bot:')) { const b = botMgr.get(id); if (b && b.alive) { out.set(b.pos.x, b.pos.y + 1, b.pos.z); return true; } return false; }
+  const r = mp.remotes.get(id); if (r && r.group.visible) { out.set(r.group.position.x, r.group.position.y + 1, r.group.position.z); return true; } return false;
+}
+// Burn every marked target each frame: accumulate fractional DoT, throw black-flame
+// particles, and occasionally spread the flames to a nearby enemy.
+function tickAmaterasu(dt) {
+  if (!amaBurn.size) return;
+  for (const [id, e] of amaBurn) {
+    if (!amaTargetPos(id, _amaP)) { amaBurn.delete(id); continue; }
+    e.t -= dt; e.acc += e.dps * dt;
+    let dmg = 0; while (e.acc >= 1) { e.acc -= 1; dmg++; }
+    if (dmg > 0 && isAuthority()) { if (String(id).startsWith('bot:')) botHurt(id, dmg, e.src, false); }
+    if (dmg > 0 && !String(id).startsWith('bot:')) mp.sendHit(id, dmg);
+    if (Math.random() < 0.7) particles.burst(_amaP.x + (Math.random() - 0.5) * 0.7, _amaP.y + Math.random() * 0.7, _amaP.z + (Math.random() - 0.5) * 0.7, [26, 6, 36], 2);
+    if (Math.random() < 0.3) particles.burst(_amaP.x, _amaP.y + 0.3, _amaP.z, [150, 40, 190], 1);
+    if (e.t <= 0) { amaBurn.delete(id); continue; }
+    if (isAuthority() && Math.random() < 0.25) {   // the black flames spread
+      for (const b of botMgr.bots) {
+        if (!b.alive || friendly(b.id) || amaBurn.has(b.id)) continue;
+        if (Math.hypot(b.pos.x - _amaP.x, b.pos.y + 1 - _amaP.y, b.pos.z - _amaP.z) < 2.6) { igniteTarget(b.id, e.dps, e.t * 0.7, e.src); break; }
+      }
+    }
+  }
+}
+let _mobBurnAcc = 0;
+// The gaze: ignite whoever you look at, and hold it to lock them in genjutsu.
+function sharinganGaze(gun, dt) {
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const muzzle = _eye.clone().addScaledVector(_dir, 0.3);
+  const block = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  const blockDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
+  const enemy = raycastEnemies(_eye, _dir, blockDist);
+  const mobHit = mobs.raycast(_eye, _dir, blockDist);
+  const enemyDist = enemy ? enemy.dist : Infinity, mobDist = mobHit ? mobHit.dist : Infinity;
+  const hitDist = Math.min(blockDist, enemyDist, mobDist);
+  const end = _eye.clone().addScaledVector(_dir, hitDist);
+  let locked = false;
+  if (enemy && enemyDist <= hitDist + 0.01 && !friendly(enemy.id)) {
+    igniteTarget(enemy.id, gun.dot, gun.ignite, myName());
+    if (gazeTargetId === enemy.id) gazeHold += dt; else { gazeTargetId = enemy.id; gazeHold = 0; }
+    if (gazeHold >= gun.ensnare) {                 // genjutsu snaps shut
+      gazeHold = 0; locked = true;
+      if (enemy.bot) { const b = botMgr.get(enemy.id); if (b) { b.stunT = gun.stun; particles.burst(b.pos.x, b.pos.y + 1.5, b.pos.z, [255, 20, 44], 24); } }
+      sfx.rasenshuriken();
+    }
+  } else if (mobHit && mobDist <= hitDist + 0.01) {
+    mobHit.mob.burning = true; _mobBurnAcc += gun.dot * dt;
+    while (_mobBurnAcc >= 1) { _mobBurnAcc -= 1; mobHit.mob.hurt(1, player.pos.x, player.pos.z); }
+    gazeTargetId = null; gazeHold = 0;
+  } else { gazeTargetId = null; gazeHold = 0; }
+  sharinganFx.set(true, muzzle, end, locked);
+  if (gameMode !== 'gungame') chakraEnergy = Math.max(0, chakraEnergy - gun.drain * dt);
+  gazeBcCD -= dt; if (gazeBcCD <= 0) { gazeBcCD = 0.12; broadcastFire('sharingan', muzzle, _dir, { r: hitDist, lock: locked ? 1 : 0 }); }
+}
+// Precognition: enter bullet-time — enemies slow + glow through walls, you take less damage.
+function activatePrecog(gun) {
+  precogT = gun.precogDur; precogCD = gun.precogDur + gun.precogCD;
+  if (gameMode !== 'gungame') chakraEnergy = Math.max(0, chakraEnergy - gun.precogCost);
+  setEnemyXray(true); hud.setPrecog(true); sfx.chakraReady(); addShake(0.22);
+  player.eyePosition(_eye); particles.burst(_eye.x, _eye.y, _eye.z, [255, 30, 50], 22);
+}
+function setEnemyXray(on) {
+  precogXray = on;
+  for (const b of botMgr.bots) {
+    if (!b.mesh) continue;
+    const enemy = !(teamMode && b.team === myTeam);
+    b.mesh.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material.depthTest = !(on && enemy);
+      o.renderOrder = (on && enemy) ? 4000 : 0;
+      if (o.material.emissive) o.material.emissive.setHex((on && enemy) ? 0x6a0010 : 0x000000);
+    });
+  }
+}
+function resetSharingan() {
+  if (precogXray) setEnemyXray(false);
+  precogT = 0; precogCD = 0; gazeTargetId = null; gazeHold = 0;
+  amaBurn.clear(); sharinganFx.set(false); hud.setPrecog(false);
+}
+
 // Everything portals can teleport: the player, mobs and bots.
 function portalBodies() {
   const list = [player];
@@ -2391,9 +2487,14 @@ function frame() {
   // Bots + match flow: the authority simulates; guests render via broadcasts.
   if (mode === BATTLE && loaded) {
     if (!frozen) recordReel(dt);     // roll the kill-cam motion buffer
+    // Sharingan: tick the Amaterasu burns + Precognition bullet-time.
+    if (!frozen) tickAmaterasu(dt);
+    if (precogCD > 0) precogCD -= dt;
+    if (precogT > 0) { precogT -= dt; setEnemyXray(true); if (precogT <= 0) { setEnemyXray(false); hud.setPrecog(false); } }
+    const botDt = (matchWinner || frozen) ? 0 : (precogT > 0 ? dt * 0.4 : dt);   // enemies move in slow-mo during Precognition
     if (isAuthority()) {
       botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
-      botMgr.update((matchWinner || frozen) ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
+      botMgr.update(botDt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
       if (!frozen) manageBots(dt);
       if (!matchWinner && !frozen) modeTick(dt);
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
@@ -2441,6 +2542,7 @@ function frame() {
   // whenever we're not actively holding a charge weapon.
   if (!(active && gun && gun.charge)) { chargeT = 0; vmCharge = 0; }
   if (!(active && gun && gun.kind === 'beam' && (mouseLeft || keyBreak))) { if (laser.group.visible) laser.set(false); beamSnd = false; }
+  if (!(active && gun && gun.kind === 'sharingan' && (mouseLeft || keyBreak))) { if (sharinganFx.group.visible) sharinganFx.set(false); gazeTargetId = null; gazeHold = 0; }
   if (active && gun) {
     resetBreak();
     const id = inventory.selectedId();
@@ -2464,6 +2566,12 @@ function frame() {
       const reloading = gun.mag && reloadingGun === id;
       if (lmb && !reloading && ammoFor(gun, id) > 0) fireBeam(gun, id, dt);
       else { laser.set(false); if (lmb && !reloading) startReload(gun, id); }
+    }
+    // Sharingan: RMB = Precognition (bullet-time); LMB = the gaze (Amaterasu + Genjutsu).
+    else if (gun.kind === 'sharingan') {
+      if (rmb && precogCD <= 0 && precogT <= 0 && (gameMode === 'gungame' || chakraEnergy >= gun.precogCost)) activatePrecog(gun);
+      if (lmb && (gameMode === 'gungame' || chakraEnergy > 0)) sharinganGaze(gun, dt);
+      else { gazeTargetId = null; gazeHold = 0; sharinganFx.set(false); }
     }
     // Auto guns fire while held; the rest fire once per click.
     else if (lmb && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
@@ -2546,7 +2654,7 @@ function frame() {
   // Curve the player's in-flight Rasenshuriken toward where they're aiming (sweep your view to bend it).
   chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
   chakra.update(sdt, world, chakraHooks);
-  laser.update(dt); hollowPurple.update(sdt);
+  laser.update(dt); hollowPurple.update(sdt); sharinganFx.update(dt);
   grenades.update(sdt, world);
   grenadeCD -= sdt;
   portals.update(dt, portalBodies());
@@ -2593,6 +2701,7 @@ window.__game = {
   __testFire: (id) => fireGun(gunOf(id)),
   __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
   __trigger: (down) => { mouseLeft = !!down; triggerConsumed = false; },   // drive the charge-up loop in tests
+  __trigger2: (down) => { mouseRight = !!down; },                          // drive secondary fire (precognition) in tests
   __channel: (on) => { chargingChakra = !!on; },                           // simulate holding C in tests
   __break: (x, y, z) => breakBlock(x, y, z, false),                        // test hook: break a block (runs water-fill)
   __cactusContact: (dt) => cactusContact(dt),
@@ -2601,6 +2710,7 @@ window.__game = {
   get arenaTheme() { return arenaTheme; },
   get gunGameLadder() { return GUNGAME_LADDER.slice(); },
   get killCam() { return { active: killCam.active, mode: killCam.mode, t: killCam.t, dur: killCamDur, replay: replay.active, pass: replay.pass, reel: killReel.length }; },
+  get sharingan() { return { precogT: +precogT.toFixed(2), precogCD: +precogCD.toFixed(2), burns: amaBurn.size, gazeHold: +gazeHold.toFixed(2), gazeId: gazeTargetId, fx: sharinganFx.group.visible }; },
   __reelLen: () => killReel.length,
   __reelKeys: () => { const s = new Set(); for (const fr of killReel) for (const k in fr.a) s.add(k); return [...s]; },
   __forceReplayKill: (killerName, killerKey, victimName, victimKey) => { lastKill.killer = killerName; lastKill.victim = victimName; lastKill.killerKey = killerKey; lastKill.victimKey = victimKey; lastKill.at = performance.now() / 1000; },
