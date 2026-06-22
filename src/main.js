@@ -933,6 +933,9 @@ function setupWar(humans) {
     if (b.team === WAR_AXIS) {                              // defenders: hold the nest, brace the MG
       b.defend = true; b.anchor = nearestNest(b.pos.x, b.pos.z); b.yaw = Math.PI;
       b.gunId = HEAVY_MG;
+      // Dug-in mounted gunners: a touch quicker to react and steadier than a roamer,
+      // but still beatable (own copy of D so the shared difficulty preset isn't mutated).
+      b.D = Object.assign({}, b.D, { aimErr: b.D.aimErr * 0.8, react: b.D.react * 0.7, fireGap: b.D.fireGap * 0.7 });
     } else {                                                // attackers: push up the beach to the objective
       b.defend = false; b.anchor = null; b.yaw = 0;
       b.advance = true; b._goalJitter = (Math.random() - 0.5) * 12;
