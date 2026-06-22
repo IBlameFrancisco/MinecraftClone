@@ -19,7 +19,7 @@ import {
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
   HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN } from './items.js';
 import { World } from './world.js';
-import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY } from './worldgen.js';
+import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
 import { Sky } from './sky.js';
 import { Particles } from './particles.js';
@@ -186,6 +186,8 @@ let health = 20, hunger = 20, dead = false;
 let invuln = 0, regenTimer = 0, hungerTimer = 0, starveTimer = 0;
 let arena = false;                 // is the current world a battle map (arena/beach)?
 let battleMap = 'arena';           // which battle map: 'arena' or 'beach' (D-Day)
+let arenaTheme = 'ruins';          // arena re-skin (ruins/jungle/frozen/desert), random per match
+const pickArenaTheme = () => ARENA_THEME_NAMES[(Math.random() * ARENA_THEME_NAMES.length) | 0];
 let lastHitBy = null, lastHitTime = -100;   // for PvP kill attribution
 let shakeAmt = 0;                  // screen-shake magnitude
 let combo = 0, comboTimer = 0, firstBlood = true;   // announcer multikill tracking
@@ -329,12 +331,16 @@ function finishLoading() {
 }
 
 // Regenerate from a seed (start-screen "New World" / Battle / joining a host).
-function loadWorld(seedStr, mapKind) {
+function loadWorld(seedStr, mapKind, theme) {
   currentSeedStr = (seedStr && seedStr.trim()) ? seedStr.trim() : randomSeedStr();
   seedInput.value = currentSeedStr;
   arena = !!mapKind;
   battleMap = mapKind === 'beach' ? 'beach' : 'arena';
-  world.regenerate(hashSeed(currentSeedStr), mapKind);
+  // Pick a fresh random arena re-skin each time an arena map loads (the D-Day
+  // beach has its own dedicated look) unless one was explicitly handed in.
+  if (battleMap === 'arena' && arena) arenaTheme = theme || pickArenaTheme();
+  world.regenerate(hashSeed(currentSeedStr), mapKind, arenaTheme);
+  if (arena && battleMap === 'arena') sky.setArenaTheme(arenaTheme);
   edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll(); botMgr.clear();
   setupHill(false); setupZone(false);
   if (!mapKind && mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
@@ -566,7 +572,7 @@ const playerName = () => (document.getElementById('nameInput').value.trim() || _
 const mpHandlers = {
   getInit: () => ({
     seed: hashSeed(currentSeedStr),
-    arena, battleMap, battle: mode === BATTLE, team: teamMode, scoreLimit, gameMode,
+    arena, battleMap, arenaTheme, battle: mode === BATTLE, team: teamMode, scoreLimit, gameMode,
     edits: [...edits.entries()].map(([k, v]) => { const [x, y, z] = k.split(',').map(Number); return [x, y, z, v]; }),
   }),
   onInit: (d) => {
@@ -574,8 +580,10 @@ const mpHandlers = {
     seedInput.value = currentSeedStr;
     arena = !!d.arena;
     battleMap = d.battleMap === 'beach' ? 'beach' : 'arena';
+    arenaTheme = d.arenaTheme || 'ruins';
     botMgr.clear();
-    world.regenerate(d.seed, arena ? battleMap : false);
+    world.regenerate(d.seed, arena ? battleMap : false, arenaTheme);
+    if (arena && battleMap === 'arena') sky.setArenaTheme(arenaTheme);
     edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
     for (const e of d.edits) recordEdit(e[0], e[1], e[2], e[3]);
     if (d.battle) {
@@ -2350,6 +2358,8 @@ window.__game = {
   __break: (x, y, z) => breakBlock(x, y, z, false),                        // test hook: break a block (runs water-fill)
   __cactusContact: (dt) => cactusContact(dt),
   __endMatch: (w) => endMatch(w),                       // test hook: force a round win
+  __loadArena: (theme) => { menuMode = BATTLE; setGameMode(BATTLE); loadWorld(currentSeedStr || 'test', 'arena', theme); sky.setArena(true); sky.setWar(false); atMenu = false; everPlayed = true; refreshOverlays(); },
+  get arenaTheme() { return arenaTheme; },
   get gunGameLadder() { return GUNGAME_LADDER.slice(); },
   get killCam() { return { active: killCam.active, t: killCam.t, fx: killCam.focus.x, fz: killCam.focus.z }; },
   get vmCharge() { return vmCharge; },
