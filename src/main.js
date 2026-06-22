@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -41,7 +41,8 @@ const SURVIVAL = 0, CREATIVE = 1, BATTLE = 2;
 const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
-const BATTLE_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB];
+// Nine-slot deathmatch arsenal (one per hotbar key), one of each weapon class.
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -163,6 +164,8 @@ const rockets = new Rockets(scene);
 const grenades = new Grenades(scene);
 const blackholes = new BlackHoles(scene);
 const chakra = new ChakraFx(scene);
+const laser = new LaserBeam(scene);
+const hollowPurple = new HollowPurple(scene);
 const portals = new Portals(scene);
 const botMgr = new BotManager(scene);
 const damageNumbers = new DamageNumbers(scene);
@@ -250,7 +253,7 @@ let triggerConsumed = false;   // for semi-auto guns: one shot per click
 let chargeT = 0, chargeGunId = -1, vmCharge = 0;   // chakra jutsu charge-up (hold to gather)
 // Chakra reserve (the Naruto power-up): hold C to channel chakra, which powers jutsu.
 const CHAKRA_MAX = 100, CHAKRA_REGEN = 7, CHAKRA_CHANNEL = 52;   // per second
-const RASENGAN_COST = 28, RASENSHURIKEN_COST = 55;
+const RASENGAN_COST = 28, RASENSHURIKEN_COST = 55, HOLLOW_PURPLE_COST = 80;
 let chakraEnergy = CHAKRA_MAX, chargingChakra = false, chakraAuraI = 0, chakraSnd = false, chakraBurstReady = true;
 let grenadeCount = 0, grenadeCD = 0, streak = 0;   // grenades + killstreaks
 const ammo = {};
@@ -624,6 +627,8 @@ const mpHandlers = {
     else if (k === 'grenade') { grenades.spawn(muzzle, dir, d.fuse || 1.6, null, true); sfx.place(); }
     else if (k === 'rasengan') { chakra.burst(muzzle.clone().addScaledVector(dir.clone().normalize(), 2.2), 1.6 + 1.8 * (d.cf || 1), 0x4aa3ff, false); sfx.rasengan(); }
     else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); sfx.rasenshuriken(); }
+    else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); sfx.gunAt('rail', d.x, d.y, d.z); }
+    else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); sfx.explosionAt(d.x, d.y, d.z); }
   },
   onBoard: (d) => {
     board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
@@ -783,8 +788,8 @@ const WAR_TIME = 180, WAR_TICKETS = 18;
 // Gun Game ladder — escalates weakest→strongest, finishing on the point-blank
 // Rasengan (the "knife round": you must close to chakra range for the win).
 const GUNGAME_LADDER = [
-  HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, HEAVY_MG, PLASMA_GUN,
-  SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, RASENSHURIKEN, RASENGAN,
+  HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, HEAVY_MG, PLASMA_GUN, SNIPER, RAILGUN,
+  LASER_CANNON, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, RASENSHURIKEN, HOLLOW_PURPLE, RASENGAN,
 ];
 const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
 const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
@@ -1441,6 +1446,7 @@ function shotTracer(kind, muzzle, dir, range, color) {
 // direct hit, so derive an effective bot damage from splash — otherwise a bot
 // forced onto e.g. the Rasenshuriken in Gun Game could never score and stall.
 function botEffectiveDamage(gun) {
+  if (gun.kind === 'hollowpurple') return 26;     // bots fire it as a strong bolt, not the player's one-shot corridor
   if (gun.damage > 0) return gun.damage;
   if (gun.splash) return Math.max(8, Math.round(gun.splash * 0.4));
   return 12;
@@ -1453,6 +1459,8 @@ function botFire(bot, dir) {
     : gun.kind === 'rasengan' || gun.kind === 'rasenshuriken' ? 0x9fdcff
     : gun.kind === 'blackhole' ? 0xb98bff
     : gun.kind === 'plasma' ? 0x7af0e2
+    : gun.kind === 'beam' ? 0xff5570
+    : gun.kind === 'hollowpurple' ? 0xb060ff
     : (gun.zoom ? 0xbfe4ff : 0xffd27a);
   const dmg = botEffectiveDamage(gun);
   if (gun.kind === 'shotgun') {
@@ -1897,6 +1905,74 @@ function fireRail(gun, muzzle) {
   sfx.gun('rail');
 }
 
+// Laser cannon: a sustained beam. Resolves an endpoint each frame, paints the beam,
+// and applies continuous damage on a fixed tick while draining the heat battery.
+let beamTickCD = 0, beamDrainAcc = 0, beamSndCD = 0, beamBroadcastCD = 0, beamSnd = false;
+function fireBeam(gun, id, dt) {
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const muzzle = _eye.clone().addScaledVector(_dir, 0.55);
+  const block = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  const blockDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
+  const enemy = raycastEnemies(_eye, _dir, blockDist);
+  const mobHit = mobs.raycast(_eye, _dir, blockDist);
+  const hitDist = Math.min(blockDist, enemy ? enemy.dist : Infinity, mobHit ? mobHit.dist : Infinity);
+  const end = _eye.clone().addScaledVector(_dir, hitDist);
+  laser.set(true, muzzle, end, gun.color);
+  beamTickCD -= dt;
+  if (beamTickCD <= 0) {
+    beamTickCD = gun.tick;
+    const dmg = Math.max(1, Math.round(gun.dps * gun.tick));
+    if (enemy && enemy.dist <= hitDist + 0.01 && !friendly(enemy.id)) {
+      const d = enemy.head ? Math.round(dmg * 1.4) : dmg;
+      if (enemy.bot) botHurt(enemy.id, d, myName(), enemy.head); else mp.sendHit(enemy.id, d, enemy.head);
+      hud.hitMarker(enemy.head); damageNumbers.spawn(end, d, enemy.head);
+    } else if (mobHit && mobHit.dist <= hitDist + 0.01) {
+      mobHit.mob.hurt(dmg, player.pos.x, player.pos.z); hud.hitMarker(false);
+    }
+    particles.burst(end.x, end.y, end.z, [255, 90, 120], 5);
+  }
+  beamDrainAcc += gun.drain * dt;
+  if (beamDrainAcc >= 1) { const n = Math.floor(beamDrainAcc); beamDrainAcc -= n; ammo[id] = Math.max(0, ammoFor(gun, id) - n); if (ammoFor(gun, id) <= 0) { laser.set(false); startReload(gun, id); } }
+  addShake(0.022); vmRecoil = Math.min(1, vmRecoil + 0.05); beamSnd = true;
+  beamSndCD -= dt; if (beamSndCD <= 0) { beamSndCD = 0.14; sfx.gunAt('rail', muzzle.x, muzzle.y, muzzle.z); }
+  beamBroadcastCD -= dt; if (beamBroadcastCD <= 0) { beamBroadcastCD = 0.1; broadcastFire('beam', muzzle, _dir, { r: hitDist, c: gun.color }); }
+}
+
+// Hollow Purple (Gojo): clap red + blue together and erase a wide corridor with an
+// imaginary-mass purple beam. A fuller charge → wider/longer/deadlier blast.
+function fireHollowPurple(gun, cf = 1) {
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
+  const range = gun.range * (0.55 + 0.45 * cf), radius = gun.radius * (0.6 + 0.4 * cf);
+  const block = voxelRaycast(_eye, _dir, range, (x, y, z) => world.getBlock(x, y, z));
+  const wallDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : range;
+  const end = _eye.clone().addScaledVector(_dir, wallDist);
+  const dmg = Math.max(1, Math.round(gun.damage * (0.4 + 0.6 * cf)));
+  const KB = (gun.knockback || 24) * (0.5 + 0.5 * cf);
+  // Everything within `radius` of the beam line (up to the wall) is annihilated.
+  const distToLine = (px, py, pz) => {
+    const vx = px - _eye.x, vy = py - _eye.y, vz = pz - _eye.z;
+    const t = Math.max(0, Math.min(wallDist, vx * _dir.x + vy * _dir.y + vz * _dir.z));
+    return Math.hypot(vx - _dir.x * t, vy - _dir.y * t, vz - _dir.z * t);
+  };
+  let struck = false;
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    if (distToLine(b.pos.x, b.pos.y + 1, b.pos.z) > radius) continue;
+    botHurt(b.id, dmg, myName(), false);
+    b.vel.x += _dir.x * KB; b.vel.z += _dir.z * KB; b.vel.y += KB * 0.3; struck = true;
+  }
+  for (const m of mobs.list) { if (distToLine(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z) <= radius) { m.hurt(dmg, player.pos.x, player.pos.z); struck = true; } }
+  if (mp.online) for (const [id, r] of mp.remotes) { if (friendly(id)) continue; if (distToLine(r.group.position.x, r.group.position.y + 1, r.group.position.z) <= radius) { mp.sendHit(id, dmg); struck = true; } }
+  if (struck) hud.hitMarker(false);
+  hollowPurple.spawn(muzzle, end, radius);
+  particles.burst(end.x, end.y, end.z, [180, 90, 255], 50);
+  particles.burst(muzzle.x, muzzle.y, muzzle.z, [120, 140, 255], 20);
+  shockShake(end, 0.9, 30); addShake(0.25 + 0.2 * cf); vmRecoil = Math.min(1, vmRecoil + 0.8);
+  sfx.explosionAt(end.x, end.y, end.z);
+  broadcastFire('hollowpurple', muzzle, _dir, { r: wallDist, rad: radius });
+}
+
 // Everything portals can teleport: the player, mobs and bots.
 function portalBodies() {
   const list = [player];
@@ -1964,7 +2040,8 @@ function releaseCharge(gun, cf) {
   // chakra reserve, or a player could reach the Rasengan/Rasenshuriken and be
   // unable to fire (and unable to win). Every other mode pays the chakra cost.
   const freeJutsu = gameMode === 'gungame';
-  const cost = Math.round((gun.kind === 'rasenshuriken' ? RASENSHURIKEN_COST : RASENGAN_COST) * (0.5 + 0.5 * cf));
+  const baseCost = gun.kind === 'hollowpurple' ? HOLLOW_PURPLE_COST : gun.kind === 'rasenshuriken' ? RASENSHURIKEN_COST : RASENGAN_COST;
+  const cost = Math.round(baseCost * (0.5 + 0.5 * cf));
   if (!freeJutsu && chakraEnergy < cost) {          // not enough chakra — sputter out
     player.eyePosition(_eye); camera.getWorldDirection(_dir);
     const p = _eye.clone().addScaledVector(_dir, 0.5);
@@ -1983,6 +2060,7 @@ function releaseCharge(gun, cf) {
     sfx.rasenshuriken(); addShake(0.06 + 0.2 * cf);
     broadcastFire('rasenshuriken', muzzle, _dir, { cf, sp: scaled.speed, rad: scaled.radius, r: gun.range });
   }
+  else if (gun.kind === 'hollowpurple') fireHollowPurple(gun, cf);
   vmRecoil = Math.min(1, vmRecoil + 0.6);
   return true;
 }
@@ -2031,17 +2109,24 @@ function fireRasengan(gun, cf = 1) {
   }
   if (mp.online) for (const { id } of mp.playersNear(end, R)) { if (friendly(id)) continue; mp.sendHit(id, dmg); struck = true; }
   if (struck) hud.hitMarker(false);
-  chakra.burst(end.clone(), 1.6 + 1.8 * cf, 0x4aa3ff, false);
-  particles.burst(end.x, end.y, end.z, [120, 195, 255], 24 + Math.round(cf * 34));
-  addShake(0.1 + 0.2 * cf); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
+  // A brighter grind-flash: a spiral chakra dome, a white core flash, denser spray.
+  chakra.burst(end.clone(), 1.8 + 2.1 * cf, 0x4aa3ff, false);
+  chakra.burst(end.clone(), 1.0 + 1.0 * cf, 0xffffff, false);
+  particles.burst(end.x, end.y, end.z, [150, 205, 255], 34 + Math.round(cf * 46));
+  particles.burst(end.x, end.y, end.z, [255, 255, 255], 10 + Math.round(cf * 14));
+  addShake(0.14 + 0.26 * cf); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
 }
 function rasenshurikenImpact(pos, gun) {
-  particles.burst(pos.x, pos.y, pos.z, [210, 240, 255], 60);
-  particles.burst(pos.x, pos.y, pos.z, [150, 210, 255], 30);
+  // A blinding wind-blade dome: a big needle burst + layered particle shells.
+  chakra.burst(pos.clone(), Math.max(3, gun.radius * 0.95), 0xeaffff, true);
+  chakra.burst(pos.clone(), Math.max(2, gun.radius * 0.55), 0xffffff, false);
+  particles.burst(pos.x, pos.y, pos.z, [230, 248, 255], 110);
+  particles.burst(pos.x, pos.y, pos.z, [150, 210, 255], 60);
+  particles.burst(pos.x, pos.y, pos.z, [255, 255, 255], 26);
   sfx.explosionAt(pos.x, pos.y, pos.z);
-  shockShake(pos, 0.8, 28);
+  shockShake(pos, 1.05, 34);
   explodeDamage(pos, gun.radius, gun.splash, 0.35);
-  blastCover(pos, 3);
+  blastCover(pos, 4);
 }
 // The shuriken detonates on contact with any combatant (else on a block / its range).
 const _guideDir = new THREE.Vector3();
@@ -2107,15 +2192,18 @@ const blackHoleHooks = {
     if (isAuthority()) for (const b of botMgr.bots) if (b.alive && Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z) < 1.5) return true;
     return false;
   },
-  onAnchor: (pos) => { sfx.blackhole(); shockShake(pos, 0.45, 30); },
+  onAnchor: (pos) => { sfx.blackhole(); shockShake(pos, 0.6, 34); particles.burst(pos.x, pos.y, pos.z, [180, 130, 255], 30); },
   onField: (pos, dt, gun) => blackHoleField(pos, dt, gun),
   onCollapse: (pos, gun) => {
-    particles.burst(pos.x, pos.y, pos.z, [180, 120, 255], 64);
-    particles.burst(pos.x, pos.y, pos.z, [255, 230, 200], 32);
+    // A violent implosion-then-blast: a bright core flash + layered purple/gold debris.
+    particles.burst(pos.x, pos.y, pos.z, [255, 255, 255], 30);
+    particles.burst(pos.x, pos.y, pos.z, [180, 120, 255], 110);
+    particles.burst(pos.x, pos.y, pos.z, [255, 230, 200], 56);
+    particles.burst(pos.x, pos.y, pos.z, [120, 80, 220], 40);
     sfx.explosionAt(pos.x, pos.y, pos.z);
-    shockShake(pos, 0.75, 26);
+    shockShake(pos, 1.0, 32);
     explodeDamage(pos, gun.radius * 0.5, gun.splash, 0.4);
-    blastCover(pos, 3);
+    blastCover(pos, 4);
   },
 };
 
@@ -2339,6 +2427,7 @@ function frame() {
   // Chakra jutsu: hold to gather chakra (charge), release to unleash. Cancel the charge
   // whenever we're not actively holding a charge weapon.
   if (!(active && gun && gun.charge)) { chargeT = 0; vmCharge = 0; }
+  if (!(active && gun && gun.kind === 'beam' && (mouseLeft || keyBreak))) { if (laser.group.visible) laser.set(false); beamSnd = false; }
   if (active && gun) {
     resetBreak();
     const id = inventory.selectedId();
@@ -2356,6 +2445,12 @@ function frame() {
         if (fired && gun.mag) { ammo[id]--; if (ammoFor(gun, id) <= 0) startReload(gun, id); }   // only spend ammo if it actually fired
       } else { chargeT = 0; if (empty && !reloading) startReload(gun, id); }
       vmCharge = chargeT / gun.charge;
+    }
+    // Laser cannon: pour a continuous beam while held (drains a heat battery).
+    else if (gun.kind === 'beam') {
+      const reloading = gun.mag && reloadingGun === id;
+      if (lmb && !reloading && ammoFor(gun, id) > 0) fireBeam(gun, id, dt);
+      else { laser.set(false); if (lmb && !reloading) startReload(gun, id); }
     }
     // Auto guns fire while held; the rest fire once per click.
     else if (lmb && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
@@ -2438,6 +2533,7 @@ function frame() {
   // Curve the player's in-flight Rasenshuriken toward where they're aiming (sweep your view to bend it).
   chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
   chakra.update(sdt, world, chakraHooks);
+  laser.update(dt); hollowPurple.update(sdt);
   grenades.update(sdt, world);
   grenadeCD -= sdt;
   portals.update(dt, portalBodies());
@@ -2472,7 +2568,7 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, camera, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, blackholes, blackHoleHooks, chakra, chakraHooks, rasenshurikenImpact, portals,
+  world, player, sky, scene, renderer, camera, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, blackholes, blackHoleHooks, chakra, chakraHooks, rasenshurikenImpact, laser, hollowPurple, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },
