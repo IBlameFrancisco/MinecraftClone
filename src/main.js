@@ -1473,7 +1473,7 @@ function updateDyingAvatars(dt) {
 
 // ---- Flash step: double-tap a movement direction to instantly blink that way,
 // leaving fading after-images behind. Has charges that regenerate over time. ----
-const FLASH_MAX = 2, FLASH_DIST = 7, FLASH_REGEN = 3.0;
+const FLASH_MAX = 3, FLASH_DIST = 12, FLASH_REGEN = 1.6;
 let flashCharges = FLASH_MAX, flashRegen = 0, flashCD = 0;
 const flashTap = { KeyW: -1, KeyA: -1, KeyS: -1, KeyD: -1 };
 const afterImages = [];   // { mesh, t, dur } — translucent silhouettes left along the blink
@@ -1514,8 +1514,8 @@ function flashStep(code) {
   const moved = player.flashTeleport(dx, dz, FLASH_DIST);
   if (moved < 0.3) return;                                     // blocked at the wall — don't burn a charge
   const end = player.pos.clone();
-  flashCharges--; flashCD = 0.4; flashRegen = 0; invuln = Math.max(invuln, 0.4);   // brief i-frames through the blink
-  spawnAfterImages(start, end, myName(), getSkin(mp.skin), 3);
+  flashCharges--; flashCD = 0.18; flashRegen = 0; invuln = Math.max(invuln, 0.4);   // brief i-frames through the blink
+  spawnAfterImages(start, end, myName(), getSkin(mp.skin), 4);
   addShake(0.12); sfx.flashStep();
   broadcastFire('flash', start, _fdir.set(dx, 0, dz), { ex: end.x, ey: end.y, ez: end.z, skin: mp.skin });
 }
