@@ -344,25 +344,55 @@ export class BlackHoles {
     const core = add(new THREE.Mesh(new THREE.SphereGeometry(1.3, 24, 16), new THREE.MeshBasicMaterial({ color: 0x000000 })));
     const glow = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x7b3ff2, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
     glow.scale.setScalar(7);
-    const disk = add(new THREE.Mesh(new THREE.CircleGeometry(4.6, 64), new THREE.MeshBasicMaterial({ map: this._diskTex, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+    const disk = add(new THREE.Mesh(new THREE.CircleGeometry(5.4, 64), new THREE.MeshBasicMaterial({ map: this._diskTex, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
     disk.rotation.x = -1.18;
-    const disk2 = add(new THREE.Mesh(new THREE.CircleGeometry(3.3, 56), new THREE.MeshBasicMaterial({ map: this._diskTex, transparent: true, opacity: 0.55, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
+    const disk2 = add(new THREE.Mesh(new THREE.CircleGeometry(3.8, 56), new THREE.MeshBasicMaterial({ map: this._diskTex, transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })));
     disk2.rotation.set(-1.18, 0.6, 0.4);
     const ring = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: this._ringTex, color: 0xffe2b0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false })));
-    ring.scale.setScalar(4.3); ring.renderOrder = 1000;
+    ring.scale.setScalar(4.9); ring.renderOrder = 1000;
     const shock = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: this._ringTex, color: 0xb98bff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false })));
     shock.renderOrder = 1001;
+    // Twin relativistic jets blasting from the poles — the signature quasar look.
+    const jets = new THREE.Group();
+    const mkJet = (sign) => {
+      const j = new THREE.Group();
+      const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.1, 7.2, 18, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.45, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      cone.position.y = sign * 3.7;
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.04, 7.4, 10),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      beam.position.y = sign * 3.7;
+      const tip = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xd6efff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      tip.position.y = sign * 7.2; tip.scale.setScalar(2.6);
+      j.add(cone, beam, tip); jets.add(j); return j;
+    };
+    const jetT = mkJet(1), jetB = mkJet(-1); add(jets);
+    // Crackling lightning arcs flickering off the event horizon.
+    const arcs = [];
+    for (let i = 0; i < 6; i++) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(7 * 3), 3));
+      const ln = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xdcbcff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      add(ln); arcs.push({ ln, t: Math.random() * 0.1, ang: Math.random() * 6.2832 });
+    }
     const parts = [];
     for (let i = 0; i < 16; i++) {
       const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffd0a0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
       g.add(s); parts.push({ s, ang: Math.random() * 6.28, rad: 2 + Math.random() * 2.6, y: (Math.random() - 0.5) * 1.4, spd: 1.6 + Math.random() * 1.8, fall: 0.6 + Math.random() * 0.9 });
     }
-    for (const o of [disk, disk2, ring, shock, ...parts.map((p) => p.s)]) o.visible = false;  // fly = just the orb
+    // The collapse supernova flash — kept on the manager group so the imploding orb's
+    // shrinking scale doesn't shrink the flash with it.
+    const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false }));
+    flash.renderOrder = 1002; flash.visible = false; this.group.add(flash);
+    for (const o of [disk, disk2, ring, shock, jets, ...arcs.map((a) => a.ln), ...parts.map((p) => p.s)]) o.visible = false;  // fly = just the orb
     this.group.add(g);
     this.list.push({ phase: 'fly', pos: pos.clone(), vel: dir.clone().normalize().multiplyScalar(gun.speed),
-      gun, ownerId, ghost, t: 0, travelled: 0, c: 0, g, core, glow, disk, disk2, ring, shock, parts });
+      gun, ownerId, ghost, t: 0, travelled: 0, c: 0, g, core, glow, disk, disk2, ring, shock, jets, jetT, jetB, arcs, flash, parts });
   }
-  _dispose(h) { this.group.remove(h.g); h.g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
+  _dispose(h) {
+    this.group.remove(h.g); h.g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
+    if (h.flash) { this.group.remove(h.flash); h.flash.material.dispose(); }
+  }
   update(dt, world, hooks) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const h = this.list[i], gun = h.gun;
@@ -373,26 +403,58 @@ export class BlackHoles {
         const solid = isSolid(world.getBlock(Math.floor(h.pos.x), Math.floor(h.pos.y), Math.floor(h.pos.z)));
         if (solid || h.travelled > gun.range || (!h.ghost && hooks.anchorAt && hooks.anchorAt(h.pos))) {
           h.phase = 'open'; h.t = 0; h.g.rotation.set(0, 0, 0);
-          for (const o of [h.disk, h.disk2, h.ring, h.shock, ...h.parts.map((p) => p.s)]) o.visible = true;
+          for (const o of [h.disk, h.disk2, h.ring, h.shock, h.jets, ...h.arcs.map((a) => a.ln), ...h.parts.map((p) => p.s)]) o.visible = true;
+          h.flash.position.copy(h.pos);
           if (!h.ghost && hooks.onAnchor) hooks.onAnchor(h.pos.clone());
         }
         continue;
       }
       h.t += dt;
-      let s = 1;
+      let s = 1, feed = 0;   // feed 0..1 = how "charged" the singularity is (grows over the hold)
       if (h.phase === 'open') { s = easeOutBack(Math.min(1, h.t / 0.45)) * 1.0; if (h.t >= 0.45) h.phase = 'hold'; }
-      else if (h.phase === 'hold') { s = 1 + 0.04 * Math.sin(h.t * 8); if (h.t >= gun.duration - 0.5) { h.phase = 'collapse'; h.c = 0; } }
-      else { h.c += dt; const k = Math.min(1, h.c / 0.5); s = (1 - k) * (1 - k) * (1 + 0.6 * Math.sin(k * 30));
+      else if (h.phase === 'hold') { feed = Math.min(1, h.t / Math.max(0.5, gun.duration - 0.5)); s = 1 + 0.04 * Math.sin(h.t * 8); if (h.t >= gun.duration - 0.5) { h.phase = 'collapse'; h.c = 0; } }
+      else { feed = 1; h.c += dt; const k = Math.min(1, h.c / 0.5); s = (1 - k) * (1 - k) * (1 + 0.6 * Math.sin(k * 30));
+        // Supernova flash: a brilliant burst that blooms as the orb implodes to a point.
+        h.flash.visible = true; h.flash.scale.setScalar(3 + k * 30); h.flash.material.opacity = Math.sin(k * Math.PI) * 0.95;
+        h.flash.material.rotation += dt * 4;
         if (h.c >= 0.5) { if (!h.ghost && hooks.onCollapse) hooks.onCollapse(h.pos.clone(), gun); this._dispose(h); this.list.splice(i, 1); continue; } }
       h.g.scale.setScalar(Math.max(0.001, s));
-      h.disk.rotation.z += dt * 2.6; h.disk2.rotation.z -= dt * 3.4;
+      h.core.scale.setScalar(1 + 0.45 * feed);                        // event horizon grows as it feeds
+      h.disk.rotation.z += dt * (2.6 + 1.8 * feed); h.disk2.rotation.z -= dt * (3.4 + 2.2 * feed);   // disk spins up
       h.disk2.rotation.x = -1.18 + 0.08 * Math.sin(h.t * 3);   // slight precession for depth
       h.ring.material.rotation += dt * 0.6;
       const pulse = 0.9 + 0.1 * Math.sin(h.t * 7);
       h.ring.material.opacity = pulse;
-      h.glow.material.opacity = 0.85 * pulse;
-      h.glow.scale.setScalar(7 * (0.96 + 0.04 * Math.sin(h.t * 5)));   // breathing event-horizon halo
-      if (h.t < 0.6 && h.phase !== 'collapse') { const k = Math.min(1, h.t / 0.55); h.shock.scale.setScalar(2 + k * 11); h.shock.material.opacity = (1 - k) * 0.7; }
+      h.ring.scale.setScalar(4.9 * (1 + 0.18 * feed));               // lensing ring widens with the horizon
+      h.glow.material.opacity = (0.85 + 0.25 * feed) * pulse;
+      h.glow.material.color.setRGB(0.48 + 0.2 * feed, 0.25, 0.95);   // violet glow runs hotter as it charges
+      h.glow.scale.setScalar((7 + 2.5 * feed) * (0.96 + 0.04 * Math.sin(h.t * 5)));   // breathing event-horizon halo
+      // Jets: collimated, spinning, flaring brighter and longer as the singularity feeds.
+      h.jets.rotation.y += dt * 0.8; h.jets.rotation.z = 0.12 * Math.sin(h.t * 1.3);
+      const jl = (0.8 + 0.6 * feed) * (1 + (h.phase === 'collapse' ? 1.4 * Math.min(1, h.c / 0.5) : 0));
+      h.jets.scale.set(0.8 + 0.4 * feed, jl, 0.8 + 0.4 * feed);
+      const jflk = 0.5 + 0.5 * feed + 0.12 * Math.sin(h.t * 22);
+      h.jetT.children[0].material.opacity = h.jetB.children[0].material.opacity = 0.4 * jflk;
+      h.jetT.children[1].material.opacity = h.jetB.children[1].material.opacity = 0.7 * jflk;
+      // Lightning arcs: re-strike on a flicker timer, fading fast between strikes.
+      for (const a of h.arcs) {
+        a.t -= dt;
+        if (a.t <= 0) {
+          a.t = 0.04 + Math.random() * 0.07; a.ang += (Math.random() - 0.5) * 1.4;
+          const arr = a.ln.geometry.attributes.position.array;
+          const r1 = 2.6 + Math.random() * (1.8 + 1.6 * feed), ny = (Math.random() - 0.5) * 2.4;
+          const px = Math.cos(a.ang + 1.5708), pz = Math.sin(a.ang + 1.5708);
+          for (let k = 0; k < 7; k++) {
+            const f = k / 6, rr = 1.3 + (r1 - 1.3) * f, jit = (k === 0 || k === 6) ? 0 : (Math.random() - 0.5) * 0.8;
+            arr[k * 3] = Math.cos(a.ang) * rr + px * jit;
+            arr[k * 3 + 1] = ny * f + (Math.random() - 0.5) * 0.5;
+            arr[k * 3 + 2] = Math.sin(a.ang) * rr + pz * jit;
+          }
+          a.ln.geometry.attributes.position.needsUpdate = true;
+          a.ln.material.opacity = (0.5 + 0.5 * feed) * (0.6 + Math.random() * 0.4);
+        } else a.ln.material.opacity *= Math.pow(0.015, dt);   // fast decay between strikes
+      }
+      if (h.t < 0.6 && h.phase !== 'collapse') { const k = Math.min(1, h.t / 0.55); h.shock.scale.setScalar(2 + k * 13); h.shock.material.opacity = (1 - k) * 0.7; }
       else h.shock.material.opacity = 0;
       for (const p of h.parts) {
         p.ang += p.spd * dt * (1 + (1 - Math.min(1, p.rad / 4)) * 1.5);   // speed up as they spiral in
