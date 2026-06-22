@@ -249,7 +249,14 @@ export class Inventory {
     for (let i = 0; i < n; i++) this.craftGridEl.appendChild(this._makeSlot('craft', i, this.craft[i]));
     this.resultWrapEl.innerHTML = '';
     const result = matchRecipe(this.craft.slice(0, n));
-    this.resultWrapEl.appendChild(this._makeSlot('result', 0, result ? { id: result.id, count: result.count } : null));
+    const resSlot = this._makeSlot('result', 0, result ? { id: result.id, count: result.count } : null);
+    // A ready recipe glows and the arrow lights up — clear "you can craft this" signal.
+    resSlot.classList.toggle('ready', !!result);
+    this.resultWrapEl.appendChild(resSlot);
+    if (this.craftAreaEl) {
+      const arrow = this.craftAreaEl.querySelector('.arrow');
+      if (arrow) arrow.classList.toggle('lit', !!result);
+    }
     this._result = result;
   }
 
@@ -334,20 +341,38 @@ export class Inventory {
       if (s) { s.count--; if (s.count <= 0) this.craft[i] = null; }
     }
     this.renderHotbar(); this.renderScreen(); this._paintCursor();
+    // Satisfying pop on the (freshly rebuilt) result slot after a successful craft.
+    const fresh = this.resultWrapEl && this.resultWrapEl.querySelector('.islot');
+    if (fresh) { fresh.classList.remove('crafted'); void fresh.offsetWidth; fresh.classList.add('crafted'); }
   }
 
   _paintCursor() {
     this.cursorEl.innerHTML = '';
-    if (this.cursor) { this.cursorEl.appendChild(iconCanvas(this.cursor.id)); this.cursorEl.style.display = 'block'; }
-    else this.cursorEl.style.display = 'none';
+    if (this.cursor) {
+      this.cursorEl.appendChild(iconCanvas(this.cursor.id));
+      // Count badge on the held stack so split/merge math stays readable while dragging.
+      if (this.cursor.count > 1) {
+        const c = document.createElement('span'); c.className = 'cnt'; c.textContent = this.cursor.count;
+        this.cursorEl.appendChild(c);
+      }
+      this.cursorEl.style.display = 'block';
+    } else this.cursorEl.style.display = 'none';
   }
 
   toggle() { this.open ? this.close() : this.openScreen(); }
-  openScreen(craftSize = 2) { this.chestSlots = null; this.craftSize = craftSize; this.open = true; this.renderScreen(); this.screen.classList.remove('hidden'); }
-  openChest(slots) { this.chestSlots = slots; this.open = true; this.renderScreen(); this.screen.classList.remove('hidden'); }
+  // Reveal the panel and let CSS animate it in (the `.hidden` toggle stays the source of truth for the API).
+  _reveal() {
+    this.screen.classList.remove('hidden');
+    this.screen.classList.remove('opening');
+    void this.screen.offsetWidth;   // restart the entrance transition
+    this.screen.classList.add('opening');
+  }
+  openScreen(craftSize = 2) { this.chestSlots = null; this.craftSize = craftSize; this.open = true; this.renderScreen(); this._reveal(); }
+  openChest(slots) { this.chestSlots = slots; this.open = true; this.renderScreen(); this._reveal(); }
   close() {
     this.open = false;
     this.screen.classList.add('hidden');
+    this.screen.classList.remove('opening');
     // return held cursor + crafting-grid contents to the inventory
     if (this.cursor) { this.add(this.cursor.id, this.cursor.count); this.cursor = null; this._paintCursor(); }
     if (!this.chestSlots) {
@@ -377,29 +402,62 @@ export class Inventory {
   _injectStyles() {
     const s = document.createElement('style');
     s.textContent = `
+      @keyframes invPanelIn { from { opacity:0; transform:translateY(10px) scale(0.97); } to { opacity:1; transform:none; } }
+      @keyframes invFadeIn { from { opacity:0; } to { opacity:1; } }
+      @keyframes invCraftPop { 0% { transform:scale(1); } 35% { transform:scale(1.28); } 100% { transform:scale(1); } }
+      @keyframes invReadyGlow { 0%,100% { box-shadow:0 0 0 1px rgba(150,235,150,0.45), 0 0 12px rgba(120,225,120,0.30); }
+        50% { box-shadow:0 0 0 1px rgba(180,255,180,0.7), 0 0 20px rgba(140,245,140,0.55); } }
+      @keyframes invArrowPulse { 0%,100% { opacity:0.85; } 50% { opacity:1; transform:translateX(2px); } }
+
       .slot .cnt { position:absolute; right:3px; bottom:1px; font-size:13px; font-weight:700; color:#fff; text-shadow:1px 1px 2px #000; }
       #inventory { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
         background:rgba(8,12,22,0.55); backdrop-filter:blur(3px); pointer-events:auto; z-index:20; }
       #inventory.hidden { display:none; }
-      #inventory .panel { background:rgba(28,30,38,0.96); border:2px solid rgba(255,255,255,0.14);
-        border-radius:12px; padding:18px 20px; box-shadow:0 18px 60px rgba(0,0,0,0.5); }
-      #inventory h2 { font-size:16px; margin-bottom:12px; opacity:0.9; letter-spacing:0.5px; }
+      #inventory.opening { animation:invFadeIn 0.16s ease both; }
+      #inventory.opening .panel { animation:invPanelIn 0.22s cubic-bezier(0.2,0.9,0.3,1.2) both; }
+      #inventory .panel { background:linear-gradient(180deg, rgba(34,37,47,0.97), rgba(24,26,34,0.97));
+        border:2px solid rgba(255,255,255,0.14); border-radius:12px; padding:18px 20px;
+        box-shadow:0 18px 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.07); }
+      #inventory h2 { font-size:16px; margin-bottom:12px; opacity:0.92; letter-spacing:0.5px; font-weight:700; }
       #inventory .chestgrid { display:grid; grid-template-columns:repeat(9,48px); gap:5px; margin-bottom:4px; }
       #inventory .craftarea { display:flex; align-items:center; gap:14px; margin-bottom:10px; }
-      #inventory .craftgrid { display:grid; gap:5px; }
-      #inventory .arrow { font-size:22px; opacity:0.7; }
-      #inventory .grid { display:grid; grid-template-columns:repeat(9,48px); gap:5px; max-height:360px; overflow-y:auto; }
+      #inventory .craftgrid { display:grid; gap:5px; padding:6px; border-radius:8px;
+        background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); }
+      #inventory .arrow { font-size:22px; opacity:0.45; transition:opacity 0.15s, color 0.15s, transform 0.15s; }
+      #inventory .arrow.lit { opacity:1; color:#a6f0a6; text-shadow:0 0 10px rgba(140,240,140,0.6);
+        animation:invArrowPulse 1.1s ease-in-out infinite; }
+      #inventory .grid { display:grid; grid-template-columns:repeat(9,48px); gap:5px; max-height:360px; overflow-y:auto;
+        scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.25) transparent; }
+      #inventory .grid::-webkit-scrollbar { width:8px; }
+      #inventory .grid::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.18); border-radius:4px; }
       #inventory .hbrow { display:grid; grid-template-columns:repeat(9,48px); gap:5px; margin-top:6px; }
       #inventory .hr { height:1px; background:rgba(255,255,255,0.12); margin:12px 0; }
       .islot { position:relative; width:48px; height:48px; border-radius:5px; background:rgba(255,255,255,0.06);
-        border:2px solid rgba(255,255,255,0.10); display:flex; align-items:center; justify-content:center; cursor:pointer; image-rendering:pixelated; }
-      .islot:hover { background:rgba(255,255,255,0.18); border-color:rgba(255,255,255,0.4); }
-      .islot.active { border-color:#fff; }
-      .resultwrap .islot { width:54px; height:54px; background:rgba(120,200,120,0.12); border-color:rgba(140,220,140,0.4); }
-      .islot canvas { width:40px; height:40px; image-rendering:pixelated; }
-      .islot .cnt { position:absolute; right:2px; bottom:0; font-size:13px; font-weight:700; color:#fff; text-shadow:1px 1px 2px #000; }
-      #invcursor { position:fixed; left:0; top:0; width:40px; height:40px; margin:-20px 0 0 -20px; pointer-events:none; display:none; z-index:30; image-rendering:pixelated; }
+        border:2px solid rgba(255,255,255,0.10); display:flex; align-items:center; justify-content:center; cursor:pointer;
+        image-rendering:pixelated; transition:background 0.1s, border-color 0.1s, transform 0.08s, box-shadow 0.1s; }
+      .islot:hover { background:rgba(255,255,255,0.18); border-color:rgba(255,255,255,0.45);
+        box-shadow:0 0 0 1px rgba(255,255,255,0.18), 0 3px 10px rgba(0,0,0,0.35); transform:translateY(-1px); }
+      .islot:active { transform:scale(0.93); }
+      .islot.active { border-color:#ffe27a; background:rgba(255,226,122,0.14);
+        box-shadow:0 0 0 1px rgba(255,226,122,0.4), 0 0 12px rgba(255,200,90,0.3); }
+      .hbrow .islot.active { transform:translateY(-2px); }
+      .islot canvas { width:40px; height:40px; image-rendering:pixelated;
+        filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5)); pointer-events:none; }
+      .islot .cnt { position:absolute; right:2px; bottom:0; font-size:13px; font-weight:800; color:#fff;
+        text-shadow:0 1px 2px #000, 0 0 3px #000; line-height:1; pointer-events:none; }
+      .resultwrap .islot { width:54px; height:54px; background:rgba(120,200,120,0.10);
+        border-color:rgba(140,220,140,0.35); cursor:default; }
+      .resultwrap .islot canvas { width:46px; height:46px; }
+      .resultwrap .islot.ready { cursor:pointer; background:rgba(120,210,120,0.18); border-color:rgba(160,240,160,0.6);
+        animation:invReadyGlow 1.3s ease-in-out infinite; }
+      .resultwrap .islot.ready:hover { background:rgba(140,230,140,0.28); }
+      .resultwrap .islot.crafted canvas { animation:invCraftPop 0.32s cubic-bezier(0.2,0.9,0.3,1.4); }
+      #invcursor { position:fixed; left:0; top:0; width:40px; height:40px; margin:-20px 0 0 -20px;
+        pointer-events:none; display:none; z-index:30; image-rendering:pixelated;
+        filter:drop-shadow(0 3px 6px rgba(0,0,0,0.6)); }
       #invcursor canvas { width:40px; height:40px; image-rendering:pixelated; }
+      #invcursor .cnt { position:absolute; right:-2px; bottom:-4px; font-size:13px; font-weight:800; color:#fff;
+        text-shadow:0 1px 2px #000, 0 0 3px #000; line-height:1; }
     `;
     document.head.appendChild(s);
   }
