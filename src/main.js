@@ -1951,12 +1951,14 @@ function fireBeam(gun, id, dt) {
     }
     if (any) { hud.hitMarker(false); damageNumbers.spawn(end, dmg, false); }
     blastCover(end, 1);                                   // melt through soft cover the beam touches
-    particles.burst(end.x, end.y, end.z, [255, 90, 120], 6);
   }
+  // A steady stream of impact sparks every frame (not a pulse per tick) so the beam
+  // reads as one continuous lance rather than repeated bursts.
+  if (Math.random() < 0.9) particles.burst(end.x, end.y, end.z, [255, 90, 120], 2);
   beamDrainAcc += gun.drain * dt;
   if (beamDrainAcc >= 1) { const n = Math.floor(beamDrainAcc); beamDrainAcc -= n; ammo[id] = Math.max(0, ammoFor(gun, id) - n); if (ammoFor(gun, id) <= 0) { laser.set(false); startReload(gun, id); } }
-  addShake(0.03); vmRecoil = Math.min(1, vmRecoil + 0.05); beamSnd = true;
-  beamSndCD -= dt; if (beamSndCD <= 0) { beamSndCD = 0.14; sfx.gunAt('rail', muzzle.x, muzzle.y, muzzle.z); }
+  addShake(0.02); vmRecoil = Math.min(1, vmRecoil + 0.04); beamSnd = true;
+  sfx.beamStart();                                        // one sustained beam tone (idempotent) — no repeated zaps
   beamBroadcastCD -= dt; if (beamBroadcastCD <= 0) { beamBroadcastCD = 0.1; broadcastFire('beam', muzzle, _dir, { r: blockDist, c: gun.color }); }
 }
 
@@ -2541,7 +2543,7 @@ function frame() {
   // Chakra jutsu: hold to gather chakra (charge), release to unleash. Cancel the charge
   // whenever we're not actively holding a charge weapon.
   if (!(active && gun && gun.charge)) { chargeT = 0; vmCharge = 0; }
-  if (!(active && gun && gun.kind === 'beam' && (mouseLeft || keyBreak))) { if (laser.group.visible) laser.set(false); beamSnd = false; }
+  if (!(active && gun && gun.kind === 'beam' && (mouseLeft || keyBreak))) { if (laser.group.visible) laser.set(false); if (beamSnd) { sfx.beamStop(); beamSnd = false; } }
   if (!(active && gun && gun.kind === 'sharingan' && (mouseLeft || keyBreak))) { if (sharinganFx.group.visible) sharinganFx.set(false); gazeTargetId = null; gazeHold = 0; }
   if (active && gun) {
     resetBreak();
@@ -2565,7 +2567,7 @@ function frame() {
     else if (gun.kind === 'beam') {
       const reloading = gun.mag && reloadingGun === id;
       if (lmb && !reloading && ammoFor(gun, id) > 0) fireBeam(gun, id, dt);
-      else { laser.set(false); if (lmb && !reloading) startReload(gun, id); }
+      else { laser.set(false); sfx.beamStop(); if (lmb && !reloading) startReload(gun, id); }
     }
     // Sharingan: RMB = Precognition (bullet-time); LMB = the gaze (Amaterasu + Genjutsu).
     else if (gun.kind === 'sharingan') {

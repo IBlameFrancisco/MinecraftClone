@@ -349,6 +349,28 @@ export class SFX {
     c.osc.stop(t + 0.25); c.sub.stop(t + 0.25);
     if (c.osc2) c.osc2.stop(t + 0.25);
   }
+
+  // ---- Laser cannon: one continuous searing beam tone (start/stop), not repeated
+  // zaps — a buzzy sawtooth + bright square through a shimmering bandpass. ----
+  beamStart() {
+    if (!this.ctx || this._beam) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.setValueAtTime(118, t);
+    const osc2 = this.ctx.createOscillator(); osc2.type = 'square'; osc2.frequency.setValueAtTime(740, t);
+    const filt = this.ctx.createBiquadFilter(); filt.type = 'bandpass'; filt.frequency.setValueAtTime(1700, t); filt.Q.value = 5;
+    const lfo = this.ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime(28, t);   // shimmer
+    const lfoG = this.ctx.createGain(); lfoG.gain.setValueAtTime(420, t); lfo.connect(lfoG); lfoG.connect(filt.frequency);
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.setTargetAtTime(0.06, t, 0.03);   // quick swell in
+    osc.connect(filt); osc2.connect(filt); filt.connect(g); g.connect(this.master);
+    osc.start(); osc2.start(); lfo.start();
+    this._beam = { osc, osc2, lfo, g };
+  }
+  beamStop() {
+    if (!this._beam) return;
+    const t = this.ctx.currentTime, c = this._beam; this._beam = null;
+    c.g.gain.setTargetAtTime(0.0001, t, 0.05);
+    c.osc.stop(t + 0.15); c.osc2.stop(t + 0.15); c.lfo.stop(t + 0.15);
+  }
   // Power-up shockwave when the chakra peaks.
   chakraBurst() {
     if (!this.ctx) return;
