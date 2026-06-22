@@ -45,20 +45,22 @@ const ARENA_STRUCT = [
 // Allied storm in from the sea (high +Z) across an open, obstacle-studded beach,
 // breach a seawall, and assault a fortified bluff of bunkers, MG nests and a
 // trench (low -Z) to capture the command bunker. Axis defend from the line.
-export const BEACH = { FLOOR: 50, HALF: 38, WALL_H: 9, OBJ_X: 0, OBJ_Z: -20, OBJ_R: 6 };
-// Spawn pools [x, z]: Allied wade in at the surf's edge (z≈24, sand at/above the
-// waterline so the camera never starts submerged); Axis hold the bunker line.
-export const BEACH_SPAWN_ALLIED = [[-24, 24], [-16, 25], [-8, 24], [0, 25], [8, 24], [16, 25], [24, 24], [0, 23]];
-export const BEACH_SPAWN_AXIS = [[-26, 2], [-13, 1], [0, -4], [13, 1], [26, 2], [-20, -5], [20, -5], [0, 2]];
+export const BEACH = { FLOOR: 50, HALF: 46, WALL_H: 9, OBJ_X: 0, OBJ_Z: -26, OBJ_R: 6, BOAT_DECK: 50 };
+// Landing-craft positions [x,z] — the Allied storm ashore from these. The fleet is
+// spread wide across the surf; soldiers spawn on the decks (BOAT_DECK) so the camera
+// clears the water, then pour down the ramps.
+export const BEACH_BOATS = [-34, -22, -10, 2, 14, 26, 38];
+export const BEACH_SPAWN_ALLIED = BEACH_BOATS.map((x) => [x, 33]);
+export const BEACH_SPAWN_AXIS = [[-30, 2], [-18, 1], [-6, -4], [6, 1], [18, 2], [30, 1], [-24, -5], [24, -5], [0, 2], [0, -6]];
 // Defender hold points: MG nests on the bluff front + the bunkers behind.
-export const BEACH_NESTS = [[-26, 4], [-13, 4], [0, 4], [13, 4], [26, 4], [-20, -4], [0, -4], [20, -4]];
+export const BEACH_NESTS = [[-30, 4], [-18, 4], [-6, 4], [6, 4], [18, 4], [30, 4], [-24, -4], [0, -4], [24, -4]];
 
-// Ground (top solid y) along the assault axis: deep sea -> surf -> beach ->
+// Ground (top solid y) along the assault axis: deep sea -> surf -> long beach ->
 // seawall shelf -> fortified bluff.
 export function beachGroundY(wz) {
   const F = BEACH.FLOOR;
-  if (wz >= 32) return F - 5;                                 // deep sea (landing craft float here)
-  if (wz >= 24) return F - Math.round((wz - 24) * 5 / 8);     // surf ramp: F .. F-5
+  if (wz >= 36) return F - 6;                                 // deep sea (the fleet floats here)
+  if (wz >= 26) return F - Math.round((wz - 26) * 6 / 10);    // surf ramp: F .. F-6
   if (wz >= 6) return F;                                      // open killing beach
   if (wz >= 4) return F + 1;                                  // seawall shelf (MG nests)
   return F + 2;                                               // fortified bluff (bunkers, trench)
@@ -110,7 +112,7 @@ export class WorldGen {
     if (this.beach) {
       const m = Math.max(Math.abs(wx), Math.abs(wz));
       if (m > BEACH.HALF) return 0;
-      if (m >= BEACH.HALF - 1) return BEACH.FLOOR + BEACH.WALL_H;
+      if (m >= BEACH.HALF - 2) return BEACH.FLOOR + BEACH.WALL_H + 3;
       return Math.max(BEACH.FLOOR, beachGroundY(wz)) + 2;     // approx (structures add a little)
     }
     const key = wx + ',' + wz;
@@ -326,12 +328,14 @@ export class WorldGen {
         const m = Math.max(Math.abs(wx), Math.abs(wz));
         if (m > HALF) continue;                                    // void beyond the map
         const gy = beachGroundY(wz);
-        if (m >= HALF - 1) {                                       // containing cliff/wall
-          for (let y = F - 6; y <= F + WH; y++) chunk.setLocal(lx, y, lz, y <= F - 5 ? BEDROCK : COBBLE);
+        // Containing bluff — a THICK, tall natural cliff on the map edges, kept far
+        // from the action (no thin boxes to snag on, like the old wall).
+        if (m >= HALF - 2) {
+          for (let y = F - 8; y <= F + WH + 3; y++) chunk.setLocal(lx, y, lz, y <= F - 7 ? BEDROCK : (y >= F + WH + 1 ? GRAVEL : STONE));
           continue;
         }
         const topMat = wz < 6 ? GRAVEL : SAND;                     // shingle bluff / sandy beach
-        for (let y = F - 6; y <= gy; y++) chunk.setLocal(lx, y, lz, y <= F - 6 ? BEDROCK : y >= gy - 2 ? topMat : STONE);
+        for (let y = F - 7; y <= gy; y++) chunk.setLocal(lx, y, lz, y <= F - 7 ? BEDROCK : y >= gy - 2 ? topMat : STONE);
         for (let y = gy + 1; y <= F; y++) if (chunk.getLocal(lx, y, lz) === AIR) chunk.setLocal(lx, y, lz, WATER);
         this.beachProps(chunk, lx, lz, wx, wz, gy);
       }
@@ -341,50 +345,62 @@ export class WorldGen {
   }
 
   beachProps(chunk, lx, lz, wx, wz, gy) {
-    const F = BEACH.FLOOR;
+    const F = BEACH.FLOOR, DECK = BEACH.BOAT_DECK;
     const set = (y, b) => chunk.setLocal(lx, y, lz, b);
 
-    // Landing craft (Higgins boats) in the surf, hull open toward the beach.
-    for (const cx of [-16, 0, 16]) {
-      if (Math.abs(wx - cx) <= 2 && wz >= 30 && wz <= 33) {
-        set(F - 4, PLANK);
-        if (Math.abs(wx - cx) === 2 || wz === 33) { set(F - 3, PLANK); set(F - 2, PLANK); }
+    // ---- Landing craft (Higgins boats): a fleet across the surf, with a raised deck
+    // the troops stand on and a ramp lowered toward the beach. ----
+    for (const cx of BEACH_BOATS) {
+      const dx = Math.abs(wx - cx);
+      if (dx <= 2 && wz >= 31 && wz <= 36) {
+        set(DECK, PLANK);                                          // deck floor
+        if (dx === 2 || wz === 36) { set(DECK + 1, PLANK); set(DECK + 2, PLANK); }   // low hull walls (sides + stern) — open bow
+        if (wz === 36 && dx === 0) set(DECK + 3, COAL_ORE);        // a small gun tub on the stern
       }
+      if (dx <= 2 && wz >= 28 && wz <= 30) set(DECK - (31 - wz), PLANK);   // lowered bow ramp down to the surf
+    }
+    // A couple of wrecked, half-sunk craft for atmosphere.
+    for (const [cx, cz] of [[-40, 30], [40, 28]]) {
+      if (Math.abs(wx - cx) <= 2 && Math.abs(wz - cz) <= 1) { set(F - 4, PLANK); if (((wx + wz) & 1) === 0) set(F - 3, PLANK); }
     }
 
-    // Beach obstacles (sparse, deterministic): hedgehog stakes, sandbags, craters.
-    if (wz >= 9 && wz <= 23) {
+    // ---- Beach obstacles (denser, cinematic): hedgehogs, Belgian gates, wire,
+    // sandbags, craters, fallen-soldier helmets. ----
+    if (wz >= 8 && wz <= 25) {
       const h = hash2(wx, wz);
-      if (h < 0.020) { set(gy + 1, IRON_ORE); set(gy + 2, LOG); set(gy + 3, IRON_ORE); }   // anti-boat hedgehog
-      else if (h < 0.034) set(gy + 1, GRAVEL);                                              // lone sandbag
-      else if (h < 0.040) set(gy, COAL_ORE);                                                // scorched crater
+      if (h < 0.028) { set(gy + 1, IRON_ORE); set(gy + 2, LOG); set(gy + 3, IRON_ORE); }   // Czech hedgehog
+      else if (h < 0.044) { set(gy + 1, LOG); set(gy + 2, LOG); }                          // Belgian-gate post
+      else if (h < 0.060) set(gy + 1, GRAVEL);                                             // sandbag / debris
+      else if (h < 0.072) set(gy, COAL_ORE);                                               // scorched crater
+      else if (h < 0.080) set(gy + 1, IRON_ORE);                                           // dropped helmet / kit
     }
-    if (wz === 8 && (wx & 1) === 0) set(F + 1, IRON_ORE);          // wire / stake line out on the sand
+    // Barbed-wire stake lines strung across the beach.
+    if ((wz === 9 || wz === 16) && (((wx % 3) + 3) % 3) === 0) set(F + 1, IRON_ORE);
 
-    // Seawall at the top of the beach: 2 high, with climb gaps ~every 14 blocks.
-    if (wz === 6 && (((wx % 14) + 14) % 14) >= 3) { set(F + 1, COBBLE); set(F + 2, COBBLE); }
+    // ---- Seawall at the top of the beach: 3 high, with climb gaps ~every 15. ----
+    if (wz === 6 && (((wx % 15) + 15) % 15) >= 3) { set(F + 1, COBBLE); set(F + 2, COBBLE); set(F + 3, GRAVEL); }
 
-    // MG nests on the shelf: sandbag U facing the beach, with the gun behind it.
-    for (const nx of [-26, -13, 0, 13, 26]) {
+    // ---- MG nests on the shelf: sandbag horseshoe facing the beach, gun behind. ----
+    for (const [nx] of BEACH_NESTS) {
       if (Math.abs(wx - nx) <= 2 && (wz === 4 || wz === 5)) {
-        if (wz === 5 || Math.abs(wx - nx) === 2) set(F + 2, GRAVEL);   // front (beach side) + sides
+        if (wz === 5 || Math.abs(wx - nx) === 2) set(F + 2, GRAVEL);
       }
-      if (wx === nx && wz === 4) { set(F + 2, COBBLE); set(F + 3, COAL_ORE); }  // the gun
+      if (wx === nx && wz === 4) { set(F + 2, COBBLE); set(F + 3, COAL_ORE); }
     }
 
-    // Bunkers on the bluff: hollow cobble shell, beach-facing firing slit.
-    for (const cx of [-20, 0, 20]) {
+    // ---- Bunkers on the bluff: hollow cobble shell, beach-facing firing slit. ----
+    for (const cx of [-30, -10, 10, 30]) {
       if (Math.abs(wx - cx) <= 3 && wz >= -6 && wz <= -2) {
-        set(F + 5, COBBLE);                                         // roof
+        set(F + 5, COBBLE);                                        // roof
         const onWall = Math.abs(wx - cx) === 3 || wz === -6 || wz === -2;
         if (onWall) { for (let y = F + 3; y <= F + 4; y++) if (!(wz === -2 && y === F + 4)) set(y, COBBLE); }
         else { set(F + 3, AIR); set(F + 4, AIR); }
       }
     }
 
-    // Trench tying the line together: 1 deep, sandbag lip toward the beach.
-    if (wz >= -1 && wz <= 1 && Math.abs(wx) <= 30) set(F + 2, AIR);
-    if (wz === 2 && Math.abs(wx) <= 30 && (wx & 1) === 0) set(F + 3, GRAVEL);
+    // ---- Trench tying the line together: 1 deep, sandbag lip toward the beach. ----
+    if (wz >= -1 && wz <= 1 && Math.abs(wx) <= 38) set(F + 2, AIR);
+    if (wz === 2 && Math.abs(wx) <= 38 && (wx & 1) === 0) set(F + 3, GRAVEL);
 
     this.beachObjective(chunk, lx, lz, wx, wz);
   }

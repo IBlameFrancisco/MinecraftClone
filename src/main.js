@@ -743,16 +743,8 @@ function battleDeath() {
     hud.announce('Eliminated — spectating', '#ff5b5b'); hud.flashHurt();
     return;
   }
-  if (gameMode === 'war' && myTeam === WAR_ALLIED) {
-    if (warTickets > 0) warTickets--;     // a reinforcement comes ashore in your place
-    else {                                // assault spent — spectate from above the bluff
-      eliminated = true; player.flying = true;
-      player.pos.set(BEACH.OBJ_X + 0.5, BEACH.FLOOR + 26, BEACH.OBJ_Z + 0.5); player.vel.set(0, 0, 0);
-      health = 20; hud.setHealth(20); invuln = 999;
-      hud.announce('No reinforcements left — spectating', '#ff5b5b'); hud.flashHurt();
-      return;
-    }
-  }
+  // War: both sides reinforce endlessly — the attack only ends when the clock runs
+  // out (Axis hold) or the beachhead is taken (Allied win), so just respawn.
   const sp = teamSpawnPoint(myTeam);
   player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   if (sp.yaw !== undefined) player.yaw = sp.yaw;
@@ -799,7 +791,9 @@ function teamSpawnPoint(team) {
   if (gameMode === 'war') {
     const pool = team === WAR_AXIS ? BEACH_SPAWN_AXIS : BEACH_SPAWN_ALLIED;
     const [x, z] = pool[(Math.random() * pool.length) | 0];
-    return { x: x + 0.5, y: beachGroundY(z) + 1.2, z: z + 0.5, yaw: team === WAR_AXIS ? Math.PI : 0 };
+    // Allied stand on the landing-craft decks (above the water); Axis on the bluff line.
+    const y = (team === WAR_AXIS ? beachGroundY(z) : Math.max(beachGroundY(z), BEACH.BOAT_DECK)) + 1.2;
+    return { x: x + 0.5, y, z: z + 0.5, yaw: team === WAR_AXIS ? Math.PI : 0 };
   }
   let pool = BATTLE_SPAWNS;
   if (team === TEAM_RED) pool = BATTLE_SPAWNS.filter(([x]) => x < 0);
@@ -900,8 +894,9 @@ function setupWar(humans) {
   if (!isAuthority()) return;
 
   const hN = humans.length;
-  const axisN = Math.max(3, battleCfg.size - (warSide === 'axis' ? hN : 0));
-  const alliedN = Math.max(5, battleCfg.size + 4 - (warSide === 'allied' ? hN : 0));
+  // A whole division storms the beach: far more Allied than Axis (~3:1).
+  const axisN = Math.max(4, battleCfg.size - (warSide === 'axis' ? hN : 0));
+  const alliedN = Math.min(26, Math.max(12, battleCfg.size * 3 - (warSide === 'allied' ? hN : 0)));
   const teams = [];
   for (let i = 0; i < alliedN; i++) teams.push(WAR_ALLIED);
   for (let i = 0; i < axisN; i++) teams.push(WAR_AXIS);
@@ -1030,16 +1025,14 @@ function warTick(dt) {
   if (allied > 0 && axis === 0) warCapture = Math.min(100, warCapture + dt * (100 / 14));      // ~14s uncontested to take it
   else if (axis > 0 && allied === 0) warCapture = Math.max(0, warCapture - dt * (100 / 22));   // Axis retake it slower
   if (matchWinner) return;
-  // Tell the players the assault is on its last legs (so killing the rest = a win).
-  if (warTickets <= 0 && !warFinalAnnounced) {
+  // One-minute warning so the defenders know to dig in.
+  if (warTimer <= 60 && !warFinalAnnounced) {
     warFinalAnnounced = true;
-    hud.announce(myTeam === WAR_AXIS ? 'Allied reinforcements spent — repel the last men!' : 'No reinforcements left — this is your last push!', '#ffd86b');
+    hud.announce(myTeam === WAR_AXIS ? 'One minute — hold the line!' : 'One minute left — take the bunker!', '#ffd86b');
   }
+  // The assault ends only when the beachhead is taken (Allied) or the clock runs out (Axis).
   if (warCapture >= 100) { endMatch('Allied — beachhead secured'); return; }
   if (warTimer <= 0) { endMatch('Axis — the line held'); return; }
-  const alliedRemotes = mp.online ? [...mp.remotes].filter(([id, r]) => !r.bot && r.group.visible && teamOf(id) === WAR_ALLIED).length : 0;
-  const alliedAlive = (myTeam === WAR_ALLIED && !eliminated && health > 0 ? 1 : 0) + botMgr.bots.filter((b) => b.alive && b.team === WAR_ALLIED).length + alliedRemotes;
-  if (warTickets <= 0 && alliedAlive === 0) endMatch('Axis — assault repelled');
 }
 
 function rebuildBoard() {
@@ -1148,12 +1141,7 @@ function manageBots(dt) {
     if (!b.alive && !b.deathProcessed) { b.deathProcessed = true; onBotKilled(b); }
     else if (respawns && !b.alive && b.respawnIn > 0) {
       b.respawnIn -= dt;
-      if (b.respawnIn <= 0) {
-        // War: Allied attackers cost a reinforcement ticket to land again; once spent
-        // they stay down. Axis defenders hold the line and respawn freely.
-        if (gameMode === 'war' && b.team === WAR_ALLIED) { if (warTickets > 0) { warTickets--; respawnBot(b); } }
-        else respawnBot(b);
-      }
+      if (b.respawnIn <= 0) respawnBot(b);   // War: the assault is relentless — everyone respawns until the clock runs out
     }
   }
 }
@@ -2109,7 +2097,7 @@ function frame() {
     else if (gameMode === 'war') {
       const role = myTeam === WAR_ALLIED ? '🪖 Allied' : '🛡 Axis';
       const t = Math.max(0, warTimer), mm = Math.floor(t / 60), ss = Math.floor(t % 60);
-      info = `D-Day · ${role} · Beachhead ${Math.floor(warCapture)}% · ${mm}:${String(ss).padStart(2, '0')} · Reinf ${Math.max(0, warTickets)}`;
+      info = `D-Day · ${role} · Beachhead ${Math.floor(warCapture)}% · ${mm}:${String(ss).padStart(2, '0')} left`;
       hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo());   // keep the scoreboard title's clock live while Tab is held
     }
     else info = `Deathmatch · first to ${scoreLimit}`;
