@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows.
@@ -546,6 +546,93 @@ export class ChakraFx {
   _dispose(parent, g) { parent.remove(g); g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
 }
 
+// ---------------- Laser cannon (continuous beam) ----------------
+// One persistent beam the holder sustains while firing: a white-hot core inside a
+// coloured glow + soft outer shell, with a pulsing muzzle flare and impact burst.
+export class LaserBeam {
+  constructor(scene) {
+    this.group = new THREE.Group(); scene.add(this.group);
+    const cyl = (r, c, o) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 14, 1, true),
+      new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    this.beam = new THREE.Group();
+    this.core = cyl(0.05, 0xffffff, 1);
+    this.glow = cyl(0.16, 0xff2e54, 0.6);
+    this.outer = cyl(0.34, 0xff5570, 0.22);
+    this.beam.add(this.outer, this.glow, this.core);
+    this.beam.renderOrder = 999;
+    const sprite = (c) => new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    this.impact = sprite(0xff5570);
+    this.flare = sprite(0xffd0d8);
+    this.group.add(this.beam, this.impact, this.flare);
+    this.group.visible = false; this.t = 0;
+    this._up = new THREE.Vector3(0, 1, 0); this._q = new THREE.Quaternion();
+  }
+  set(active, start, end, color) {
+    this.group.visible = !!active;
+    if (!active) return;
+    const dir = end.clone().sub(start), len = Math.max(0.1, dir.length());
+    this._q.setFromUnitVectors(this._up, dir.normalize());
+    this.beam.position.copy(start).add(end).multiplyScalar(0.5);
+    this.beam.quaternion.copy(this._q);
+    this.beam.scale.y = len;
+    this.impact.position.copy(end);
+    this.flare.position.copy(start);
+    if (color != null) { this.glow.material.color.setHex(color); this.outer.material.color.setHex(color); this.impact.material.color.setHex(color); }
+  }
+  update(dt) {
+    if (!this.group.visible) return;
+    this.t += dt;
+    const p = 1 + Math.sin(this.t * 55) * 0.3;
+    this.core.scale.set(p, 1, p);
+    const gp = 1 + Math.sin(this.t * 33) * 0.35; this.glow.scale.set(gp, 1, gp);
+    this.outer.material.opacity = 0.16 + Math.abs(Math.sin(this.t * 20)) * 0.12;
+    this.impact.scale.setScalar(1.4 + Math.sin(this.t * 46) * 0.4);
+    this.flare.scale.setScalar(0.9 + Math.sin(this.t * 70) * 0.25);
+  }
+}
+
+// ---------------- Hollow Purple (Gojo) ----------------
+// The clap of limitless red + blue: a wide imaginary-mass corridor erased in a
+// single purple blast. A transient expanding beam with red/blue fringes, a muzzle
+// flash and an impact shockwave.
+export class HollowPurple {
+  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; }
+  spawn(start, end, radius) {
+    const g = new THREE.Group();
+    const dir = end.clone().sub(start), len = Math.max(0.5, dir.length());
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    const beam = new THREE.Group(); beam.quaternion.copy(q); beam.position.copy(start).add(end).multiplyScalar(0.5);
+    const cyl = (r, c, o) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 20, 1, true),
+      new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    const core = cyl(radius * 0.3, 0xffffff, 1);
+    const mid = cyl(radius * 0.66, 0x9a3cff, 0.85);
+    const outer = cyl(radius * 1.0, 0xb060ff, 0.4);
+    const red = cyl(radius * 1.12, 0xff2a44, 0.22);
+    const blue = cyl(radius * 1.2, 0x2a6bff, 0.18);
+    beam.add(outer, blue, red, mid, core);
+    g.add(beam);
+    const sprite = (c, s, pos) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); sp.scale.setScalar(s); sp.position.copy(pos); g.add(sp); return sp; };
+    const flash = sprite(0xdcb0ff, radius * 2.6, start);
+    const shock = sprite(0xc070ff, radius * 1.2, end);
+    this.group.add(g);
+    this.list.push({ g, beam, core, mid, outer, red, blue, flash, shock, t: 0, max: 0.62, radius });
+  }
+  update(dt) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const f = this.list[i]; f.t += dt; const k = Math.min(1, f.t / f.max), fade = 1 - k;
+      const grow = 0.32 + 0.68 * (1 - Math.pow(1 - k, 3));
+      f.beam.scale.set(grow, 1, grow);
+      f.core.material.opacity = fade; f.mid.material.opacity = 0.85 * fade; f.outer.material.opacity = 0.4 * fade;
+      f.red.material.opacity = 0.22 * fade; f.blue.material.opacity = 0.18 * fade;
+      f.beam.rotation.y += dt * 4.5;
+      f.flash.material.opacity = Math.max(0, 1 - k * 2.2); f.flash.scale.setScalar(f.radius * (2.6 + k * 2.4));
+      f.shock.material.opacity = Math.max(0, 1 - k * 1.5); f.shock.scale.setScalar(f.radius * (1.2 + k * 7));
+      if (f.t >= f.max) { this._dispose(f.g); this.list.splice(i, 1); }
+    }
+  }
+  _dispose(g) { this.group.remove(g); g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
+}
+
 // ---------------- Portals ----------------
 export class Portals {
   constructor(scene) {
@@ -871,6 +958,28 @@ export function makeViewModel(id) {
       orbAnim(charge, dt, t);
       const c = Math.max(0, Math.min(1, charge));
       rim.scale.setScalar(0.7 + 0.75 * c); rim.material.opacity = 0.18 + 0.6 * c;
+    };
+  } else if (id === LASER_CANNON) {
+    box(0.2, 0.2, 0.7, 0x2a2030, 0, 0, -0.3);              // heavy emitter body
+    box(0.24, 0.24, 0.16, 0x140c1c, 0, 0, -0.62);          // muzzle housing
+    const lens = box(0.12, 0.12, 0.1, 0xff2e54, 0, 0, -0.7); lens.material = new THREE.MeshBasicMaterial({ color: 0xff516e, fog: false });
+    const r1 = box(0.04, 0.04, 0.6, 0xff2e54, 0.12, 0.08, -0.3); r1.material = new THREE.MeshBasicMaterial({ color: 0xff5570, fog: false });
+    const r2 = box(0.04, 0.04, 0.6, 0xff2e54, -0.12, 0.08, -0.3); r2.material = new THREE.MeshBasicMaterial({ color: 0xff5570, fog: false });
+    box(0.12, 0.16, 0.18, 0x3a2a1a, 0, -0.05, 0.16);       // coolant drum
+    box(0.1, 0.2, 0.14, 0x201828, 0, -0.16, 0.04);         // grip
+  } else if (id === HOLLOW_PURPLE) {
+    // A cursed-energy gauntlet cupping the red + blue spheres that clap into purple.
+    box(0.17, 0.15, 0.2, 0xe8b89a, 0, -0.13, -0.32);        // hand
+    box(0.2, 0.12, 0.16, 0x241a33, 0, -0.2, -0.18);         // dark gauntlet
+    const red = box(0.12, 0.12, 0.12, 0xff2a44, 0.1, 0.0, -0.42); red.material = new THREE.MeshBasicMaterial({ color: 0xff3a54, fog: false });
+    const blue = box(0.12, 0.12, 0.12, 0x2a6bff, -0.1, 0.0, -0.42); blue.material = new THREE.MeshBasicMaterial({ color: 0x3a7bff, fog: false });
+    const haze = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xb060ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    haze.scale.setScalar(0.5); haze.position.set(0, 0.0, -0.42); g.add(haze);
+    g.userData.chakraAnim = (charge, dt, t) => {
+      const c = Math.max(0, Math.min(1, charge)), conv = 0.1 * (1 - c);   // red+blue converge as it charges
+      red.position.x = conv; blue.position.x = -conv;
+      const s = 0.7 + 0.6 * c; red.scale.setScalar(s); blue.scale.setScalar(s);
+      haze.material.opacity = 0.2 + 0.6 * c; haze.scale.setScalar(0.4 + 0.7 * c);
     };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xd6d6d6, 0, 0, -0.2);

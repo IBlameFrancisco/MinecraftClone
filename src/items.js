@@ -35,8 +35,10 @@ export const BLACK_HOLE_BOMB = 282;
 export const HEAVY_MG = 283;
 export const RASENGAN = 284;
 export const RASENSHURIKEN = 285;
+export const LASER_CANNON = 286;
+export const HOLLOW_PURPLE = 287;
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -85,6 +87,14 @@ export const ITEMS = {
   // dome of microscopic wind blades (AoE). A fuller charge throws a faster, bigger,
   // far deadlier dome.
   [RASENSHURIKEN]: { name: 'Rasenshuriken', gun: { kind: 'rasenshuriken', charge: 1.7, rate: 0.3, damage: 0, splash: 105, radius: 10, speed: 34, range: 92, mag: 1, reload: 2.3, recoil: 0.05, color: 0xbfe9ff } },
+  // Continuous laser cannon: hold to pour a searing beam down a line. `dps` is the
+  // sustained damage (applied every `tick`s); `drain` is the per-second heat cost of
+  // the `mag` battery. Bots fire it as a slower `rate`/`damage` bolt.
+  [LASER_CANNON]: { name: 'Laser Cannon', gun: { kind: 'beam', dps: 78, tick: 0.06, range: 120, mag: 100, drain: 17, reload: 2.6, recoil: 0.012, rate: 0.5, damage: 16, color: 0xff2e54 } },
+  // Cursed technique — Hollow Purple: clap the limitless red and blue together and
+  // erase a wide corridor with an imaginary-mass purple beam. A charged jutsu (draws
+  // chakra); a fuller charge means a wider, longer, more annihilating blast.
+  [HOLLOW_PURPLE]: { name: 'Hollow Purple', gun: { kind: 'hollowpurple', charge: 1.9, rate: 0.4, damage: 120, radius: 4.2, range: 110, knockback: 30, recoil: 0.06, color: 0x9a3cff } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
