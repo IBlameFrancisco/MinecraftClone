@@ -205,9 +205,13 @@ class Mob {
     this.onGround = moveEntity(world, this.pos, this.vel, this.half, this.height, dt);
 
     // Daylight burning for sky-exposed undead keeps the night population in check.
-    if (this.def.burns && !ctx.isNight) {
-      const exposed = this.pos.y >= world.getHeight(Math.floor(this.pos.x), Math.floor(this.pos.z));
-      if (exposed) { this.health -= dt * 3; if (this.health <= 0) this.dead = true; }
+    this.burning = false;
+    if (this.def.burns && !ctx.isNight && this.pos.y >= world.getHeight(Math.floor(this.pos.x), Math.floor(this.pos.z))) {
+      this.burning = true;
+      this.health -= dt * 3; if (this.health <= 0) this.dead = true;
+      if (ctx.fire && Math.random() < dt * 30) {     // visible flames + smoke rising off them
+        ctx.fire(this.pos.x + (Math.random() - 0.5) * this.half, this.pos.y + this.height * (0.2 + Math.random() * 0.8), this.pos.z + (Math.random() - 0.5) * this.half);
+      }
     }
 
     // --- Animation ---
@@ -227,6 +231,7 @@ class Mob {
     let er = 0, eg = 0, eb = 0;
     if (this.hurtFlash > 0) { this.hurtFlash -= dt; er = 0.5; }
     else if (this.fuse > 0) { const f = Math.sin(this.fuse * 22) * 0.5 + 0.5; er = f * 0.9; eg = f * 0.9; eb = f * 0.2; }
+    else if (this.burning) { const f = Math.sin(performance.now() * 0.02) * 0.35 + 0.6; er = f; eg = f * 0.4; eb = 0; }   // smouldering glow
     this.mesh.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(er, eg, eb); });
   }
 

@@ -13,7 +13,7 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { REACH, SEA_LEVEL } from './constants.js';
 import {
   AIR, WATER, BEDROCK, GRASS, DIRT, STONE, COBBLE, COAL_ORE, IRON_ORE,
-  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, SAND, LOG, PLANK, SNOW, GRAVEL, WOOL,
+  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, SAND, LOG, PLANK, SNOW, GRAVEL, WOOL, CACTUS,
   hardness, BLOCK_TOOL, BLOCK_REQUIRES,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
@@ -127,10 +127,14 @@ function sizePost() {
 }
 sizePost();
 
-// Lights — used only by mob (Lambert) materials; chunks bake their own lighting.
-const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+// Lights — used only by mob/avatar (Lambert) materials; chunks bake their own lighting.
+// A hemisphere fill (sky tint above, dark ground below) gives blocky mobs even,
+// natural shading instead of a flat ambient.
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x2a2a30, 0.5);
 const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-scene.add(ambient, sun);
+scene.add(ambient, hemi, sun);
+const _lightDir = new THREE.Vector3();
 
 // ---------- Seeds ----------
 function hashSeed(s) {
@@ -865,12 +869,14 @@ function setupMatch() {
 
 // D-Day uniforms: olive-drab for the Allies, feldgrau for the Axis. The team-colour
 // override on avatars becomes the faction tunic colour (friend/foe read by uniform).
-function warColor(team) { return team === WAR_AXIS ? 0x474d3f : 0x595d39; }
+// Distinct faction uniforms so foe vs friend reads at a glance: Axis cold
+// field-grey with a near-black Stahlhelm; Allied warm khaki with an olive M1.
+function warColor(team) { return team === WAR_AXIS ? 0x5b6066 : 0x7a7038; }
 function factionSkin(team) {
   const axis = team === WAR_AXIS;
-  return { skin: 0xdcb38e, hair: axis ? 0x3a3026 : 0x4a3320, hairStyle: 'short', eye: 0x2a2a2a,
-    shirt: axis ? 0x474d3f : 0x595d39, pants: axis ? 0x35392e : 0x42452a,
-    hat: 'helmet', hatColor: axis ? 0x33372d : 0x474b30 };
+  return { skin: 0xdcb38e, hair: axis ? 0x2e2a26 : 0x4a3320, hairStyle: 'short', eye: 0x2a2a2a,
+    shirt: axis ? 0x5b6066 : 0x7a7038, pants: axis ? 0x2f3338 : 0x4f4420,
+    hat: 'helmet', hatColor: axis ? 0x23262a : 0x5c5a2c };
 }
 const _pick = (a) => a[(Math.random() * a.length) | 0];
 
@@ -1325,6 +1331,26 @@ function breakBlock(x, y, z, dropOk = true) {
     if (id === LEAVES) { if (Math.random() < 0.06) inventory.add(APPLE, 1); }
     else { const d = dropFor(id); if (d !== AIR) inventory.add(d, 1); }
   }
+  if (id !== WATER && y <= SEA_LEVEL) floodWater(x, y, z);   // water rushes into a hole opened below the sea
+}
+
+// Flood water into newly-opened air at/below sea level that's connected to an
+// existing water source (down + sideways, never up), so destroying a wall lets
+// the sea pour in. Bounded so a break can't fill an entire ocean of caverns.
+function floodWater(sx, sy, sz) {
+  const isWater = (x, y, z) => world.getBlock(x, y, z) === WATER;
+  if (!(isWater(sx, sy + 1, sz) || isWater(sx + 1, sy, sz) || isWater(sx - 1, sy, sz) || isWater(sx, sy, sz + 1) || isWater(sx, sy, sz - 1))) return;
+  const batch = [], q = [[sx, sy, sz]], seen = new Set([editKey(sx, sy, sz)]);
+  while (q.length && batch.length < 320) {
+    const [x, y, z] = q.shift();
+    if (world.getBlock(x, y, z) !== AIR || y > SEA_LEVEL) continue;
+    recordEdit(x, y, z, WATER); batch.push([x, y, z, WATER]);
+    for (const [nx, ny, nz] of [[x, y - 1, z], [x + 1, y, z], [x - 1, y, z], [x, y, z + 1], [x, y, z - 1]]) {
+      const key = editKey(nx, ny, nz);
+      if (!seen.has(key) && ny <= SEA_LEVEL && world.getBlock(nx, ny, nz) === AIR) { seen.add(key); q.push([nx, ny, nz]); }
+    }
+  }
+  if (batch.length) mp.sendEdits(batch);
 }
 
 // Mining effectiveness: matching tool speeds it up; some blocks need a tool to drop.
@@ -1927,6 +1953,16 @@ function onKill(mob) {
 }
 
 // ---------- Survival tick (hunger / regen) ----------
+let cactusCD = 0;
+function cactusContact(dt) {
+  cactusCD -= dt; if (cactusCD > 0) return;
+  const x0 = Math.floor(player.pos.x - 0.34), x1 = Math.floor(player.pos.x + 0.34);
+  const z0 = Math.floor(player.pos.z - 0.34), z1 = Math.floor(player.pos.z + 0.34);
+  const y0 = Math.floor(player.pos.y + 0.1), y1 = Math.floor(player.pos.y + 1.7);
+  for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) for (let y = y0; y <= y1; y++) {
+    if (world.getBlock(x, y, z) === CACTUS) { damagePlayer(1); cactusCD = 0.5; return; }
+  }
+}
 function survivalTick(dt, moving) {
   if (mode !== SURVIVAL || dead) return;
   const peaceful = difficulty === PEACEFUL;
@@ -2007,13 +2043,18 @@ function frame() {
   hud.setClock(sky.clockString());
   waterTime.value += sdt;
 
-  // Drive mob lighting from the sun.
-  sun.position.copy(sky.sunDir).multiplyScalar(100);
-  sun.color.copy(sky.dirColor); sun.intensity = sky.dirIntensity;
-  ambient.color.copy(sky.dirColor); ambient.intensity = sky.ambIntensity;
+  // Drive mob lighting from the sky. Keep the key light above the horizon so mobs
+  // are never lit from below (which looked wrong at night), with a brightness floor.
+  _lightDir.copy(sky.sunDir);
+  if (_lightDir.y < 0.35) { _lightDir.y = 0.35; _lightDir.normalize(); }
+  sun.position.copy(_lightDir).multiplyScalar(100);
+  sun.color.copy(sky.dirColor); sun.intensity = Math.max(0.35, sky.dirIntensity);
+  ambient.color.copy(sky.dirColor); ambient.intensity = Math.max(0.25, sky.ambIntensity * 0.6);
+  hemi.color.copy(sky.uniforms.topColor.value); hemi.intensity = Math.max(0.4, sky.ambIntensity + 0.15);
 
   mobs.update(loaded && !dead && mode !== BATTLE && !frozen ? dt : 0, player, sky.isNight, {
     damagePlayer, onKill, explode, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
+    fire: (x, y, z) => { particles.burst(x, y, z, [255, 150, 40], 2); if (Math.random() < 0.5) particles.burst(x, y, z, [90, 90, 90], 1); },
   });
 
   // Bots + match flow: the authority simulates; guests render via broadcasts.
@@ -2132,6 +2173,7 @@ function frame() {
   if (chakraOn) { hud.setChakra(chakraEnergy / CHAKRA_MAX, chakraEnergy >= CHAKRA_MAX - 0.5); hud.setChakraAura(chakraAuraI * 0.85); }
 
   if (active) survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
+  if (active && (mode === SURVIVAL || mode === BATTLE)) cactusContact(dt);   // brushing a cactus hurts (each client damages itself → co-op safe)
 
   // Aim-down-sights (every non-scope gun) + animated viewmodel.
   const adsActive = active && gun && !gun.zoom && gun.kind !== 'portal' && mouseRight;
@@ -2210,6 +2252,8 @@ window.__game = {
   __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
   __trigger: (down) => { mouseLeft = !!down; triggerConsumed = false; },   // drive the charge-up loop in tests
   __channel: (on) => { chargingChakra = !!on; },                           // simulate holding C in tests
+  __break: (x, y, z) => breakBlock(x, y, z, false),                        // test hook: break a block (runs water-fill)
+  __cactusContact: (dt) => cactusContact(dt),
   get vmCharge() { return vmCharge; },
   get chakraEnergy() { return chakraEnergy; },
   set chakraEnergy(v) { chakraEnergy = v; },
