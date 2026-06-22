@@ -205,12 +205,13 @@ export class HUD {
     this.hurtEl.id = 'hurt';
     document.getElementById('ui').appendChild(this.hurtEl);
 
-    // Chakra gauge (battle/creative): a blue bar under the health icons.
+    // Chakra gauge (battle/creative): a blue bar just above the status row. Parented
+    // to #ui (not #status) so it shows in Creative too and never rides the menu.
     this.chakraEl = document.createElement('div');
     this.chakraEl.id = 'chakrabar';
-    this.chakraEl.style.cssText = 'display:none;width:200px;height:9px;margin-top:5px;border-radius:5px;background:rgba(10,20,40,0.55);box-shadow:inset 0 0 3px rgba(0,0,0,0.6);overflow:hidden;position:relative;';
-    this.chakraEl.innerHTML = '<div class="cfill" style="height:100%;width:100%;border-radius:5px;background:linear-gradient(90deg,#1f6dd0,#6fc8ff);transition:width 0.08s linear;"></div><span class="clabel" style="position:absolute;left:7px;top:-2px;font:700 9px sans-serif;color:#d6ecff;text-shadow:0 1px 2px #000;letter-spacing:1px;">CHAKRA</span>';
-    wrap.appendChild(this.chakraEl);
+    this.chakraEl.style.cssText = 'display:none;position:absolute;left:50%;bottom:100px;transform:translateX(-50%);width:230px;height:11px;border-radius:6px;background:rgba(10,20,40,0.55);box-shadow:inset 0 0 3px rgba(0,0,0,0.6);overflow:hidden;pointer-events:none;z-index:6;';
+    this.chakraEl.innerHTML = '<div class="cfill" style="height:100%;width:100%;border-radius:6px;background:linear-gradient(90deg,#1f6dd0,#6fc8ff);transition:width 0.08s linear;"></div><span class="clabel" style="position:absolute;left:9px;top:0px;font:700 9px sans-serif;color:#d6ecff;text-shadow:0 1px 2px #000;letter-spacing:1px;line-height:11px;">CHAKRA</span>';
+    document.getElementById('ui').appendChild(this.chakraEl);
     this.chakraFill = this.chakraEl.querySelector('.cfill');
 
     // Full-screen chakra aura glow (blue edges) while channelling.
@@ -230,6 +231,8 @@ export class HUD {
   }
   // Channel aura overlay intensity 0..1.
   setChakraAura(intensity) { if (this.chakraAuraEl) this.chakraAuraEl.style.opacity = String(Math.max(0, Math.min(1, intensity))); }
+  // Hide the health/hunger row (e.g. returning to the home menu).
+  hideStatus() { if (this.statusEl) this.statusEl.style.display = 'none'; }
 
   showName(name) {
     this.nameLabel.textContent = name;

@@ -366,7 +366,12 @@ const SHURIKEN_TEX = shurikenTexture();
 // Rasengan + Rasenshuriken effects: the flying shuriken projectile, plus transient
 // chakra bursts (the Rasengan grind-flash and the Rasenshuriken wind-blade dome).
 export class ChakraFx {
-  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.proj = []; this.fx = []; }
+  constructor(scene) {
+    this.group = new THREE.Group(); scene.add(this.group); this.proj = []; this.fx = [];
+    // Scratch vectors for the projectile steering/physics (avoid per-frame allocation).
+    this._cur = new THREE.Vector3(); this._sub = new THREE.Vector3();
+    this._vh = new THREE.Vector3(); this._axle = new THREE.Vector3(); this._UP = new THREE.Vector3(0, 1, 0);
+  }
 
   // Throw a spinning Rasenshuriken; on impact it detonates the dome and calls onImpact.
   // It flies as the charged buzzsaw — a flat saw blade on a (near-)vertical axle,
@@ -388,7 +393,9 @@ export class ChakraFx {
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x8fd6ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); glow.scale.setScalar(2.8);
     g.add(core, glow);
     this.group.add(g);
-    this.proj.push({ g, spinner, pos: pos.clone(), vel: d.multiplyScalar(gun.speed), gun, ownerId, onImpact, travelled: 0 });
+    const speed = gun.speed;
+    this.proj.push({ g, pivot, spinner, pos: pos.clone(), vel: d.multiplyScalar(speed), gun, ownerId, onImpact, travelled: 0,
+      guided: true, turn: 3.6, gravity: 4, cruise: speed, maxSpeed: speed * 1.25 });
   }
 
   // ---- Chakra charge aura (the Naruto power-up) ----
@@ -463,17 +470,52 @@ export class ChakraFx {
   }
 
   update(dt, world, hooks) {
+    const guide = hooks && hooks.guideDir;            // unit dir to steer toward (the thrower's aim), or null
     for (let i = this.proj.length - 1; i >= 0; i--) {
       const p = this.proj[i];
-      const step = p.vel.clone().multiplyScalar(dt); p.pos.add(step); p.travelled += step.length();
-      p.g.position.copy(p.pos);
-      p.spinner.rotation.y -= dt * 34;                  // clockwise buzzsaw about the vertical axle
-      const solid = isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
-      if (solid || p.travelled > p.gun.range || (hooks && hooks.anchorAt && hooks.anchorAt(p.pos))) {
+      // ---- Projectile physics: steer toward the thrower's aim (limited turn rate,
+      // so you curve it by sweeping your view), then fall under gravity, speed-capped. ----
+      if (p.guided && guide) {
+        const speed = p.vel.length() || 0.001;
+        this._cur.copy(p.vel).multiplyScalar(1 / speed);
+        const dot = Math.max(-1, Math.min(1, this._cur.dot(guide)));
+        const ang = Math.acos(dot);
+        if (ang > 1e-3) {
+          const tt = Math.min(1, (p.turn * dt) / ang);
+          this._cur.lerp(guide, tt).normalize();        // rotate heading toward the aim (approx slerp)
+          p.vel.copy(this._cur).multiplyScalar(speed);
+        }
+      }
+      p.vel.y -= p.gravity * dt;
+      const sp = p.vel.length();
+      if (sp > p.maxSpeed) p.vel.multiplyScalar(p.maxSpeed / sp);
+
+      // Sub-stepped march so a fast, curving blade can't tunnel through a wall.
+      const moveLen = p.vel.length() * dt;
+      const steps = Math.max(1, Math.ceil(moveLen / 0.4));
+      this._sub.copy(p.vel).multiplyScalar(dt / steps);
+      let hit = false;
+      for (let s = 0; s < steps; s++) {
+        p.pos.add(this._sub); p.travelled += this._sub.length();
+        if (isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)))
+            || p.travelled > p.gun.range
+            || (hooks && hooks.anchorAt && hooks.anchorAt(p.pos))) { hit = true; break; }
+      }
+      if (hit) {
         this.burst(p.pos.clone(), p.gun.radius, 0xbfe9ff, true);
         if (p.onImpact) p.onImpact(p.pos.clone(), p.gun);
         this._dispose(this.group, p.g); this.proj.splice(i, 1);
+        continue;
       }
+      p.g.position.copy(p.pos);
+      // Re-bank the buzzsaw toward its current heading so it stays readable as it curves.
+      this._vh.set(p.vel.x, 0, p.vel.z);
+      if (this._vh.lengthSq() > 1e-4) {
+        this._vh.normalize();
+        this._axle.set(0, 0.82, 0).addScaledVector(this._vh, -0.5).normalize();
+        p.pivot.quaternion.setFromUnitVectors(this._UP, this._axle);
+      }
+      p.spinner.rotation.y -= dt * 34;                  // clockwise buzzsaw about the vertical axle
     }
     for (let i = this.fx.length - 1; i >= 0; i--) {
       const f = this.fx[i]; f.t += dt; const k = Math.min(1, f.t / f.max);

@@ -495,7 +495,7 @@ const rdRange = document.getElementById('rdRange');
 const setText = (id, v) => { document.getElementById(id).textContent = v; };
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
 function applySettings() {
-  player.setFov(settings.fov); player.setSensitivity(settings.sens); world.renderDistance = settings.rd;
+  player.setFov(settings.fov); player.setSensitivity(settings.sens); world.renderDistance = settings.rd; sky.setRenderDistance(settings.rd);
   fovRange.value = settings.fov; setText('fovVal', settings.fov);
   sensRange.value = Math.round(settings.sens * 100); setText('sensVal', settings.sens.toFixed(2));
   rdRange.value = settings.rd; setText('rdVal', settings.rd);
@@ -503,7 +503,7 @@ function applySettings() {
 applySettings();
 fovRange.addEventListener('input', () => { settings.fov = +fovRange.value; setText('fovVal', settings.fov); player.setFov(settings.fov); saveSettings(); });
 sensRange.addEventListener('input', () => { settings.sens = +sensRange.value / 100; setText('sensVal', settings.sens.toFixed(2)); player.setSensitivity(settings.sens); saveSettings(); });
-rdRange.addEventListener('input', () => { settings.rd = +rdRange.value; setText('rdVal', settings.rd); world.renderDistance = settings.rd; saveSettings(); });
+rdRange.addEventListener('input', () => { settings.rd = +rdRange.value; setText('rdVal', settings.rd); world.renderDistance = settings.rd; sky.setRenderDistance(settings.rd); saveSettings(); });
 const settingsEl = document.getElementById('settings');
 document.getElementById('settingsBtn').addEventListener('click', () => settingsEl.classList.remove('hidden'));
 document.getElementById('settingsDone').addEventListener('click', () => settingsEl.classList.add('hidden'));
@@ -624,8 +624,12 @@ document.getElementById('joinBtn').addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement === renderer.domElement) { everPlayed = true; atMenu = false; }
+  else chargingChakra = false;   // releasing the lock can swallow the C keyup — don't latch channeling
   refreshOverlays();
 });
+// A blur/tab-away can swallow keyups; never let the chakra-channel key stay stuck on.
+window.addEventListener('blur', () => { chargingChakra = false; });
+document.addEventListener('visibilitychange', () => { if (document.hidden) chargingChakra = false; });
 deathEl.querySelector('#respawn').addEventListener('click', () => respawn());
 
 // Hold Tab for the battle scoreboard.
@@ -662,6 +666,8 @@ function leaveBattleCleanup() {
   matchWinner = null; matchOverTimer = 0;
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
   hud.setBattle(false); hud.showRadar(false); hud.setGrenades(0);   // battle chrome must not linger on the menu
+  hud.setChakraVisible(false); hud.setChakraAura(0); hud.hideStatus();
+  chargingChakra = false; if (chakraSnd) { sfx.chakraChannelStop(); chakraSnd = false; }
 }
 function toggleMode() {
   if (mode === BATTLE) return;                      // locked while in the arena
@@ -1102,6 +1108,7 @@ function onBotKilled(b) {
 }
 function respawnBot(b) {
   b.alive = true; b.deathProcessed = false; b.health = 20;
+  b.lastHitTime = -100; b.lastHitByName = null; b.lastHeadshot = false;   // clear stale damage so a fall-off next life isn't mis-credited
   const sp = teamSpawnPoint(b.team); b.pos.set(sp.x, sp.y, sp.z); b.vel.set(0, 0, 0);
   if (sp.yaw !== undefined) b.yaw = sp.yaw;
   // War: keep the bot's faction weapon (defenders stay on the MG) instead of re-rolling.
@@ -1690,7 +1697,7 @@ function releaseCharge(gun, cf) {
     const p = _eye.clone().addScaledVector(_dir, 0.5);
     particles.burst(p.x, p.y, p.z, [110, 150, 200], 8);
     hud.setChakra(chakraEnergy / CHAKRA_MAX, false);
-    return;
+    return false;
   }
   chakraEnergy -= cost;
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
@@ -1703,6 +1710,7 @@ function releaseCharge(gun, cf) {
     sfx.rasenshuriken(); addShake(0.06 + 0.2 * cf);
   }
   vmRecoil = Math.min(1, vmRecoil + 0.6);
+  return true;
 }
 
 // Peak-chakra power-up: a chakra shockwave that flashes out and shoves nearby enemies
@@ -1762,7 +1770,9 @@ function rasenshurikenImpact(pos, gun) {
   blastCover(pos, 3);
 }
 // The shuriken detonates on contact with any combatant (else on a block / its range).
+const _guideDir = new THREE.Vector3();
 const chakraHooks = {
+  guideDir: null,           // set each frame to the thrower's aim so the Rasenshuriken can curve
   anchorAt: (pos) => {
     for (const m of mobs.list) if (Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z) < 1.8) return true;
     if (isAuthority()) for (const b of botMgr.bots) if (b.alive && Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z) < 1.8) return true;
@@ -2049,8 +2059,8 @@ function frame() {
         if (was === 0 && chargeT > 0) sfx.chakraCharge();           // rising hum on gather start
         if (was < gun.charge && chargeT >= gun.charge) sfx.chakraReady();  // ping at full charge
       } else if (!mouseLeft && chargeT > 0.06) {
-        releaseCharge(gun, Math.min(1, chargeT / gun.charge)); chargeT = 0;
-        if (gun.mag) { ammo[id]--; if (ammoFor(gun, id) <= 0) startReload(gun, id); }   // mag weapons (Rasenshuriken) consume + reload
+        const fired = releaseCharge(gun, Math.min(1, chargeT / gun.charge)); chargeT = 0;
+        if (fired && gun.mag) { ammo[id]--; if (ammoFor(gun, id) <= 0) startReload(gun, id); }   // only spend ammo if it actually fired
       } else { chargeT = 0; if (empty && !reloading) startReload(gun, id); }
       vmCharge = chargeT / gun.charge;
     }
@@ -2131,6 +2141,8 @@ function frame() {
   plasmas.update(sdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
   rockets.update(sdt, world, mobs, enemyBots, mp, portals, rocketImpact);
   blackholes.update(sdt, world, blackHoleHooks);
+  // Curve the player's in-flight Rasenshuriken toward where they're aiming (sweep your view to bend it).
+  chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
   chakra.update(sdt, world, chakraHooks);
   grenades.update(sdt, world);
   grenadeCD -= sdt;
