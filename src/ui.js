@@ -204,7 +204,32 @@ export class HUD {
     this.hurtEl = document.createElement('div');
     this.hurtEl.id = 'hurt';
     document.getElementById('ui').appendChild(this.hurtEl);
+
+    // Chakra gauge (battle/creative): a blue bar under the health icons.
+    this.chakraEl = document.createElement('div');
+    this.chakraEl.id = 'chakrabar';
+    this.chakraEl.style.cssText = 'display:none;width:200px;height:9px;margin-top:5px;border-radius:5px;background:rgba(10,20,40,0.55);box-shadow:inset 0 0 3px rgba(0,0,0,0.6);overflow:hidden;position:relative;';
+    this.chakraEl.innerHTML = '<div class="cfill" style="height:100%;width:100%;border-radius:5px;background:linear-gradient(90deg,#1f6dd0,#6fc8ff);transition:width 0.08s linear;"></div><span class="clabel" style="position:absolute;left:7px;top:-2px;font:700 9px sans-serif;color:#d6ecff;text-shadow:0 1px 2px #000;letter-spacing:1px;">CHAKRA</span>';
+    wrap.appendChild(this.chakraEl);
+    this.chakraFill = this.chakraEl.querySelector('.cfill');
+
+    // Full-screen chakra aura glow (blue edges) while channelling.
+    this.chakraAuraEl = document.createElement('div');
+    this.chakraAuraEl.id = 'chakra-aura';
+    this.chakraAuraEl.style.cssText = 'position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 0.12s;z-index:8;mix-blend-mode:screen;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 38%,rgba(60,150,255,0.28) 80%,rgba(120,200,255,0.55) 100%);';
+    document.getElementById('ui').appendChild(this.chakraAuraEl);
   }
+
+  // Show/hide the chakra gauge (battle + creative — where jutsu are usable).
+  setChakraVisible(on) { if (this.chakraEl) this.chakraEl.style.display = on ? 'block' : 'none'; if (!on) this.setChakraAura(0); }
+  // frac 0..1; `full` adds a bright pulse glow.
+  setChakra(frac, full) {
+    if (!this.chakraFill) return;
+    this.chakraFill.style.width = Math.round(Math.max(0, Math.min(1, frac)) * 100) + '%';
+    this.chakraFill.style.boxShadow = full ? '0 0 8px #8fd0ff, 0 0 14px #4aa3ff' : 'none';
+  }
+  // Channel aura overlay intensity 0..1.
+  setChakraAura(intensity) { if (this.chakraAuraEl) this.chakraAuraEl.style.opacity = String(Math.max(0, Math.min(1, intensity))); }
 
   showName(name) {
     this.nameLabel.textContent = name;

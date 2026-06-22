@@ -181,6 +181,38 @@ export class SFX {
     this._noise(0.12, 4200, 2.0, 0.06, 'highpass');    // crystalline shimmer
   }
 
+  // ---- Chakra power-up channel: a sustained rising hum (start/ramp/stop) ----
+  chakraChannelStart() {
+    if (!this.ctx || this._chan) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, t);
+    const sub = this.ctx.createOscillator(); sub.type = 'sine'; sub.frequency.setValueAtTime(70, t);
+    const filt = this.ctx.createBiquadFilter(); filt.type = 'bandpass'; filt.frequency.setValueAtTime(550, t); filt.Q.value = 3;
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.setTargetAtTime(0.09, t, 0.18);
+    osc.connect(filt).connect(g); sub.connect(g); g.connect(this.master);
+    osc.start(); sub.start();
+    this._chan = { osc, sub, filt, g };
+  }
+  chakraChannelRamp(frac) {
+    if (!this.ctx || !this._chan) return;
+    const t = this.ctx.currentTime, f = Math.max(0, Math.min(1, frac));
+    this._chan.osc.frequency.setTargetAtTime(150 + f * 560, t, 0.12);
+    this._chan.filt.frequency.setTargetAtTime(500 + f * 2200, t, 0.12);
+  }
+  chakraChannelStop() {
+    if (!this._chan) return;
+    const t = this.ctx.currentTime, c = this._chan; this._chan = null;
+    c.g.gain.setTargetAtTime(0.0001, t, 0.08);
+    c.osc.stop(t + 0.25); c.sub.stop(t + 0.25);
+  }
+  // Power-up shockwave when the chakra peaks.
+  chakraBurst() {
+    if (!this.ctx) return;
+    this._tone(130, 42, 0.5, 0.32, 'square');
+    this._tone(720, 200, 0.32, 0.18, 'sawtooth');
+    this._noise(0.4, 1300, 0.8, 0.26, 'lowpass');
+  }
+
   // Surface-dependent footstep. `mat` is a material category.
   step(mat = 'grass') {
     if (!this.ctx) return;

@@ -391,6 +391,58 @@ export class ChakraFx {
     this.proj.push({ g, spinner, pos: pos.clone(), vel: d.multiplyScalar(gun.speed), gun, ownerId, onImpact, travelled: 0 });
   }
 
+  // ---- Chakra charge aura (the Naruto power-up) ----
+  // A ring of chakra streaking upward around the channeler, with rising rings and
+  // a pulsing ground ring. Built lazily; driven each frame by updateAura().
+  _ensureAura() {
+    if (this.aura) return this.aura;
+    const g = new THREE.Group(); g.visible = false; this.group.add(g);
+    const ground = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.06, 8, 48),
+      new THREE.MeshBasicMaterial({ color: 0x6fc8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    ground.rotation.x = -Math.PI / 2; g.add(ground);
+    const rings = [];
+    for (let i = 0; i < 3; i++) {
+      const r = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.045, 8, 40),
+        new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      r.rotation.x = -Math.PI / 2; g.add(r); rings.push({ mesh: r, p: i / 3 });
+    }
+    const streaks = []; const N = 18;
+    for (let i = 0; i < N; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x8fd0ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      g.add(s); streaks.push({ spr: s, ang: (i / N) * 6.2832, p: Math.random(), rad: 0.7 + Math.random() * 0.5, speed: 0.8 + Math.random() * 0.7 });
+    }
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.55, 2.7, 16, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x4aa3ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    col.position.y = 1.35; g.add(col);
+    this.aura = { g, ground, rings, streaks, col, t: 0 };
+    return this.aura;
+  }
+
+  // Position + animate the aura at `pos` (feet) scaled by `intensity` (0 hides it).
+  updateAura(pos, intensity, dt) {
+    if (intensity <= 0.001) { if (this.aura) this.aura.g.visible = false; return; }
+    const a = this._ensureAura(); a.g.visible = true; a.t += dt;
+    a.g.position.set(pos.x, pos.y, pos.z);
+    const I = Math.min(1, intensity);
+    a.ground.scale.setScalar((1.0 + 0.15 * Math.sin(a.t * 10)) * (0.7 + 0.5 * I));
+    a.ground.material.opacity = 0.3 + 0.5 * I; a.ground.rotation.z += dt * 2;
+    for (const r of a.rings) {
+      r.p += dt * (0.5 + 0.9 * I); if (r.p >= 1) r.p -= 1;
+      r.mesh.position.y = r.p * 2.7;
+      r.mesh.scale.setScalar((0.6 + 0.8 * r.p) * (0.7 + 0.4 * I));
+      r.mesh.material.opacity = 0.5 * I * Math.sin(r.p * Math.PI);
+    }
+    for (const s of a.streaks) {
+      s.p += dt * s.speed * (0.6 + 1.3 * I); if (s.p >= 1) s.p -= 1;
+      const rad = s.rad * (1 - 0.4 * s.p);
+      s.spr.position.set(Math.cos(s.ang) * rad, s.p * 2.85, Math.sin(s.ang) * rad);
+      s.spr.scale.setScalar(0.12 + 0.13 * I);
+      s.spr.material.opacity = (0.2 + 0.75 * I) * Math.sin(s.p * Math.PI);
+    }
+    a.col.material.opacity = 0.1 * I;
+    a.col.scale.set(1 + 0.1 * Math.sin(a.t * 8), 1, 1 + 0.1 * Math.cos(a.t * 8));
+  }
+
   // A chakra burst: an expanding additive sphere; `needles` adds the radiating
   // wind-blade urchin of the Rasenshuriken dome.
   burst(pos, radius, color, needles) {
