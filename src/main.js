@@ -506,11 +506,13 @@ refreshModePicker();
 // ---------- Settings (FOV / sensitivity / render distance, persisted) ----------
 const SETTINGS_KEY = 'guncraft.settings';
 let settings;
-try { settings = Object.assign({ fov: 75, sens: 1.0, rd: 7 }, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); }
-catch { settings = { fov: 75, sens: 1.0, rd: 7 }; }
+try { settings = Object.assign({ fov: 75, sens: 1.0, rd: 7, deathcam: 3 }, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); }
+catch { settings = { fov: 75, sens: 1.0, rd: 7, deathcam: 3 }; }
 const fovRange = document.getElementById('fovRange');
 const sensRange = document.getElementById('sensRange');
 const rdRange = document.getElementById('rdRange');
+const dcRange = document.getElementById('dcRange');
+const dcLabel = (v) => (v <= 0 ? 'Off' : v + 's');
 const setText = (id, v) => { document.getElementById(id).textContent = v; };
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {} }
 function applySettings() {
@@ -518,11 +520,13 @@ function applySettings() {
   fovRange.value = settings.fov; setText('fovVal', settings.fov);
   sensRange.value = Math.round(settings.sens * 100); setText('sensVal', settings.sens.toFixed(2));
   rdRange.value = settings.rd; setText('rdVal', settings.rd);
+  if (dcRange) { dcRange.value = settings.deathcam; setText('dcVal', dcLabel(settings.deathcam)); }
 }
 applySettings();
 fovRange.addEventListener('input', () => { settings.fov = +fovRange.value; setText('fovVal', settings.fov); player.setFov(settings.fov); saveSettings(); });
 sensRange.addEventListener('input', () => { settings.sens = +sensRange.value / 100; setText('sensVal', settings.sens.toFixed(2)); player.setSensitivity(settings.sens); saveSettings(); });
 rdRange.addEventListener('input', () => { settings.rd = +rdRange.value; setText('rdVal', settings.rd); world.renderDistance = settings.rd; sky.setRenderDistance(settings.rd); saveSettings(); });
+if (dcRange) dcRange.addEventListener('input', () => { settings.deathcam = +dcRange.value; setText('dcVal', dcLabel(settings.deathcam)); saveSettings(); });
 const settingsEl = document.getElementById('settings');
 document.getElementById('settingsBtn').addEventListener('click', () => settingsEl.classList.remove('hidden'));
 document.getElementById('settingsDone').addEventListener('click', () => settingsEl.classList.add('hidden'));
@@ -687,6 +691,7 @@ function setGameMode(m) {
 function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0;
   matchWinner = null; matchOverTimer = 0;
+  abortDeathCam();
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
   hud.setBattle(false); hud.showRadar(false); hud.setGrenades(0);   // battle chrome must not linger on the menu
   hud.setChakraVisible(false); hud.setChakraAura(0); hud.hideStatus();
@@ -751,15 +756,21 @@ function battleDeath() {
     hud.announce('Eliminated — spectating', '#ff5b5b'); hud.flashHurt();
     return;
   }
-  // War: both sides reinforce endlessly — the attack only ends when the clock runs
-  // out (Axis hold) or the beachhead is taken (Allied win), so just respawn.
+  hud.flashHurt();
+  // A death cam (tap to skip; auto-skips after the setting) before respawning — unless
+  // it's off, or the match is already ending (the win kill-cam takes over).
+  const camSec = settings.deathcam || 0;
+  if (camSec > 0 && !matchWinner) startDeathCam(killer, camSec);
+  else respawnPlayer();
+}
+// War + the other respawning modes reinforce endlessly; just put the player back.
+function respawnPlayer() {
   const sp = teamSpawnPoint(myTeam);
   player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   if (sp.yaw !== undefined) player.yaw = sp.yaw;
   health = 20; hud.setHealth(20); invuln = 1.6;
   grenadeCount = 2; hud.setGrenades(2);
   if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
-  hud.flashHurt();
 }
 
 // ---------- Battle match: teams, bots, scoreboard, rounds ----------
@@ -1180,7 +1191,8 @@ function sampleReel(key, qt, out) {
 // ---- Final-kill cam ---- a true replay: stand-in avatars retrace the kill from
 // the reel while the camera cuts between three angles, then a simple orbit fallback.
 const REPLAY_PASSES = [{ cam: 'orbit', speed: 1.05 }, { cam: 'shoulder', speed: 0.82 }, { cam: 'low', speed: 0.55 }];
-const replay = { active: false, rStart: 0, rEnd: 0, pass: 0, clock: 0, killerKey: null, victimKey: null, avK: null, avV: null, orbitBase: 0, orbitDir: 1 };
+const REPLAY_HOLD = 2.0;             // slow-mo death hold after the final angle (so the kill isn't cut short)
+const replay = { active: false, rStart: 0, rEnd: 0, pass: 0, clock: 0, killerKey: null, victimKey: null, avK: null, avV: null, orbitBase: 0, orbitDir: 1, holding: false, holdT: 0, holdEye: new THREE.Vector3() };
 let killCamDur = 4.6;                 // how long the whole cam (replay or orbit) runs
 const _kcWin = new THREE.Vector3(), _kcEye = new THREE.Vector3();
 const _rK = new THREE.Vector3(), _rV = new THREE.Vector3(), _rMid = new THREE.Vector3(), _rTmp = new THREE.Vector3();
@@ -1235,12 +1247,12 @@ function startReplay(winner) {
   replay.killerKey = lastKill.killerKey; replay.victimKey = lastKill.victimKey;
   replay.avK = buildReplayAvatar(replay.killerKey);
   replay.avV = buildReplayAvatar(replay.victimKey);
-  replay.pass = 0; replay.clock = 0;
+  replay.pass = 0; replay.clock = 0; replay.holding = false; replay.holdT = 0;
   replay.fires = fireReel.filter((e) => e.t >= replay.rStart - 0.3 && e.t <= replay.rEnd + 0.4);  // shots to replay
   replay.fireIdx = 0;
   replay.orbitBase = Math.random() * Math.PI * 2; replay.orbitDir = Math.random() < 0.5 ? 1 : -1;
   const span = replay.rEnd - replay.rStart;
-  killCamDur = REPLAY_PASSES.reduce((s, p) => s + span / p.speed, 0);   // total replay runtime
+  killCamDur = REPLAY_PASSES.reduce((s, p) => s + span / p.speed, 0) + REPLAY_HOLD;   // total replay runtime (+ death hold)
   replay.active = true; killCam.active = true; killCam.mode = 'replay';
   hideLiveCombatants();
   hud.showKillCam(winner, lastKill.victim, 1, REPLAY_PASSES.length);
@@ -1267,6 +1279,7 @@ function updateKillCam(dt) {
 }
 function updateReplay(dt) {
   hideLiveCombatants();                        // keep live avatars hidden even if one respawns
+  if (replay.holding) { updateReplayHold(dt); return; }
   const pass = REPLAY_PASSES[replay.pass];
   replay.clock += Math.max(0, dt) * pass.speed;
   const qt = replay.rStart + replay.clock;
@@ -1297,10 +1310,31 @@ function updateReplay(dt) {
   camera.position.copy(_kcEye); camera.up.set(0, 1, 0);
   camera.lookAt(look.x, look.y + lookY, look.z);
   if (qt >= replay.rEnd) {
+    if (replay.pass >= REPLAY_PASSES.length - 1) {   // final angle: hold on the kill in slow-mo
+      replay.holding = true; replay.holdT = 0;
+      let hx = _rV.x - _rK.x, hz = _rV.z - _rK.z;     // flung the way the killing blow drove them
+      if (hx === 0 && hz === 0) hz = 1;
+      startDeathAnim(replay.avV, hx, hz, { dur: REPLAY_HOLD * 0.9 });   // pierced & toppled; disposed with the cam
+      particles.burst(_rV.x, _rV.y + 1, _rV.z, [220, 70, 70], 24);
+      replay.holdEye.set(_kcEye.x, _kcEye.y, _kcEye.z);                 // ease in from the last camera spot
+      return;
+    }
     replay.pass++; replay.clock = 0; replay.fireIdx = 0;   // restart the shot timeline for the next angle
-    if (replay.pass >= REPLAY_PASSES.length) { endKillCam(true); return; }
     hud.showKillCam(lastKill.killer, lastKill.victim, replay.pass + 1, REPLAY_PASSES.length);
   }
+}
+// Slow-mo hold on the felled victim once the angles are done, so the death plays out fully.
+function updateReplayHold(dt) {
+  replay.holdT += Math.max(0, dt);
+  const v = replay.avV ? replay.avV.position : _rV;
+  const e = Math.min(1, replay.holdT / REPLAY_HOLD);
+  const ang = replay.orbitBase + replay.orbitDir * (1.7 + e * 0.55), rad = 4.8 - 1.5 * e, h = 1.7 - 0.5 * e;
+  _kcEye.set(v.x + Math.cos(ang) * rad, v.y + h, v.z + Math.sin(ang) * rad);
+  _kcEye.lerp(replay.holdEye, Math.max(0, 1 - e * 4));                  // brief ease-in from the last shot
+  if (_kcEye.y < ARENA.FLOOR + 0.6) _kcEye.y = ARENA.FLOOR + 0.6;
+  camera.position.copy(_kcEye); camera.up.set(0, 1, 0);
+  camera.lookAt(v.x, v.y + 0.4, v.z);
+  if (replay.holdT >= REPLAY_HOLD) endKillCam(true);
 }
 function updateOrbit(dt) {
   killCam.t += Math.max(0, dt);
@@ -1319,7 +1353,8 @@ function endKillCam(showRound) {
   if (!killCam.active) return;
   killCam.active = false; killCam.mode = 'orbit';
   if (replay.active) {
-    replay.active = false;
+    replay.active = false; replay.holding = false;
+    if (replay.avV) clearDeathAnim(replay.avV);   // drop the death-hold reference before disposing
     disposeReplayAvatar(replay.avK); disposeReplayAvatar(replay.avV);
     replay.avK = replay.avV = null;
     restoreLiveCombatants();
@@ -1327,12 +1362,53 @@ function endKillCam(showRound) {
   hud.hideKillCam();
   if (showRound && matchWinner) { hud.showRoundOver(matchWinner); hud.showScoreboard(); }
 }
+
+// ---- Death cam: when YOU die in battle, spawn a corpse, topple it, orbit it with a
+// "tap to skip" prompt, and respawn on skip or after the auto-skip setting elapses. ----
+const deathCam = { active: false, t: 0, dur: 3, focus: new THREE.Vector3(), base: 0, sweep: 1, killer: '', corpse: null };
+function startDeathCam(killer, sec) {
+  const corpse = makeAvatar(myName(), getSkin(mp.skin));
+  corpse.position.copy(player.pos); corpse.rotation.y = player.yaw + Math.PI;
+  scene.add(corpse);
+  startDeathAnim(corpse, Math.sin(player.yaw), Math.cos(player.yaw), { temp: true, dur: Math.min(sec * 0.7, 1.4) });   // crumple backward
+  deathCam.corpse = corpse;
+  deathCam.focus.copy(player.pos); deathCam.focus.y += 1.0;
+  deathCam.base = Math.random() * Math.PI * 2; deathCam.sweep = (Math.random() < 0.5 ? 1 : -1) * 1.1;
+  deathCam.t = 0; deathCam.dur = sec; deathCam.active = true; deathCam.killer = killer || '';
+  invuln = 999;                         // can't be killed again mid-cam
+  hud.showDeathCam(killer);
+}
+function skipDeathCam() { if (deathCam.active) endDeathCam(); }
+function endDeathCam() {
+  deathCam.active = false; deathCam.corpse = null;   // the corpse finishes its own topple via dyingAvatars
+  hud.hideDeathCam();
+  respawnPlayer();
+}
+// Tear the death cam down without respawning (match reset / leaving to menu).
+function abortDeathCam() {
+  if (deathCam.corpse) { clearDeathAnim(deathCam.corpse); scene.remove(deathCam.corpse); disposeAvatar(deathCam.corpse); }
+  deathCam.active = false; deathCam.corpse = null;
+  hud.hideDeathCam();
+}
+function updateDeathCam(dt) {
+  if (!deathCam.active) return;
+  deathCam.t += dt;
+  hud.setDeathCamTime(Math.max(0, deathCam.dur - deathCam.t));
+  const e = Math.min(1, deathCam.t / deathCam.dur);
+  const ang = deathCam.base + deathCam.sweep * e, rad = 5.5 - 1.3 * e, h = 2.9 - 0.7 * e, f = deathCam.focus;
+  _kcEye.set(f.x + Math.cos(ang) * rad, f.y + h, f.z + Math.sin(ang) * rad);
+  if (_kcEye.y < ARENA.FLOOR + 0.8) _kcEye.y = ARENA.FLOOR + 0.8;
+  camera.position.copy(_kcEye); camera.up.set(0, 1, 0);
+  camera.lookAt(f.x, f.y - 0.25, f.z);
+  if (viewModel) viewModel.visible = false;
+  if (deathCam.t >= deathCam.dur) endDeathCam();
+}
 function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
-  matchWinner = null; endKillCam(false); resetReel(); resetSharingan(); hud.hideRoundOver(); hud.hideScoreboard();
+  matchWinner = null; endKillCam(false); abortDeathCam(); resetReel(); resetSharingan(); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
     warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
   }
@@ -1352,15 +1428,56 @@ function botHurt(botId, dmg, fromName, head) {
   b.lastHitByName = fromName; b.lastHitTime = performance.now() / 1000; b.lastHeadshot = !!head;
   b.hurt(dmg);
 }
+// ---- Death animations: avatars topple, get flung along the killing blow, sink and
+// fade instead of vanishing instantly. Drives bot meshes and temporary player corpses.
+const dyingAvatars = [];   // { mesh, t, dur, dirX, dirZ, kb, tip, temp }
+function startDeathAnim(mesh, dirX, dirZ, opts) {
+  if (!mesh) return;
+  const dl = Math.hypot(dirX || 0, dirZ || 0);
+  const dx = dl > 0.1 ? dirX / dl : Math.random() - 0.5, dz = dl > 0.1 ? dirZ / dl : Math.random() - 0.5;
+  mesh.traverse((o) => { if (o.material) o.material.transparent = true; });   // allow fade
+  dyingAvatars.push({
+    mesh, t: 0, dur: (opts && opts.dur) || 1.1,
+    dirX: dx, dirZ: dz, kb: Math.min(9, 3 + dl * 0.4), tip: Math.random() < 0.5 ? 1 : -1, temp: !!(opts && opts.temp),
+  });
+}
+function clearDeathAnim(mesh) {            // a respawning bot reclaims its mesh
+  for (let i = dyingAvatars.length - 1; i >= 0; i--) if (dyingAvatars[i].mesh === mesh) dyingAvatars.splice(i, 1);
+}
+function disposeAvatar(m) {
+  m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } else if (o.isSprite && o.material) { o.material.map?.dispose(); o.material.dispose(); } });
+}
+function resetAvatarLook(mesh) {
+  mesh.rotation.x = 0; mesh.rotation.z = 0;
+  mesh.traverse((o) => { if (o.material) o.material.opacity = 1; });
+}
+function updateDyingAvatars(dt) {
+  for (let i = dyingAvatars.length - 1; i >= 0; i--) {
+    const d = dyingAvatars[i]; d.t += dt; const k = Math.min(1, d.t / d.dur), m = d.mesh;
+    const tip = Math.min(1, k * 1.5);                                  // topples over in the first ~2/3
+    m.rotation.x = d.tip * tip * Math.PI * 0.5;                        // fall flat
+    const slide = d.kb * dt * (1 - k);                                 // flung back, decelerating
+    m.position.x += d.dirX * slide; m.position.z += d.dirZ * slide;
+    if (k > 0.45) m.position.y -= 0.9 * dt;                            // sink as it fades out
+    const op = k < 0.5 ? 1 : 1 - (k - 0.5) / 0.5;
+    m.traverse((o) => { if (o.material) o.material.opacity = op; });
+    if (k >= 1) {
+      if (d.temp) { scene.remove(m); disposeAvatar(m); }
+      else m.visible = false;
+      dyingAvatars.splice(i, 1);
+    }
+  }
+}
 function onBotKilled(b) {
-  particles.burst(b.pos.x, b.pos.y + 1, b.pos.z, [255, 120, 120], 24);
+  particles.burst(b.pos.x, b.pos.y + 1, b.pos.z, [200, 60, 60], 18);
   const killer = (performance.now() / 1000 - (b.lastHitTime || 0) < 10) ? b.lastHitByName : null;
   hud.addKill(b.name, killer);
   if (killer === myName()) announceKill(b.lastHeadshot);
   if (mp.isHost) mp.broadcast({ t: 'death', id: b.id, name: b.name, by: killer });
   noteKill(killer, b.name, b.pos.x, b.pos.y + 1, b.pos.z, b.id);
   registerKill(killer, b.id);
-  b.mesh.visible = false; b.respawnIn = 2.5;
+  startDeathAnim(b.mesh, b.vel.x, b.vel.z);   // topple + get flung the way the hit knocked them
+  b.respawnIn = 2.5;
 }
 function respawnBot(b) {
   b.alive = true; b.deathProcessed = false; b.health = 20;
@@ -1370,7 +1487,8 @@ function respawnBot(b) {
   // War: keep the bot's faction weapon (defenders stay on the MG) instead of re-rolling.
   if (gameMode === 'war' && (b.defend || b.advance) && b.gunId !== undefined) { b.gun = gunOf(b.gunId); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0; }
   else b._chooseGun();
-  b.mesh.visible = true;
+  clearDeathAnim(b.mesh); resetAvatarLook(b.mesh);   // reclaim the mesh from any death animation
+  b.mesh.position.copy(b.pos); b.mesh.visible = true;
 }
 function manageBots(dt) {
   const respawns = gameMode !== 'br' && gameMode !== 'wave';   // BR eliminates; waves replace
@@ -1526,6 +1644,7 @@ function setDifficultyDirect(d) { difficulty = d; hud.setDifficulty(DIFF_NAMES[d
 // ---------- Keyboard (E inventory, G mode, B difficulty) ----------
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return; // don't trigger game keys while typing in chat/menu
+  if (deathCam.active && (e.code === 'Space' || e.code === 'Enter')) { e.preventDefault(); skipDeathCam(); return; }
   if (e.code === 'KeyE') {
     if (dead) return;
     if (inventory.open) closeInventory(); else if (player.locked) openInventory(2);  // not from pause/menu
@@ -1561,6 +1680,7 @@ window.addEventListener('keyup', (e) => {
 let mouseLeft = false, mouseRight = false, keyBreak = false, keyPlace = false;   // Q/F mirror the mouse buttons for mouseless play
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (document.pointerLockElement !== renderer.domElement) return;
+  if (deathCam.active) { skipDeathCam(); return; }   // tap to skip your death cam
   if (e.button === 0) { mouseLeft = true; breakCD = 0; attackCD = 0; triggerConsumed = false; }
   if (e.button === 2) { mouseRight = true; placeCD = 0; }
 });
@@ -2467,15 +2587,15 @@ function frame() {
   world.processQueues(loaded ? 6 : 40);
   if (!loaded) updateLoading();
 
-  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated && !killCam.active;
+  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated && !killCam.active && !deathCam.active;
   // Pausing (Esc) freezes the single-player world; co-op keeps running (can't pause others).
   const frozen = paused && !mp.online;
   const sdt = frozen ? 0 : dt;
 
   if (loaded && player.locked && !dead) {
-    player.update(dt);
+    player.update(deathCam.active ? 0 : dt);   // frozen while the death cam plays
     // Fell off the arena into the void → eliminate + respawn.
-    if (mode === BATTLE && player.pos.y < ARENA.FLOOR - 25) battleDeath();
+    if (mode === BATTLE && !deathCam.active && player.pos.y < ARENA.FLOOR - 25) battleDeath();
     if (player.fallImpact > 0) { damagePlayer(Math.ceil(player.fallImpact * 0.6)); player.fallImpact = 0; }
     if (active && player.onGround && Math.hypot(player.vel.x, player.vel.z) > 1.4) {
       const fb = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.1), Math.floor(player.pos.z));
@@ -2702,7 +2822,9 @@ function frame() {
   // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
   shakeAmt *= Math.max(0, 1 - 9 * dt);
   if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
-  updateKillCam(dt);   // takes over the camera for the Gun Game final-kill cam
+  updateDyingAvatars(dt);   // topple/fade dying avatars
+  updateDeathCam(dt);       // your-death cam (tap to skip)
+  updateKillCam(dt);        // takes over the camera for the Gun Game final-kill cam
   camera.getWorldDirection(_camFwd);
   sfx.setListener(camera.position.x, camera.position.y, camera.position.z, _camFwd.x, _camFwd.z);
 
@@ -2745,7 +2867,12 @@ window.__game = {
   __loadArena: (theme) => { menuMode = BATTLE; setGameMode(BATTLE); loadWorld(currentSeedStr || 'test', 'arena', theme); sky.setArena(true); sky.setWar(false); atMenu = false; everPlayed = true; refreshOverlays(); },
   get arenaTheme() { return arenaTheme; },
   get gunGameLadder() { return GUNGAME_LADDER.slice(); },
-  get killCam() { return { active: killCam.active, mode: killCam.mode, t: killCam.t, dur: killCamDur, replay: replay.active, pass: replay.pass, reel: killReel.length }; },
+  get killCam() { return { active: killCam.active, mode: killCam.mode, t: killCam.t, dur: killCamDur, replay: replay.active, pass: replay.pass, holding: replay.holding, reel: killReel.length }; },
+  get deathCamState() { return { active: deathCam.active, t: +deathCam.t.toFixed(2), dur: deathCam.dur, killer: deathCam.killer, hasCorpse: !!deathCam.corpse }; },
+  get settings() { return settings; },
+  __dyingCount: () => dyingAvatars.length,
+  __killSelf: (killer) => { lastHitBy = killer || 'Tester'; lastHitTime = performance.now() / 1000; battleDeath(); },
+  __skipDeathCam: () => skipDeathCam(),
   get sharingan() { return { precogT: +precogT.toFixed(2), precogCD: +precogCD.toFixed(2), burns: amaBurn.size, gazeHold: +gazeHold.toFixed(2), gazeId: gazeTargetId, fx: sharinganFx.group.visible }; },
   __reelLen: () => killReel.length,
   __reelKeys: () => { const s = new Set(); for (const fr of killReel) for (const k in fr.a) s.add(k); return [...s]; },
