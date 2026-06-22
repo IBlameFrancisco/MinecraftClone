@@ -20,12 +20,12 @@ const LIGHT_DAY = new THREE.Color(1.0, 0.99, 0.96);
 const LIGHT_NIGHT = new THREE.Color(0.17, 0.21, 0.34);
 const LIGHT_DUSK = new THREE.Color(1.0, 0.66, 0.45);
 
-// ---- Horror mode (battle arena): a perpetual blood-dark, fog-choked night. ----
-const HORROR_TOP = sc(0.018, 0.006, 0.012);
-const HORROR_HORIZON = sc(0.11, 0.018, 0.024);
-const HORROR_FOG = sc(0.05, 0.015, 0.02);
-const HORROR_TINT = new THREE.Color(0.30, 0.20, 0.22);
-const _MOON_DIR = new THREE.Vector3(0.35, 0.78, 0.3).normalize();
+// ---- Battle arena: a bright, vivid championship sky — luminous and high-energy. ----
+const ARENA_TOP = sc(0.16, 0.42, 0.88);        // vivid deep sky blue
+const ARENA_HORIZON = sc(0.74, 0.90, 1.0);     // bright airy horizon
+const ARENA_FOG = sc(0.78, 0.91, 1.0);
+const ARENA_TINT = new THREE.Color(1.1, 1.06, 1.0);    // bright, slightly warm (linear multiplier, >1 → glow)
+const _ARENA_SUN = new THREE.Vector3(0.32, 0.86, 0.38).normalize();
 
 // ---- War mode (D-Day beach): a bleak, overcast, smoke-hazed grey morning. ----
 const WAR_TOP = sc(0.40, 0.43, 0.48);
@@ -127,7 +127,7 @@ export class Sky {
     this.dirColor = new THREE.Color(1, 1, 1);
     this.dirIntensity = 1;
     this.ambIntensity = 0.6;
-    this.horror = false;
+    this.arena = false;       // bright battle-arena atmosphere
     this.war = false;
     this._flick = 1;
     this._flickT = 0;
@@ -137,13 +137,13 @@ export class Sky {
   _restoreSky() {
     this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1];
     this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(40);
-    this.sun.material.color.setRGB(1, 1, 1); this.clouds.material.opacity = 0.8;
+    this.sun.material.color.setRGB(1, 1, 1); this.sun.scale.setScalar(60); this.clouds.material.opacity = 0.8;
   }
 
-  // Toggle the creepy battle-arena atmosphere.
-  setHorror(on) {
-    if (this.horror === on) return;
-    this.horror = on;
+  // Toggle the bright battle-arena atmosphere.
+  setArena(on) {
+    if (this.arena === on) return;
+    this.arena = on;
     if (!on) this._restoreSky();   // restore the sun/moon/cloud look the day/night cycle expects
   }
 
@@ -157,7 +157,7 @@ export class Sky {
   update(dt) {
     this.time = (this.time + dt / DAY_LENGTH) % 1;
     if (this.war) return this._updateWar(dt);
-    if (this.horror) return this._updateHorror(dt);
+    if (this.arena) return this._updateArena(dt);
 
     // Sun angle: noon at t=0.25, midnight at t=0.75.
     const ang = this.time * Math.PI * 2 - Math.PI / 2;
@@ -207,44 +207,38 @@ export class Sky {
     return this.time;
   }
 
-  // Perpetual blood-dark night with heavy, close fog and a flickering dim tint
-  // (like failing torches) — the battle arena's horror atmosphere.
-  _updateHorror(dt) {
+  // A bright, vivid arena sky — clear and luminous, with a strong overhead sun, a
+  // subtle high-energy shimmer, and open far fog so the whole map reads.
+  _updateArena(dt) {
     this._flickT += dt;
-    // mostly steady, with a slow breathe + occasional sharp dips (a guttering flame)
-    const breathe = 0.92 + 0.08 * Math.sin(this._flickT * 2.7);
-    // Rate-based (≈2 dips/sec) so the guttering looks the same at any frame rate.
-    const dip = (Math.random() < 1 - Math.exp(-2.0 * dt)) ? 0.55 + Math.random() * 0.25 : 1.0;
-    this._flick += (breathe * dip - this._flick) * Math.min(1, 11 * dt);
-    const f = this._flick;
+    const f = 1.0 + 0.025 * Math.sin(this._flickT * 1.6);   // gentle energy shimmer (never darkens)
 
-    this.uniforms.topColor.value.copy(HORROR_TOP).multiplyScalar(f);
-    this.uniforms.horizonColor.value.copy(HORROR_HORIZON).multiplyScalar(f);
-    this.fog.color.copy(HORROR_FOG).multiplyScalar(f);
-    this.fog.near = 9; this.fog.far = 58;
-    setWorldTint(HORROR_TINT.r * f, HORROR_TINT.g * f, HORROR_TINT.b * f);
+    this.uniforms.topColor.value.copy(ARENA_TOP);
+    this.uniforms.horizonColor.value.copy(ARENA_HORIZON);
+    this.fog.color.copy(ARENA_FOG);
+    this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1] * 1.15;   // open, distant fog
+    setWorldTint(ARENA_TINT.r * f, ARENA_TINT.g * f, ARENA_TINT.b * f);
 
-    // Entity (bot/mob) lighting — dim and grim so figures read as shadows.
-    this.isNight = true;
-    this.sunDir.set(0.3, 0.55, 0.25).normalize();
-    this.dirColor.copy(HORROR_TINT);
-    this.dirIntensity = 0.4 * f;
-    this.ambIntensity = 0.34 * f;
-    setWaterEnv(this.sunDir, HORROR_HORIZON, 0.85);
+    // Bright, even lighting so figures + the map pop.
+    this.isNight = false;
+    this.sunDir.copy(_ARENA_SUN);
+    this.dirColor.setRGB(1.0, 0.99, 0.95);
+    this.dirIntensity = 1.15;
+    this.ambIntensity = 0.82;
+    setWaterEnv(this.sunDir, ARENA_HORIZON, 0.7);
 
-    // Blood moon hangs overhead; no sun, only faint roiling clouds.
+    // A bright sun high overhead; airy drifting clouds; no moon.
     const cam = this.camera.position;
     this.dome.position.copy(cam);
-    this.sun.material.opacity = 0;
-    this.moon.material.color.setRGB(0.75, 0.11, 0.09);
-    this.moon.scale.setScalar(78);
-    this.moon.material.opacity = 0.9 * f;
-    this.moon.position.copy(cam).addScaledVector(_MOON_DIR, 470);
+    this.sun.material.color.setRGB(1.0, 0.97, 0.86); this.sun.scale.setScalar(72);
+    this.sun.material.opacity = 1;
+    this.sun.position.copy(cam).addScaledVector(_ARENA_SUN, 480);
+    this.moon.material.opacity = 0;
     this.clouds.position.x = cam.x; this.clouds.position.z = cam.z;
-    this.clouds.material.map.offset.x += dt * 0.0026;
-    this.clouds.material.map.offset.y += dt * 0.0012;
-    this.clouds.material.color.setRGB(0.18 * f, 0.045 * f, 0.05 * f);
-    this.clouds.material.opacity = 0.3;
+    this.clouds.material.map.offset.x += dt * 0.004;
+    this.clouds.material.map.offset.y += dt * 0.0016;
+    this.clouds.material.color.setRGB(1.0, 1.0, 1.0);
+    this.clouds.material.opacity = 0.65;
     return this.time;
   }
 
@@ -279,7 +273,7 @@ export class Sky {
 
   clockString() {
     if (this.war) return '⛅ Operation Overlord';
-    if (this.horror) return '🩸 the witching hour';
+    if (this.arena) return '⚔ Arena';
     // Map t=0.25 -> 12:00, t=0 -> 06:00, t=0.5 -> 18:00.
     const hours = (this.time * 24 + 6) % 24;
     const h = Math.floor(hours);

@@ -7,7 +7,7 @@ import { SimplexNoise } from './noise.js';
 import { CHUNK_SIZE, CHUNK_HEIGHT, SEA_LEVEL, WORLD_SEED } from './constants.js';
 import {
   AIR, GRASS, DIRT, STONE, SAND, LOG, LEAVES, WATER, SNOW,
-  COAL_ORE, IRON_ORE, BEDROCK, GRAVEL, CACTUS, COBBLE, PLANK, WOOL, GLOWSTONE, TORCH,
+  COAL_ORE, IRON_ORE, BEDROCK, GRAVEL, CACTUS, COBBLE, PLANK, WOOL, GLOWSTONE, TORCH, GLASS,
 } from './blocks.js';
 
 export const BIOME_PLAINS = 0;
@@ -24,21 +24,21 @@ export const ARENA = { FLOOR: 50, HALF: 38, WALL_H: 10 };
 // Structures in folded (|x|,|z|) quadrant coords — mirrored into all four
 // quadrants (fair for FFA). `cap` is a single block placed one above the top.
 const ARENA_STRUCT = [
-  { x0: 10, x1: 11, z0: 10, z1: 11, y0: 1, y1: 6, mat: COBBLE,   cap: GLOWSTONE }, // inner lit pillars
-  { x0: 22, x1: 23, z0: 22, z1: 23, y0: 1, y1: 5, mat: COAL_ORE, cap: GLOWSTONE }, // outer lit pillars
-  { x0: 18, x1: 19, z0: 7,  z1: 8,  y0: 1, y1: 4, mat: COAL_ORE },                 // broken dark pillars
-  { x0: 7,  x1: 8,  z0: 18, z1: 19, y0: 1, y1: 4, mat: COAL_ORE },
-  { x0: 14, x1: 20, z0: 14, z1: 15, y0: 1, y1: 2, mat: COBBLE },                   // L-shaped low cover
-  { x0: 14, x1: 15, z0: 14, z1: 20, y0: 1, y1: 2, mat: COBBLE },
-  { x0: 24, x1: 30, z0: 2,  z1: 6,  y0: 1, y1: 2, mat: COBBLE },                   // raised stage
-  { x0: 23, x1: 23, z0: 2,  z1: 6,  y0: 1, y1: 1, mat: COBBLE },                   // step onto the stage
+  { x0: 10, x1: 11, z0: 10, z1: 11, y0: 1, y1: 6, mat: COBBLE, cap: GLOWSTONE }, // inner lit pillars
+  { x0: 22, x1: 23, z0: 22, z1: 23, y0: 1, y1: 5, mat: PLANK,  cap: GLOWSTONE }, // outer warm-wood pillars
+  { x0: 18, x1: 19, z0: 7,  z1: 8,  y0: 1, y1: 4, mat: COBBLE, cap: GLOWSTONE }, // mid pillars (lit)
+  { x0: 7,  x1: 8,  z0: 18, z1: 19, y0: 1, y1: 4, mat: COBBLE, cap: GLOWSTONE },
+  { x0: 14, x1: 20, z0: 14, z1: 15, y0: 1, y1: 2, mat: PLANK },                  // L-shaped low cover (warm)
+  { x0: 14, x1: 15, z0: 14, z1: 20, y0: 1, y1: 2, mat: PLANK },
+  { x0: 24, x1: 30, z0: 2,  z1: 6,  y0: 1, y1: 2, mat: COBBLE },                 // raised stage
+  { x0: 23, x1: 23, z0: 2,  z1: 6,  y0: 1, y1: 1, mat: COBBLE },                 // step onto the stage
   { x0: 2,  x1: 6,  z0: 24, z1: 30, y0: 1, y1: 2, mat: COBBLE },
   { x0: 2,  x1: 6,  z0: 23, z1: 23, y0: 1, y1: 1, mat: COBBLE },
-  { x0: 29, x1: 31, z0: 29, z1: 31, y0: 1, y1: 7, mat: COBBLE,   cap: TORCH },     // corner watchtowers
-  { x0: 30, x1: 30, z0: 5,  z1: 5,  y0: 1, y1: 1, mat: COBBLE,   cap: GLOWSTONE }, // floor braziers
-  { x0: 5,  x1: 5,  z0: 30, z1: 30, y0: 1, y1: 1, mat: COBBLE,   cap: GLOWSTONE },
-  { x0: 16, x1: 16, z0: 28, z1: 28, y0: 1, y1: 1, mat: COBBLE,   cap: TORCH },
-  { x0: 28, x1: 28, z0: 16, z1: 16, y0: 1, y1: 1, mat: COBBLE,   cap: TORCH },
+  { x0: 29, x1: 31, z0: 29, z1: 31, y0: 1, y1: 7, mat: COBBLE, cap: GLOWSTONE }, // corner watchtower beacons
+  { x0: 30, x1: 30, z0: 5,  z1: 5,  y0: 1, y1: 2, mat: COBBLE, cap: GLOWSTONE }, // floor braziers
+  { x0: 5,  x1: 5,  z0: 30, z1: 30, y0: 1, y1: 2, mat: COBBLE, cap: GLOWSTONE },
+  { x0: 16, x1: 16, z0: 28, z1: 28, y0: 1, y1: 2, mat: COBBLE, cap: GLOWSTONE },
+  { x0: 28, x1: 28, z0: 16, z1: 16, y0: 1, y1: 2, mat: COBBLE, cap: GLOWSTONE },
 ];
 
 // ---- War / D-Day beach (an asymmetric assault map) ----
@@ -270,31 +270,34 @@ export class WorldGen {
         const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az), inr = Math.min(ax, az);
         if (m > HALF) continue;                         // void beyond the arena
 
-        // Foundation + grim, stained stone floor.
+        // Foundation + clean light-stone floor with a glowing inlay grid.
         chunk.setLocal(lx, F - 2, lz, BEDROCK);
         chunk.setLocal(lx, F - 1, lz, BEDROCK);
         let floor = (((wx >> 2) + (wz >> 2)) & 1) ? STONE : COBBLE;
-        if (hash2(wx * 3 + 1, wz * 3 + 7) < 0.05) floor = COAL_ORE;   // dark stains
+        if (m < HALF - 1 && wx % 12 === 0 && wz % 12 === 0) floor = GLOWSTONE;   // lit grid nodes
         chunk.setLocal(lx, F, lz, floor);
 
-        // Tall banded perimeter wall, torch sconces on the inner face, crenellations.
+        // Bright perimeter wall: cobble with glowing bands + sconces on the inner
+        // face, glass-topped crenellations.
         if (m >= HALF - 1) {
           for (let y = 1; y <= WH; y++) {
-            let wmat = (y % 4 === 0) ? COAL_ORE : COBBLE;
-            if (m === HALF - 1 && y === 5 && inr % 6 === 2) wmat = TORCH;  // sconces
+            let wmat = COBBLE;
+            if (m === HALF - 1 && (y === 4 || y === 8)) wmat = GLOWSTONE;          // glowing bands
+            if (m === HALF - 1 && y === 6 && inr % 6 === 2) wmat = GLOWSTONE;      // sconces
             chunk.setLocal(lx, F + y, lz, wmat);
           }
-          if (((ax + az) & 1) === 0) chunk.setLocal(lx, F + WH + 1, lz, COBBLE);  // crenellations
+          chunk.setLocal(lx, F + WH + 1, lz, ((ax + az) & 1) === 0 ? GLASS : COBBLE);  // glass-topped crenellations
           continue;
         }
 
-        // Central ritual altar: stepped dais + dark obelisk crowned with a beacon.
+        // Central luminous dais: a stepped platform crowned with a glowstone beacon
+        // sheathed in glass.
         if (m <= 6) {
           const h = m <= 2 ? 3 : m <= 4 ? 2 : 1;
-          for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, y === h ? COBBLE : BEDROCK);
+          for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, (y === h && m <= 2) ? GLOWSTONE : COBBLE);
           if (m === 4 && ax === az) chunk.setLocal(lx, F + h + 1, lz, GLOWSTONE);     // corner lamps
-          if (m <= 1) for (let y = 4; y <= 8; y++) chunk.setLocal(lx, F + y, lz, m === 0 ? COAL_ORE : BEDROCK); // obelisk
-          if (ax === 0 && az === 0) chunk.setLocal(lx, F + 9, lz, GLOWSTONE);         // cursed beacon
+          if (m <= 1) for (let y = 4; y <= 8; y++) chunk.setLocal(lx, F + y, lz, m === 0 ? GLOWSTONE : GLASS); // glowing beacon in glass
+          if (ax === 0 && az === 0) chunk.setLocal(lx, F + 9, lz, GLOWSTONE);         // crowning beacon
           continue;
         }
 

@@ -87,7 +87,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.12;
 renderer.sortObjects = true;
 document.getElementById('app').appendChild(renderer.domElement);
 
@@ -103,17 +103,17 @@ const GradeShader = {
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
       vec2 d = vUv - 0.5;
-      float vig = smoothstep(0.92, 0.32, length(d));   // soft vignette
-      c.rgb *= mix(0.7, 1.0, vig);
-      c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;              // gentle contrast
+      float vig = smoothstep(0.95, 0.35, length(d));   // soft, gentle vignette
+      c.rgb *= mix(0.84, 1.0, vig);
+      c.rgb = (c.rgb - 0.5) * 1.06 + 0.5;              // gentle contrast
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-      c.rgb = mix(vec3(l), c.rgb, 1.16);               // a touch more saturation
+      c.rgb = mix(vec3(l), c.rgb, 1.22);               // a touch more vibrance
       gl_FragColor = c;
     }`,
 };
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.5, 0.8);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.52, 0.55, 0.78);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
 composer.addPass(new ShaderPass(GradeShader));
@@ -574,7 +574,7 @@ const mpHandlers = {
       gameMode = d.gameMode || 'dm';
       setGameMode(BATTLE); inventory.setLoadout(gameMode === 'war' ? WAR_LOADOUT : BATTLE_LOADOUT); health = 20; hud.setHealth(20);
       teamMode = !!d.team; scoreLimit = d.scoreLimit || 20; computeCoverPoints();
-      sky.setHorror(gameMode !== 'war'); sky.setWar(gameMode === 'war');
+      sky.setArena(gameMode !== 'war'); sky.setWar(gameMode === 'war');
     }
     startWorld();
     setMpStatus(`Joined ${d.hostName || 'host'}'s ${d.battle ? 'battle arena' : 'world'}!`);
@@ -639,7 +639,7 @@ function setGameMode(m) {
   inventory.setMode(m === CREATIVE || m === BATTLE); // battle uses the infinite (creative) set
   if (m === BATTLE) { hud.setBattle(true); hud.showRadar(true); setupArenaPickups(); }  // atmosphere set in setupMatch
   else {
-    sky.setHorror(false); sky.setWar(false);
+    sky.setArena(false); sky.setWar(false);
     leaveBattleCleanup();
     hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear(); hud.setGrenades(0);
     if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
@@ -806,7 +806,7 @@ function setupMatch() {
   computeCoverPoints();
   setupHill(gameMode === 'koth');
   setupZone(gameMode === 'br');
-  sky.setHorror(gameMode !== 'war'); sky.setWar(gameMode === 'war');
+  sky.setArena(gameMode !== 'war'); sky.setWar(gameMode === 'war');
   if (gameMode === 'war') pickups.clear();
 
   const humans = [selfId()];
