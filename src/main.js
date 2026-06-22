@@ -31,7 +31,7 @@ import { voxelRaycast } from './raycast.js';
 import { rayAABB } from './physics.js';
 import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
-import { Multiplayer } from './net.js';
+import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
 import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
@@ -610,7 +610,7 @@ const mpHandlers = {
   onHit: (dmg, fromName) => { lastHitBy = fromName; lastHitTime = performance.now() / 1000; damagePlayer(dmg, undefined, undefined, true); },
   onKillFeed: (victim, killer) => { hud.addKill(victim, killer); if (killer === myName()) announceKill(false); },
   onBotHit: (botId, dmg, fromName, head) => botHurt(botId, dmg, fromName, head),
-  onDeathAuthority: (by, id) => { const r = mp.remotes.get(id); if (r) noteKill(by, mp.roster.get(id), r.group.position.x, r.group.position.y + 1, r.group.position.z); registerKill(by, id); },
+  onDeathAuthority: (by, id) => { const r = mp.remotes.get(id); if (r) noteKill(by, mp.roster.get(id), r.group.position.x, r.group.position.y + 1, r.group.position.z, id); registerKill(by, id); },
   onBotFire: (d) => { shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color); sfx.gunAt(d.kind === 'rail' ? 'rail' : d.kind === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z); },
   // Another player's shot — render it visually (no damage; their client resolves hits).
   onPlayerFire: (d) => {
@@ -740,7 +740,7 @@ function battleDeath() {
   const killer = (now - lastHitTime < 10) ? lastHitBy : null;
   hud.addKill(myName(), killer);
   if (mp.online) mp.sendDeath(killer);
-  noteKill(killer, myName(), player.pos.x, player.pos.y + 1, player.pos.z);
+  noteKill(killer, myName(), player.pos.x, player.pos.y + 1, player.pos.z, 'me');
   if (isAuthority()) registerKill(killer, selfId(), myName());
   particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 80, 80], 30);
   sfx.gun('sniper'); lastHitBy = null; streak = 0;
@@ -794,9 +794,9 @@ const humanScore = new Map();   // remote human id -> { k, d }
 const teamAssign = new Map();   // combatant id -> team
 let board = [];                 // scoreboard snapshot
 let matchWinner = null, matchOverTimer = 0;
-// Gun Game final-kill cam: a cinematic orbit on the match-winning kill.
-const killCam = { active: false, t: 0, dur: 4.6, focus: new THREE.Vector3(), base: 0, sweep: 1.3, r0: 8, r1: 4.6, h0: 3.2, h1: 1.9 };
-const lastKill = { killer: '', victim: '', vpos: new THREE.Vector3(), at: -1 };
+// Gun Game final-kill cam: a cinematic multi-angle replay of the match-winning kill.
+const killCam = { active: false, mode: 'orbit', t: 0, dur: 4.6, focus: new THREE.Vector3(), base: 0, sweep: 1.3, r0: 8, r1: 4.6, h0: 3.2, h1: 1.9 };
+const lastKill = { killer: '', victim: '', killerKey: null, victimKey: null, vpos: new THREE.Vector3(), at: -1 };
 let coverPoints = [];
 const isAuthority = () => (!mp.online || mp.isHost);
 const selfId = () => (mp.online ? mp.myId : 'me');
@@ -845,7 +845,7 @@ function setupMatch() {
   if (gameMode === 'wave' || gameMode === 'war') teamMode = true;
   scoreLimit = gameMode === 'gungame' ? GUNGAME_LADDER.length : battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
-  matchWinner = null; matchOverTimer = 0; endKillCam(false); hud.hideRoundOver();
+  matchWinner = null; matchOverTimer = 0; endKillCam(false); resetReel(); hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
@@ -1079,10 +1079,20 @@ function addDeathById(id) {
   const bt = botMgr.get(id); if (bt) { bt.deaths++; return; }
   const s = humanScore.get(id) || { k: 0, d: 0 }; s.d++; humanScore.set(id, s);
 }
-// Record the most recent kill (who, whom, where) so that if it turns out to be
-// the match-winning blow in Gun Game we can frame the final-kill cam on it.
-function noteKill(killerName, victimName, vx, vy, vz) {
+// Resolve a combatant name to its kill-reel key ('me' / bot id / remote id).
+function reelKeyForName(name) {
+  if (!name) return null;
+  if (name === myName()) return 'me';
+  for (const b of botMgr.bots) if (b.name === name) return b.id;
+  if (mp.online) for (const [id, n] of mp.roster) if (n === name) return id;
+  return null;
+}
+// Record the most recent kill (who, whom, where + reel keys) so that if it turns
+// out to be the match-winning blow in Gun Game we can replay it from the reel.
+function noteKill(killerName, victimName, vx, vy, vz, victimKey) {
   lastKill.killer = killerName || ''; lastKill.victim = victimName || '';
+  lastKill.killerKey = reelKeyForName(killerName);
+  lastKill.victimKey = victimKey != null ? victimKey : reelKeyForName(victimName);
   lastKill.vpos.set(vx, vy, vz); lastKill.at = performance.now() / 1000;
 }
 function registerKill(killerName, victimId) {
@@ -1111,14 +1121,53 @@ function checkWin() {
 function endMatch(winner) {
   matchWinner = winner;
   if (mp.isHost) mp.broadcast({ t: 'roundover', winner });
-  // Gun Game gets a cinematic final-kill cam before the standings come up.
+  // Gun Game gets a cinematic final-kill cam (a multi-angle replay) before standings.
   const cam = gameMode === 'gungame' && startKillCam(winner);
-  matchOverTimer = cam ? 8.5 : 7;
+  matchOverTimer = cam ? killCamDur + 2.6 : 7;
   if (!cam) { hud.showRoundOver(winner); hud.showScoreboard(); }
   hud.announce(`${winner} wins!`, '#ffd86b'); sfx.announce('win');
 }
 
-// Resolve a combatant's live position by name (self / bot / remote).
+// ---- Kill reel: a rolling ~2.4s buffer of every combatant's transform, so the
+// final-kill cam can actually replay the kill (not just orbit a frozen pose). ----
+const REEL_HZ = 20, REEL_SECS = 2.0;
+const killReel = [];                 // [{ t, a: { key: [x,y,z,yaw] } }] newest last
+let reelClock = 0, reelAcc = 0;
+function recordReel(dt) {
+  if (matchWinner) return;           // freeze the reel at the kill so it holds the lead-up
+  reelAcc += dt; if (reelAcc < 1 / REEL_HZ) return;
+  reelClock += reelAcc; reelAcc = 0;
+  const a = {};
+  if (!dead && !eliminated) a['me'] = [player.pos.x, player.pos.y, player.pos.z, player.yaw];
+  for (const b of botMgr.bots) if (b.alive && b.mesh) a[b.id] = [b.pos.x, b.pos.y, b.pos.z, b.yaw];
+  if (mp.online) for (const [id, r] of mp.remotes) if (r.group && r.group.visible) a[id] = [r.group.position.x, r.group.position.y, r.group.position.z, r.target ? r.target.yaw : r.group.rotation.y];
+  killReel.push({ t: reelClock, a });
+  const cut = reelClock - REEL_SECS;
+  while (killReel.length > 2 && killReel[0].t < cut) killReel.shift();
+}
+function resetReel() { killReel.length = 0; reelClock = 0; reelAcc = 0; }
+function reelHas(key) { let c = 0; for (const fr of killReel) if (fr.a[key]) { if (++c >= 2) return true; } return false; }
+function shortAng(d) { while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
+// Interpolate an actor's transform at reel-time qt into `out`; returns the yaw (or null).
+function sampleReel(key, qt, out) {
+  let prev = null, next = null;
+  for (const fr of killReel) { if (!fr.a[key]) continue; if (fr.t <= qt) prev = fr; else { next = fr; break; } }
+  if (!prev && !next) return null;
+  if (!prev) prev = next; if (!next) next = prev;
+  const A = prev.a[key], B = next.a[key], span = next.t - prev.t;
+  const f = span > 0 ? Math.max(0, Math.min(1, (qt - prev.t) / span)) : 0;
+  out.set(A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f, A[2] + (B[2] - A[2]) * f);
+  return A[3] + shortAng(B[3] - A[3]) * f;
+}
+
+// ---- Final-kill cam ---- a true replay: stand-in avatars retrace the kill from
+// the reel while the camera cuts between three angles, then a simple orbit fallback.
+const REPLAY_PASSES = [{ cam: 'orbit', speed: 1.05 }, { cam: 'shoulder', speed: 0.82 }, { cam: 'low', speed: 0.55 }];
+const replay = { active: false, rStart: 0, rEnd: 0, pass: 0, clock: 0, killerKey: null, victimKey: null, avK: null, avV: null, orbitBase: 0, orbitDir: 1 };
+let killCamDur = 4.6;                 // how long the whole cam (replay or orbit) runs
+const _kcWin = new THREE.Vector3(), _kcEye = new THREE.Vector3();
+const _rK = new THREE.Vector3(), _rV = new THREE.Vector3(), _rMid = new THREE.Vector3(), _rTmp = new THREE.Vector3();
+
 function findCombatantPos(name, out) {
   if (!name) return false;
   if (name === myName()) { out.copy(player.pos); return true; }
@@ -1126,46 +1175,126 @@ function findCombatantPos(name, out) {
   if (mp.online) for (const [id, n] of mp.roster) if (n === name) { const r = mp.remotes.get(id); if (r) { out.copy(r.group.position); return true; } }
   return false;
 }
-const _kcWin = new THREE.Vector3();
 function startKillCam(winner) {
+  const fresh = (performance.now() / 1000 - lastKill.at < 1.5) && lastKill.killer === winner;
+  if (fresh && lastKill.killerKey && lastKill.victimKey && reelHas(lastKill.killerKey) && reelHas(lastKill.victimKey)) {
+    return startReplay(winner) || startOrbitCam(winner);
+  }
+  return startOrbitCam(winner);
+}
+function buildReplayAvatar(key) {
+  const bot = botMgr.get(key);
+  let name = '?', skin;
+  if (key === 'me') { name = myName(); skin = mp.skin; }
+  else if (bot) { name = bot.name; skin = getSkin(bot.skinId); }
+  else { name = mp.roster.get(key) || '?'; }
+  const av = makeAvatar(name, skin);
+  av.userData.yawOff = bot ? 0 : Math.PI;   // bots store avatar-yaw; players store look-yaw
+  av.visible = false; scene.add(av);
+  return av;
+}
+function disposeReplayAvatar(av) {
+  if (!av) return;
+  scene.remove(av);
+  av.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } else if (o.isSprite && o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+}
+function hideLiveCombatants() {
+  for (const b of botMgr.bots) if (b.mesh) b.mesh.visible = false;
+  if (mp.online) for (const [, r] of mp.remotes) if (r.group) r.group.visible = false;
+}
+function restoreLiveCombatants() {
+  for (const b of botMgr.bots) if (b.mesh) b.mesh.visible = b.alive;
+  if (mp.online) for (const [, r] of mp.remotes) if (r.group) r.group.visible = true;
+}
+function startReplay(winner) {
+  replay.rStart = killReel[0].t; replay.rEnd = killReel[killReel.length - 1].t;
+  if (replay.rEnd - replay.rStart < 0.4) return false;             // not enough footage
+  replay.killerKey = lastKill.killerKey; replay.victimKey = lastKill.victimKey;
+  replay.avK = buildReplayAvatar(replay.killerKey);
+  replay.avV = buildReplayAvatar(replay.victimKey);
+  replay.pass = 0; replay.clock = 0;
+  replay.orbitBase = Math.random() * Math.PI * 2; replay.orbitDir = Math.random() < 0.5 ? 1 : -1;
+  const span = replay.rEnd - replay.rStart;
+  killCamDur = REPLAY_PASSES.reduce((s, p) => s + span / p.speed, 0);   // total replay runtime
+  replay.active = true; killCam.active = true; killCam.mode = 'replay';
+  hideLiveCombatants();
+  hud.showKillCam(winner, lastKill.victim, 1, REPLAY_PASSES.length);
+  return true;
+}
+function startOrbitCam(winner) {
   if (!findCombatantPos(winner, _kcWin)) return false;
-  const fresh = (performance.now() / 1000 - lastKill.at < 1.2) && lastKill.killer === winner;
+  const fresh = (performance.now() / 1000 - lastKill.at < 1.5) && lastKill.killer === winner;
   const v = fresh ? lastKill.vpos : null;
-  // Frame the orbit between the winner and (if known) their last victim.
   killCam.focus.copy(_kcWin); killCam.focus.y += 1.0;
   if (v) killCam.focus.set((_kcWin.x + v.x) / 2, (_kcWin.y + 1.0 + v.y) / 2, (_kcWin.z + v.z) / 2);
-  // Start behind the winner, looking past them toward the action, then sweep.
-  let bx = v ? _kcWin.x - v.x : _kcWin.x - killCam.focus.x;
-  let bz = v ? _kcWin.z - v.z : _kcWin.z - killCam.focus.z;
+  let bx = v ? _kcWin.x - v.x : 1, bz = v ? _kcWin.z - v.z : 0;
   if (bx === 0 && bz === 0) bz = 1;
   killCam.base = Math.atan2(bz, bx);
   killCam.sweep = (Math.random() < 0.5 ? 1 : -1) * (1.0 + Math.random() * 0.5);
-  killCam.t = 0; killCam.active = true;
-  hud.showKillCam(winner, fresh ? lastKill.victim : '');
+  killCam.t = 0; killCam.active = true; killCam.mode = 'orbit'; killCamDur = killCam.dur;
+  hud.showKillCam(winner, fresh ? lastKill.victim : '', 0, 0);
   return true;
 }
-const _kcEye = new THREE.Vector3();
 function updateKillCam(dt) {
   if (!killCam.active) return;
+  if (killCam.mode === 'replay') updateReplay(dt); else updateOrbit(dt);
+  if (viewModel) viewModel.visible = false;   // never show first-person hands during the cam
+}
+function updateReplay(dt) {
+  hideLiveCombatants();                        // keep live avatars hidden even if one respawns
+  const pass = REPLAY_PASSES[replay.pass];
+  replay.clock += Math.max(0, dt) * pass.speed;
+  const qt = replay.rStart + replay.clock;
+  const kyaw = sampleReel(replay.killerKey, qt, _rK);
+  const vyaw = sampleReel(replay.victimKey, qt, _rV);
+  if (kyaw != null) { replay.avK.visible = true; replay.avK.position.copy(_rK); replay.avK.rotation.y = kyaw + replay.avK.userData.yawOff; }
+  if (vyaw != null) { replay.avV.visible = true; replay.avV.position.copy(_rV); replay.avV.rotation.y = vyaw + replay.avV.userData.yawOff; }
+  _rMid.copy(_rK).add(_rV).multiplyScalar(0.5); _rMid.y += 1.1;
+  const e = Math.min(1, replay.clock / Math.max(0.2, replay.rEnd - replay.rStart));
+  let lookY = 0.2;
+  if (pass.cam === 'orbit') {
+    const ang = replay.orbitBase + replay.orbitDir * e * 1.7, rad = 8 - 2 * e, h = 3.4 - 1.0 * e;
+    _kcEye.set(_rMid.x + Math.cos(ang) * rad, _rMid.y + h, _rMid.z + Math.sin(ang) * rad);
+  } else if (pass.cam === 'shoulder') {
+    _rTmp.copy(_rK).sub(_rV); _rTmp.y = 0; if (_rTmp.lengthSq() < 0.01) _rTmp.set(0, 0, 1); _rTmp.normalize();
+    _kcEye.copy(_rK).addScaledVector(_rTmp, 2.7); _kcEye.y = _rK.y + 2.5;   // behind & above the killer
+  } else {
+    _rTmp.copy(_rV).sub(_rK); _rTmp.y = 0; if (_rTmp.lengthSq() < 0.01) _rTmp.set(1, 0, 0); _rTmp.normalize();
+    _kcEye.set(_rMid.x - _rTmp.z * 4.6, _rMid.y - 0.5, _rMid.z + _rTmp.x * 4.6);   // low, side-on
+    lookY = 1.0;
+  }
+  if (_kcEye.y < ARENA.FLOOR + 0.8) _kcEye.y = ARENA.FLOOR + 0.8;
+  const look = pass.cam === 'shoulder' ? _rV : _rMid;
+  camera.position.copy(_kcEye); camera.up.set(0, 1, 0);
+  camera.lookAt(look.x, look.y + lookY, look.z);
+  if (qt >= replay.rEnd) {
+    replay.pass++; replay.clock = 0;
+    if (replay.pass >= REPLAY_PASSES.length) { endKillCam(true); return; }
+    hud.showKillCam(lastKill.killer, lastKill.victim, replay.pass + 1, REPLAY_PASSES.length);
+  }
+}
+function updateOrbit(dt) {
   killCam.t += Math.max(0, dt);
   const p = Math.min(1, killCam.t / killCam.dur);
-  const e = 1 - Math.pow(1 - p, 3);                       // easeOutCubic dolly-in
+  const e = 1 - Math.pow(1 - p, 3);
   const ang = killCam.base + killCam.sweep * e;
-  const rad = killCam.r0 + (killCam.r1 - killCam.r0) * e;
-  const h = killCam.h0 + (killCam.h1 - killCam.h0) * e;
+  const rad = killCam.r0 + (killCam.r1 - killCam.r0) * e, h = killCam.h0 + (killCam.h1 - killCam.h0) * e;
   const f = killCam.focus;
   _kcEye.set(f.x + Math.cos(ang) * rad, f.y + h, f.z + Math.sin(ang) * rad);
-  // Don't let the cam sink below the arena floor.
   if (_kcEye.y < ARENA.FLOOR + 1.2) _kcEye.y = ARENA.FLOOR + 1.2;
-  camera.position.copy(_kcEye);
-  camera.up.set(0, 1, 0);
+  camera.position.copy(_kcEye); camera.up.set(0, 1, 0);
   camera.lookAt(f.x, f.y + 0.1, f.z);
-  if (viewModel) viewModel.visible = false;   // no first-person hands during the cam
   if (killCam.t >= killCam.dur) endKillCam(true);
 }
 function endKillCam(showRound) {
   if (!killCam.active) return;
-  killCam.active = false;
+  killCam.active = false; killCam.mode = 'orbit';
+  if (replay.active) {
+    replay.active = false;
+    disposeReplayAvatar(replay.avK); disposeReplayAvatar(replay.avV);
+    replay.avK = replay.avV = null;
+    restoreLiveCombatants();
+  }
   hud.hideKillCam();
   if (showRound && matchWinner) { hud.showRoundOver(matchWinner); hud.showScoreboard(); }
 }
@@ -1174,7 +1303,7 @@ function resetMatch() {
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
-  matchWinner = null; endKillCam(false); hud.hideRoundOver(); hud.hideScoreboard();
+  matchWinner = null; endKillCam(false); resetReel(); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
     warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
   }
@@ -1200,7 +1329,7 @@ function onBotKilled(b) {
   hud.addKill(b.name, killer);
   if (killer === myName()) announceKill(b.lastHeadshot);
   if (mp.isHost) mp.broadcast({ t: 'death', id: b.id, name: b.name, by: killer });
-  noteKill(killer, b.name, b.pos.x, b.pos.y + 1, b.pos.z);
+  noteKill(killer, b.name, b.pos.x, b.pos.y + 1, b.pos.z, b.id);
   registerKill(killer, b.id);
   b.mesh.visible = false; b.respawnIn = 2.5;
 }
@@ -2160,6 +2289,7 @@ function frame() {
 
   // Bots + match flow: the authority simulates; guests render via broadcasts.
   if (mode === BATTLE && loaded) {
+    if (!frozen) recordReel(dt);     // roll the kill-cam motion buffer
     if (isAuthority()) {
       botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
       botMgr.update((matchWinner || frozen) ? 0 : dt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
@@ -2361,7 +2491,10 @@ window.__game = {
   __loadArena: (theme) => { menuMode = BATTLE; setGameMode(BATTLE); loadWorld(currentSeedStr || 'test', 'arena', theme); sky.setArena(true); sky.setWar(false); atMenu = false; everPlayed = true; refreshOverlays(); },
   get arenaTheme() { return arenaTheme; },
   get gunGameLadder() { return GUNGAME_LADDER.slice(); },
-  get killCam() { return { active: killCam.active, t: killCam.t, fx: killCam.focus.x, fz: killCam.focus.z }; },
+  get killCam() { return { active: killCam.active, mode: killCam.mode, t: killCam.t, dur: killCamDur, replay: replay.active, pass: replay.pass, reel: killReel.length }; },
+  __reelLen: () => killReel.length,
+  __reelKeys: () => { const s = new Set(); for (const fr of killReel) for (const k in fr.a) s.add(k); return [...s]; },
+  __forceReplayKill: (killerName, killerKey, victimName, victimKey) => { lastKill.killer = killerName; lastKill.victim = victimName; lastKill.killerKey = killerKey; lastKill.victimKey = victimKey; lastKill.at = performance.now() / 1000; },
   get vmCharge() { return vmCharge; },
   get chakraEnergy() { return chakraEnergy; },
   set chakraEnergy(v) { chakraEnergy = v; },
