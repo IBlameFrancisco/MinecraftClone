@@ -22,9 +22,24 @@ export class HUD {
     ui.appendChild(this.modeInfoEl);
     this.announceEl = document.createElement('div'); this.announceEl.id = 'announce';
     this.dmgDirEl = document.createElement('div'); this.dmgDirEl.id = 'dmgdir'; this.dmgDirEl.innerHTML = '<div class="wedge"></div>';
+    this.kcEl = document.createElement('div'); this.kcEl.id = 'killcam';
+    this.kcEl.innerHTML = '<div class="kc-bar kc-top"></div><div class="kc-bar kc-bot"></div>'
+      + '<div class="kc-label"><div class="kc-tag">★ FINAL KILL</div><div class="kc-line"></div></div>';
     ui.appendChild(this.sbEl); ui.appendChild(this.roEl); ui.appendChild(this.radarEl);
-    ui.appendChild(this.announceEl); ui.appendChild(this.dmgDirEl);
+    ui.appendChild(this.announceEl); ui.appendChild(this.dmgDirEl); ui.appendChild(this.kcEl);
   }
+
+  // Cinematic final-kill cam overlay: letterbox bars slide in + a "FINAL KILL" tag.
+  showKillCam(killer, victim) {
+    const line = this.kcEl.querySelector('.kc-line');
+    line.innerHTML = victim
+      ? `<b>${escapeHtml(killer)}</b> <span class="kc-arrow">▸</span> ${escapeHtml(victim)}`
+      : `<b>${escapeHtml(killer)}</b> takes the win`;
+    this.kcEl.classList.remove('show'); void this.kcEl.offsetWidth;   // restart the slide-in
+    this.kcEl.style.display = 'block';
+    this.kcEl.classList.add('show');
+  }
+  hideKillCam() { this.kcEl.classList.remove('show'); this.kcEl.style.display = 'none'; }
 
   // Big fading announcer banner (First Blood, multikills, round win…). Queued so two
   // banners fired in the same frame (e.g. multikill + killstreak) both show in turn
@@ -424,6 +439,22 @@ export class HUD {
       #dmgdir { position:absolute; left:50%; top:50%; width:0; height:0; pointer-events:none; }
       #dmgdir .wedge { position:absolute; left:-110px; top:-185px; width:220px; height:80px; opacity:0;
         background:radial-gradient(ellipse at 50% 100%, rgba(255,45,45,0.85) 0%, rgba(255,45,45,0) 72%); }
+      #killcam { display:none; position:absolute; inset:0; pointer-events:none; z-index:21; overflow:hidden; }
+      #killcam .kc-bar { position:absolute; left:0; right:0; height:11vh; background:#000;
+        box-shadow:0 0 40px rgba(0,0,0,0.9); transition:transform 0.45s cubic-bezier(.2,.7,.2,1); }
+      #killcam .kc-top { top:0; transform:translateY(-100%); }
+      #killcam .kc-bot { bottom:0; transform:translateY(100%); }
+      #killcam.show .kc-top, #killcam.show .kc-bot { transform:translateY(0); }
+      #killcam .kc-label { position:absolute; left:50%; top:13vh; transform:translate(-50%,-14px);
+        text-align:center; opacity:0; transition:opacity 0.5s 0.25s, transform 0.5s 0.25s; }
+      #killcam.show .kc-label { opacity:1; transform:translate(-50%,0); }
+      #killcam .kc-tag { font-size:15px; font-weight:900; letter-spacing:4px; color:#ff5b5b;
+        text-transform:uppercase; text-shadow:0 0 14px rgba(255,60,60,0.7), 0 2px 4px #000; }
+      #killcam .kc-line { margin-top:6px; font-size:30px; font-weight:800; letter-spacing:1px; color:#fff;
+        text-shadow:0 2px 10px rgba(0,0,0,0.9); }
+      #killcam .kc-line b { background:linear-gradient(180deg,#ffe08a,#ff8f3a); -webkit-background-clip:text;
+        background-clip:text; -webkit-text-fill-color:transparent; }
+      #killcam .kc-arrow { color:#ff6a6a; margin:0 4px; }
     `;
     document.head.appendChild(s);
   }
