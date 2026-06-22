@@ -432,7 +432,7 @@ const SHURIKEN_TEX = shurikenTexture();
 // chakra bursts (the Rasengan grind-flash and the Rasenshuriken wind-blade dome).
 export class ChakraFx {
   constructor(scene) {
-    this.group = new THREE.Group(); scene.add(this.group); this.proj = []; this.fx = [];
+    this.group = new THREE.Group(); scene.add(this.group); this.proj = []; this.fx = []; this.grinds = [];
     // Scratch vectors for the projectile steering/physics (avoid per-frame allocation).
     this._cur = new THREE.Vector3(); this._sub = new THREE.Vector3();
     this._vh = new THREE.Vector3(); this._axle = new THREE.Vector3(); this._UP = new THREE.Vector3(0, 1, 0);
@@ -517,6 +517,36 @@ export class ChakraFx {
     a.col.scale.set(1 + 0.1 * Math.sin(a.t * 8), 1, 1 + 0.1 * Math.cos(a.t * 8));
   }
 
+  // The Rasengan GRIND: a fast-spinning orb that drills into the foe at `pos` along
+  // `dir` for `dur` seconds (buzzsaw blades + a sparking spiral boring in), then blasts
+  // them with a final burst. This is the "ground into them at point-blank" moment.
+  grind(pos, dir, color, dur, scale) {
+    const sc = scale || 1;
+    const g = new THREE.Group(); g.position.copy(pos);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());   // local +z = drill axis
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.4 * sc, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.64 * sc, 18, 14),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const blades = new THREE.Group();
+    for (let i = 0; i < 7; i++) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.05 * sc, 1.6 * sc, 0.02),
+        new THREE.MeshBasicMaterial({ color: 0xeaffff, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      b.rotation.z = (i / 7) * Math.PI * 2; blades.add(b);
+    }
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    glow.scale.setScalar(2.4 * sc);
+    const sparks = [];
+    for (let i = 0; i < 12; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xdff2ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      s.scale.setScalar(0.32 * sc); g.add(s);
+      sparks.push({ s, ang: Math.random() * 6.2832, rad: (0.55 + Math.random() * 0.25) * sc, spd: 14 + Math.random() * 12 });
+    }
+    g.add(shell, blades, core, glow);
+    this.group.add(g);
+    this.grinds.push({ g, core, shell, blades, glow, sparks, t: 0, dur: dur || 0.34, color, sc, dir: dir.clone().normalize() });
+  }
+
   // A chakra burst: an expanding additive sphere; `needles` adds the radiating
   // wind-blade urchin of the Rasenshuriken dome.
   burst(pos, radius, color, needles) {
@@ -599,6 +629,24 @@ export class ChakraFx {
       if (f.lines) f.lines.material.opacity = 0.9 * (1 - k * k);
       f.g.rotation.y += dt * 2.2; f.g.rotation.x += dt * 1.4;
       if (f.t >= f.max) { this._dispose(this.group, f.g); this.fx.splice(i, 1); }
+    }
+    for (let i = this.grinds.length - 1; i >= 0; i--) {
+      const gr = this.grinds[i]; gr.t += dt; const k = Math.min(1, gr.t / gr.dur);
+      gr.blades.rotation.z -= dt * 70;                                  // screaming buzzsaw spin
+      const pulse = 1 + 0.14 * Math.sin(gr.t * 55);
+      gr.core.scale.setScalar(pulse);
+      gr.shell.scale.setScalar(pulse * (1 + 0.18 * Math.sin(gr.t * 37)));
+      gr.glow.material.opacity = 0.55 + 0.35 * Math.abs(Math.sin(gr.t * 44));
+      gr.g.position.addScaledVector(gr.dir, dt * 1.4);                  // bore forward into them
+      for (const sp of gr.sparks) {                                    // sparks spiralling off the drill
+        sp.ang += sp.spd * dt;
+        sp.s.position.set(Math.cos(sp.ang) * sp.rad, Math.sin(sp.ang) * sp.rad, -gr.t * 2.2);
+        sp.s.material.opacity = 0.85 * (1 - k);
+      }
+      if (gr.t >= gr.dur) {                                            // final blast
+        this.burst(gr.g.getWorldPosition(this._gw || (this._gw = new THREE.Vector3())).clone(), 1.5 * gr.sc, gr.color, false);
+        this._dispose(this.group, gr.g); this.grinds.splice(i, 1);
+      }
     }
   }
   _dispose(parent, g) { parent.remove(g); g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }

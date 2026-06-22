@@ -1206,9 +1206,9 @@ function reelWep(key) {   // the most recent weapon this actor held in the reel
 function buildReplayAvatar(key) {
   const bot = botMgr.get(key);
   let name = '?', skin;
-  if (key === 'me') { name = myName(); skin = mp.skin; }
+  if (key === 'me') { name = myName(); skin = getSkin(mp.skin); }
   else if (bot) { name = bot.name; skin = getSkin(bot.skinId); }
-  else { name = mp.roster.get(key) || '?'; }
+  else { const r = mp.remotes.get(key); name = mp.roster.get(key) || '?'; skin = getSkin(r && r.skinId != null ? r.skinId : undefined); }
   const av = makeAvatar(name, skin);
   av.userData.yawOff = bot ? 0 : Math.PI;   // bots store avatar-yaw; players store look-yaw
   const wep = reelWep(key);                 // show the gun/jutsu they were holding
@@ -1838,7 +1838,7 @@ function spawnGhostShot(d, withSound) {
   } else if (k === 'plasma') { plasmas.spawn(muzzle, dir.clone().normalize(), d.sp || 40, 0, d.r || 70, true); if (withSound) sfx.plasma(); }
   else if (k === 'rocket') { rockets.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 30, range: d.r || 70 }, 'remote', true); snd('shotgun'); }
   else if (k === 'grenade') { grenades.spawn(muzzle, dir, d.fuse || 1.6, null, true); if (withSound) sfx.place(); }
-  else if (k === 'rasengan') { chakra.burst(muzzle.clone().addScaledVector(dir.clone().normalize(), 2.2), 1.6 + 1.8 * (d.cf || 1), 0x4aa3ff, false); if (withSound) sfx.rasengan(); }
+  else if (k === 'rasengan') { const nd = dir.clone().normalize(), cf = d.cf || 1; chakra.grind(muzzle.clone().addScaledVector(nd, 2.4), nd, 0x4aa3ff, 0.3 + 0.18 * cf, 0.8 + 0.6 * cf); if (withSound) sfx.rasengan(); }
   else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); if (withSound) sfx.rasenshuriken(); }
   else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); snd('rail'); }
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 70, radius: d.rad || 12, duration: d.du || 3.6, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
@@ -2232,29 +2232,34 @@ function fireRasengan(gun, cf = 1) {
   const blockDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
   const dist = Math.min(blockDist, enemy ? enemy.dist : Infinity, mobHit ? mobHit.dist : Infinity, gun.range);
   const end = _eye.clone().addScaledVector(_dir, dist);
+  // The orb drives INTO the foe — embed the grind a little past the contact point.
+  const grindPos = end.clone().addScaledVector(_dir, 0.35);
   // Longer charge → much bigger hit, reach and knockback (a quick tap barely stings).
   const dmg = Math.max(1, Math.round(gun.damage * (0.25 + 0.75 * cf)));
-  const R = 1.8 + 1.5 * cf, KB = (gun.knockback || 14) * (0.3 + 0.7 * cf);
+  const R = 1.9 + 1.6 * cf, KB = (gun.knockback || 14) * (0.4 + 0.8 * cf);
   let struck = false;
+  // Drill them straight back along the aim and launch them up — the Rasengan blast-off.
   if (isAuthority()) for (const b of botMgr.bots) {
     if (!b.alive || friendly(b.id)) continue;
     if (Math.hypot(b.pos.x - end.x, b.pos.y + 1 - end.y, b.pos.z - end.z) > R) continue;
     botHurt(b.id, dmg, myName(), false);
-    const dx = b.pos.x - player.pos.x, dz = b.pos.z - player.pos.z, dl = Math.hypot(dx, dz) || 1;
-    b.vel.x += (dx / dl) * KB; b.vel.z += (dz / dl) * KB; b.vel.y += KB * 0.45; struck = true;
+    b.vel.x += _dir.x * KB; b.vel.z += _dir.z * KB; b.vel.y += KB * 0.6;
+    particles.burst(b.pos.x, b.pos.y + 1.0, b.pos.z, [255, 80, 80], 16);   // impact spray off the body
+    struck = true;
   }
   for (const m of mobs.list) {
     if (Math.hypot(m.pos.x - end.x, m.pos.y + m.height * 0.5 - end.y, m.pos.z - end.z) > R) continue;
-    m.hurt(dmg, player.pos.x, player.pos.z); struck = true;
+    m.hurt(dmg, player.pos.x, player.pos.z);
+    m.vel && (m.vel.x += _dir.x * KB, m.vel.z += _dir.z * KB, m.vel.y += KB * 0.5);
+    particles.burst(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, [255, 90, 90], 12);
+    struck = true;
   }
   if (mp.online) for (const { id } of mp.playersNear(end, R)) { if (friendly(id)) continue; mp.sendHit(id, dmg); struck = true; }
   if (struck) hud.hitMarker(false);
-  // A brighter grind-flash: a spiral chakra dome, a white core flash, denser spray.
-  chakra.burst(end.clone(), 1.8 + 2.1 * cf, 0x4aa3ff, false);
-  chakra.burst(end.clone(), 1.0 + 1.0 * cf, 0xffffff, false);
-  particles.burst(end.x, end.y, end.z, [150, 205, 255], 34 + Math.round(cf * 46));
-  particles.burst(end.x, end.y, end.z, [255, 255, 255], 10 + Math.round(cf * 14));
-  addShake(0.14 + 0.26 * cf); vmRecoil = Math.min(1, vmRecoil + 0.6); sfx.rasengan();
+  // The grind drills into them for a beat, then detonates in a chakra blast.
+  chakra.grind(grindPos.clone(), _dir.clone(), 0x4aa3ff, 0.3 + 0.18 * cf, 0.8 + 0.6 * cf);
+  particles.burst(grindPos.x, grindPos.y, grindPos.z, [150, 205, 255], 22 + Math.round(cf * 30));
+  addShake(0.2 + 0.34 * cf); vmRecoil = Math.min(1, vmRecoil + 0.7); sfx.rasengan();
 }
 function rasenshurikenImpact(pos, gun) {
   // A blinding wind-blade dome: a big needle burst + layered particle shells.
