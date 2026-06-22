@@ -869,12 +869,14 @@ function setupMatch() {
 
 // D-Day uniforms: olive-drab for the Allies, feldgrau for the Axis. The team-colour
 // override on avatars becomes the faction tunic colour (friend/foe read by uniform).
-function warColor(team) { return team === WAR_AXIS ? 0x474d3f : 0x595d39; }
+// Distinct faction uniforms so foe vs friend reads at a glance: Axis cold
+// field-grey with a near-black Stahlhelm; Allied warm khaki with an olive M1.
+function warColor(team) { return team === WAR_AXIS ? 0x5b6066 : 0x7a7038; }
 function factionSkin(team) {
   const axis = team === WAR_AXIS;
-  return { skin: 0xdcb38e, hair: axis ? 0x3a3026 : 0x4a3320, hairStyle: 'short', eye: 0x2a2a2a,
-    shirt: axis ? 0x474d3f : 0x595d39, pants: axis ? 0x35392e : 0x42452a,
-    hat: 'helmet', hatColor: axis ? 0x33372d : 0x474b30 };
+  return { skin: 0xdcb38e, hair: axis ? 0x2e2a26 : 0x4a3320, hairStyle: 'short', eye: 0x2a2a2a,
+    shirt: axis ? 0x5b6066 : 0x7a7038, pants: axis ? 0x2f3338 : 0x4f4420,
+    hat: 'helmet', hatColor: axis ? 0x23262a : 0x5c5a2c };
 }
 const _pick = (a) => a[(Math.random() * a.length) | 0];
 

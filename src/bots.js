@@ -180,7 +180,7 @@ export class BotManager {
       if (!t.alive || t.id === b.id) continue;
       if (b.team >= 0 && t.team === b.team) continue;      // teammate
       const human = !String(t.id).startsWith('bot:');
-      const d = Math.hypot(t.pos.x - b.pos.x, t.pos.z - b.pos.z) * (human ? 0.55 : 1);
+      const d = Math.hypot(t.pos.x - b.pos.x, t.pos.z - b.pos.z) * (human ? 0.9 : 1);   // mild player preference — bots still fight each other
       if (d < bestD) { bestD = d; best = t; }
       const tex = t.pos.x, tey = t.pos.y + EYE, tez = t.pos.z;
       if (ctx.los(this._eyeA.x, this._eyeA.y, this._eyeA.z, tex, tey, tez) && d < bestVisD) { bestVisD = d; bestVis = t; }
