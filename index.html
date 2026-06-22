@@ -82,21 +82,34 @@
 
       #overlay {
         position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-        background: radial-gradient(ellipse at center, rgba(6,10,18,0.18) 0%, rgba(6,10,18,0.62) 100%);
-        pointer-events: auto; transition: opacity 0.4s; text-align: center;
+        background:
+          radial-gradient(ellipse 70% 55% at 50% 28%, rgba(80,130,210,0.12), transparent 70%),
+          radial-gradient(ellipse at center, rgba(6,10,18,0.22) 0%, rgba(3,6,12,0.74) 100%);
+        pointer-events: auto; transition: opacity 0.4s; text-align: center; overflow: hidden;
       }
+      /* Slow cinematic aurora drifting behind the card. */
+      #overlay::before {
+        content: ''; position: absolute; width: 150%; height: 150%; left: -25%; top: -25%; z-index: 0; pointer-events: none;
+        background: conic-gradient(from 0deg at 50% 50%, rgba(255,140,60,0.10), rgba(70,160,255,0.10), rgba(120,220,140,0.10), rgba(180,110,255,0.10), rgba(255,140,60,0.10));
+        filter: blur(60px); opacity: 0.55; animation: gc-aurora 32s linear infinite;
+      }
+      @keyframes gc-aurora { to { transform: rotate(360deg); } }
       #overlay.hidden { opacity: 0; pointer-events: none; }
       #overlay .card {
-        position: relative; overflow: hidden; min-width: 400px; padding: 40px 46px 32px;
-        border-radius: 20px; border: 1px solid rgba(255,255,255,0.12);
-        background: linear-gradient(165deg, rgba(24,30,44,0.86), rgba(12,16,26,0.9));
-        backdrop-filter: blur(16px) saturate(1.15);
-        box-shadow: 0 34px 90px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08);
+        position: relative; overflow: hidden; min-width: 400px; padding: 42px 46px 32px; z-index: 1;
+        border-radius: 22px; border: 1px solid rgba(255,255,255,0.14);
+        background: linear-gradient(165deg, rgba(26,32,48,0.82), rgba(10,14,24,0.92));
+        backdrop-filter: blur(18px) saturate(1.2);
+        box-shadow: 0 40px 100px rgba(0,0,0,0.62), 0 0 60px rgba(60,110,200,0.10), inset 0 1px 0 rgba(255,255,255,0.10);
+        animation: gc-rise 0.5s cubic-bezier(.2,.85,.25,1) both;
       }
+      @keyframes gc-rise { from { transform: translateY(16px) scale(0.985); opacity: 0; } to { transform: none; opacity: 1; } }
       #overlay .card::before {
         content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
-        background: linear-gradient(90deg, #ff7b3a, #ffd86b, #6db33f);
+        background: linear-gradient(90deg, #ff7b3a, #ffd86b, #6db33f, #4aa3ff, #ff7b3a);
+        background-size: 200% 100%; animation: gc-bar 8s linear infinite;
       }
+      @keyframes gc-bar { to { background-position: 200% 0; } }
       .gclogo {
         font-family: 'Arial Black', 'Helvetica Neue', sans-serif; font-weight: 900;
         line-height: 1; letter-spacing: 3px; position: relative; display: inline-block; overflow: hidden;
@@ -114,8 +127,8 @@
       }
       .gclogo .g1 { background-image: linear-gradient(180deg, #ffe08a 8%, #ff7b32 92%); }
       .gclogo .g2 { background-image: linear-gradient(180deg, #c6ef8e 8%, #4f9a2f 92%); }
-      #overlay .gclogo { font-size: 58px; margin-bottom: 6px; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.55)); }
-      #overlay .tagline { opacity: 0.62; font-size: 13px; letter-spacing: 0.4px; margin-top: 0; margin-bottom: 4px; }
+      #overlay .gclogo { font-size: 72px; margin-bottom: 6px; filter: drop-shadow(0 5px 14px rgba(0,0,0,0.6)) drop-shadow(0 0 26px rgba(255,160,70,0.22)); }
+      #overlay .tagline { opacity: 0.66; font-size: 13px; letter-spacing: 0.5px; margin-top: 2px; margin-bottom: 4px; }
       #overlay .skinrow { margin-top: 16px; display: flex; flex-direction: column; align-items: center; gap: 7px; }
       #overlay .skinlabel { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.6; }
       #overlay .skinpick { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; max-width: 420px; }
