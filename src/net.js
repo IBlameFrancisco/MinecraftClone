@@ -200,7 +200,7 @@ export class Multiplayer {
     const now = performance.now();
     if (now - this._lastPos < 50) return;          // ~20 Hz
     this._lastPos = now;
-    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive !== false, wep: p.wep | 0 });
+    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive !== false, wep: p.wep | 0, ch: p.ch || 0 });
   }
   sendEdit(x, y, z, id) { if (this.online) this.broadcast({ t: 'edit', x, y, z, id }); }
   sendEdits(list) { if (this.online && list.length) this.broadcast({ t: 'edits', list }); }

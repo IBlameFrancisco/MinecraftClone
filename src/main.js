@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, Portals, makeViewModel, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, Portals, makeViewModel, makeHeldWeapon, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -622,21 +622,7 @@ const mpHandlers = {
   onDeathAuthority: (by, id) => { const r = mp.remotes.get(id); if (r) noteKill(by, mp.roster.get(id), r.group.position.x, r.group.position.y + 1, r.group.position.z, id); registerKill(by, id); },
   onBotFire: (d) => { shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color); sfx.gunAt(d.kind === 'rail' ? 'rail' : d.kind === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z); },
   // Another player's shot — render it visually (no damage; their client resolves hits).
-  onPlayerFire: (d) => {
-    const muzzle = new THREE.Vector3(d.x, d.y, d.z), dir = new THREE.Vector3(d.dx, d.dy, d.dz);
-    const k = d.k;
-    if (k === 'hitscan' || k === 'shotgun' || k === 'rail') {
-      shotTracer(k, muzzle, dir.clone().normalize(), d.r || 60, d.c || 0xffd27a);
-      sfx.gunAt(k === 'rail' ? 'rail' : k === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z);
-    } else if (k === 'plasma') { plasmas.spawn(muzzle, dir.clone().normalize(), d.sp || 40, 0, d.r || 70, true); sfx.plasma(); }
-    else if (k === 'rocket') { rockets.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 30, range: d.r || 70 }, 'remote', true); sfx.gunAt('shotgun', d.x, d.y, d.z); }
-    else if (k === 'grenade') { grenades.spawn(muzzle, dir, d.fuse || 1.6, null, true); sfx.place(); }
-    else if (k === 'rasengan') { chakra.burst(muzzle.clone().addScaledVector(dir.clone().normalize(), 2.2), 1.6 + 1.8 * (d.cf || 1), 0x4aa3ff, false); sfx.rasengan(); }
-    else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); sfx.rasenshuriken(); }
-    else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); sfx.gunAt('rail', d.x, d.y, d.z); }
-    else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); sfx.explosionAt(d.x, d.y, d.z); }
-    else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
-  },
+  onPlayerFire: (d) => spawnGhostShot(d, true),
   onBoard: (d) => {
     board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
     const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
@@ -1153,21 +1139,30 @@ function endMatch(winner) {
 // ---- Kill reel: a rolling ~2.4s buffer of every combatant's transform, so the
 // final-kill cam can actually replay the kill (not just orbit a frozen pose). ----
 const REEL_HZ = 20, REEL_SECS = 2.0;
-const killReel = [];                 // [{ t, a: { key: [x,y,z,yaw] } }] newest last
+const killReel = [];                 // [{ t, a: { key: [x,y,z,yaw,wep] } }] newest last
+const fireReel = [];                 // [{ t, k, x,y,z, dx,dy,dz, ... }] shots fired during the window
 let reelClock = 0, reelAcc = 0;
 function recordReel(dt) {
   if (matchWinner) return;           // freeze the reel at the kill so it holds the lead-up
   reelAcc += dt; if (reelAcc < 1 / REEL_HZ) return;
   reelClock += reelAcc; reelAcc = 0;
   const a = {};
-  if (!dead && !eliminated) a['me'] = [player.pos.x, player.pos.y, player.pos.z, player.yaw];
-  for (const b of botMgr.bots) if (b.alive && b.mesh) a[b.id] = [b.pos.x, b.pos.y, b.pos.z, b.yaw];
-  if (mp.online) for (const [id, r] of mp.remotes) if (r.group && r.group.visible) a[id] = [r.group.position.x, r.group.position.y, r.group.position.z, r.target ? r.target.yaw : r.group.rotation.y];
+  const myWep = gunOf(inventory.selectedId()) ? inventory.selectedId() : 0;
+  if (!dead && !eliminated) a['me'] = [player.pos.x, player.pos.y, player.pos.z, player.yaw, myWep];
+  for (const b of botMgr.bots) if (b.alive && b.mesh) a[b.id] = [b.pos.x, b.pos.y, b.pos.z, b.yaw, b.gunId || 0];
+  if (mp.online) for (const [id, r] of mp.remotes) if (r.group && r.group.visible) a[id] = [r.group.position.x, r.group.position.y, r.group.position.z, r.target ? r.target.yaw : r.group.rotation.y, r.wep || 0];
   killReel.push({ t: reelClock, a });
   const cut = reelClock - REEL_SECS;
   while (killReel.length > 2 && killReel[0].t < cut) killReel.shift();
+  while (fireReel.length && fireReel[0].t < cut - 0.5) fireReel.shift();
 }
-function resetReel() { killReel.length = 0; reelClock = 0; reelAcc = 0; }
+// Record a shot into the fire reel so the kill cam can replay the actual bullet/attack.
+function recordFire(kind, muzzle, dir, extra) {
+  if (matchWinner || mode !== BATTLE) return;
+  fireReel.push(Object.assign({ t: reelClock, k: kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z }, extra || {}));
+  if (fireReel.length > 200) fireReel.shift();
+}
+function resetReel() { killReel.length = 0; fireReel.length = 0; reelClock = 0; reelAcc = 0; }
 function reelHas(key) { let c = 0; for (const fr of killReel) if (fr.a[key]) { if (++c >= 2) return true; } return false; }
 function shortAng(d) { while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
 // Interpolate an actor's transform at reel-time qt into `out`; returns the yaw (or null).
@@ -1204,6 +1199,10 @@ function startKillCam(winner) {
   }
   return startOrbitCam(winner);
 }
+function reelWep(key) {   // the most recent weapon this actor held in the reel
+  for (let i = killReel.length - 1; i >= 0; i--) { const v = killReel[i].a[key]; if (v && v[4]) return v[4]; }
+  return 0;
+}
 function buildReplayAvatar(key) {
   const bot = botMgr.get(key);
   let name = '?', skin;
@@ -1212,6 +1211,8 @@ function buildReplayAvatar(key) {
   else { name = mp.roster.get(key) || '?'; }
   const av = makeAvatar(name, skin);
   av.userData.yawOff = bot ? 0 : Math.PI;   // bots store avatar-yaw; players store look-yaw
+  const wep = reelWep(key);                 // show the gun/jutsu they were holding
+  if (wep) { try { av.add(makeHeldWeapon(wep)); } catch { /* ignore */ } }
   av.visible = false; scene.add(av);
   return av;
 }
@@ -1235,6 +1236,8 @@ function startReplay(winner) {
   replay.avK = buildReplayAvatar(replay.killerKey);
   replay.avV = buildReplayAvatar(replay.victimKey);
   replay.pass = 0; replay.clock = 0;
+  replay.fires = fireReel.filter((e) => e.t >= replay.rStart - 0.3 && e.t <= replay.rEnd + 0.4);  // shots to replay
+  replay.fireIdx = 0;
   replay.orbitBase = Math.random() * Math.PI * 2; replay.orbitDir = Math.random() < 0.5 ? 1 : -1;
   const span = replay.rEnd - replay.rStart;
   killCamDur = REPLAY_PASSES.reduce((s, p) => s + span / p.speed, 0);   // total replay runtime
@@ -1271,6 +1274,10 @@ function updateReplay(dt) {
   const vyaw = sampleReel(replay.victimKey, qt, _rV);
   if (kyaw != null) { replay.avK.visible = true; replay.avK.position.copy(_rK); replay.avK.rotation.y = kyaw + replay.avK.userData.yawOff; }
   if (vyaw != null) { replay.avV.visible = true; replay.avV.position.copy(_rV); replay.avV.rotation.y = vyaw + replay.avV.userData.yawOff; }
+  // Replay the actual shots/attacks as they happened, in time with the action.
+  while (replay.fires && replay.fireIdx < replay.fires.length && replay.fires[replay.fireIdx].t <= qt) {
+    spawnGhostShot(replay.fires[replay.fireIdx], true); replay.fireIdx++;
+  }
   _rMid.copy(_rK).add(_rV).multiplyScalar(0.5); _rMid.y += 1.1;
   const e = Math.min(1, replay.clock / Math.max(0.2, replay.rEnd - replay.rStart));
   let lookY = 0.2;
@@ -1290,7 +1297,7 @@ function updateReplay(dt) {
   camera.position.copy(_kcEye); camera.up.set(0, 1, 0);
   camera.lookAt(look.x, look.y + lookY, look.z);
   if (qt >= replay.rEnd) {
-    replay.pass++; replay.clock = 0;
+    replay.pass++; replay.clock = 0; replay.fireIdx = 0;   // restart the shot timeline for the next angle
     if (replay.pass >= REPLAY_PASSES.length) { endKillCam(true); return; }
     hud.showKillCam(lastKill.killer, lastKill.victim, replay.pass + 1, REPLAY_PASSES.length);
   }
@@ -1490,6 +1497,8 @@ function botFire(bot, dir) {
     botBullet(bot, pd, gun.range, dmg, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
   }
   if (botSoundBudget > 0) { botSoundBudget--; sfx.gunAt(gun.kind === 'rail' ? 'rail' : gun.kind === 'shotgun' ? 'shotgun' : gun.zoom ? 'sniper' : 'handgun', muzzle.x, muzzle.y, muzzle.z); }
+  // Log the bot's shot for the kill-cam replay (render it as a simple tracer of its colour).
+  recordFire(gun.kind === 'shotgun' ? 'shotgun' : gun.kind === 'rail' ? 'rail' : 'hitscan', muzzle, dir, { r: gun.range, c: color });
   if (mp.isHost) mp.broadcast({ t: 'bfire', kind: gun.kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z, range: gun.range, color });
 }
 let botBroadcastT = 0;
@@ -1814,7 +1823,27 @@ function spreadDir(dir, spread) {
 
 // Broadcast a shot so other players see our tracers/projectiles (visual-only on their end).
 function broadcastFire(kind, muzzle, dir, extra) {
+  recordFire(kind, muzzle, dir, extra);   // also log it for the kill-cam replay
   if (mp.online) mp.broadcast(Object.assign({ t: 'pfire', k: kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z }, extra || {}));
+}
+// Render a shot as pure visuals (no damage) — shared by remote-player fire ('pfire')
+// and the kill-cam shot replay.
+function spawnGhostShot(d, withSound) {
+  const muzzle = new THREE.Vector3(d.x, d.y, d.z), dir = new THREE.Vector3(d.dx, d.dy, d.dz);
+  const snd = (name) => { if (withSound) sfx.gunAt(name, d.x, d.y, d.z); };
+  const k = d.k;
+  if (k === 'hitscan' || k === 'shotgun' || k === 'rail') {
+    shotTracer(k, muzzle, dir.clone().normalize(), d.r || 60, d.c || 0xffd27a);
+    snd(k === 'rail' ? 'rail' : k === 'shotgun' ? 'shotgun' : 'handgun');
+  } else if (k === 'plasma') { plasmas.spawn(muzzle, dir.clone().normalize(), d.sp || 40, 0, d.r || 70, true); if (withSound) sfx.plasma(); }
+  else if (k === 'rocket') { rockets.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 30, range: d.r || 70 }, 'remote', true); snd('shotgun'); }
+  else if (k === 'grenade') { grenades.spawn(muzzle, dir, d.fuse || 1.6, null, true); if (withSound) sfx.place(); }
+  else if (k === 'rasengan') { chakra.burst(muzzle.clone().addScaledVector(dir.clone().normalize(), 2.2), 1.6 + 1.8 * (d.cf || 1), 0x4aa3ff, false); if (withSound) sfx.rasengan(); }
+  else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); if (withSound) sfx.rasenshuriken(); }
+  else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); snd('rail'); }
+  else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 70, radius: d.rad || 12, duration: d.du || 3.6, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
+  else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
+  else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
 }
 function fireGun(gun, secondary) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
@@ -1824,7 +1853,7 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'rail') { fireRail(gun, muzzle); broadcastFire('rail', muzzle, _dir, { r: gun.range, c: 0xb98bff }); }
   else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); broadcastFire('plasma', muzzle, _dir, { sp: gun.speed, r: gun.range }); }
   else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); broadcastFire('rocket', muzzle, _dir, { sp: gun.speed, r: gun.range }); }
-  else if (gun.kind === 'blackhole') { blackholes.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.blackhole(); }
+  else if (gun.kind === 'blackhole') { blackholes.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.blackhole(); broadcastFire('blackhole', muzzle, _dir, { sp: gun.speed, r: gun.range, du: gun.duration, rad: gun.radius }); }
   else if (gun.kind === 'rasengan') fireRasengan(gun);
   else if (gun.kind === 'rasenshuriken') { chakra.throw(muzzle, _dir.clone(), gun, mp.myId || 'me', rasenshurikenImpact); sfx.rasenshuriken(); addShake(0.18); }
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
