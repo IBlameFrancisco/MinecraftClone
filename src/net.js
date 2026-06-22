@@ -250,6 +250,7 @@ export class Multiplayer {
     const out = [];
     for (const [id, r] of this.remotes) {
       const g = r.group;
+      if (!g.visible) continue;                        // skip dead / spectating players (consistent with raycast)
       const d = Math.hypot(g.position.x - point.x, g.position.y + AV_MID - point.y, g.position.z - point.z);
       if (d < radius) out.push({ id, dist: d });
     }

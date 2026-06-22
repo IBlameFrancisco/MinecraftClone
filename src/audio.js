@@ -167,6 +167,19 @@ export class SFX {
     this._tone(820, 1700, 0.16, 0.13, 'sawtooth');   // high chakra whirr on throw
     this._noise(0.14, 3200, 1.6, 0.08, 'highpass');
   }
+  // Chakra gathering — a rising swirling hum that ramps up while the orb forms.
+  chakraCharge() {
+    if (!this.ctx) return;
+    this._tone(180, 520, 0.55, 0.12, 'sine');          // rising swell as chakra gathers
+    this._noise(0.5, 900, 1.1, 0.07, 'bandpass');      // grinding spin building
+  }
+  // Chakra fully formed — a bright shimmering ping at peak charge.
+  chakraReady() {
+    if (!this.ctx) return;
+    this._tone(880, 1320, 0.18, 0.14, 'triangle');
+    this._tone(1320, 1760, 0.16, 0.08, 'sine');
+    this._noise(0.12, 4200, 2.0, 0.06, 'highpass');    // crystalline shimmer
+  }
 
   // Surface-dependent footstep. `mat` is a material category.
   step(mat = 'grass') {
