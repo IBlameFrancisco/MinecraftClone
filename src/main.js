@@ -691,7 +691,7 @@ function setGameMode(m) {
 function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0;
   matchWinner = null; matchOverTimer = 0;
-  abortDeathCam();
+  abortDeathCam(); clearAfterImages();
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
   hud.setBattle(false); hud.showRadar(false); hud.setGrenades(0);   // battle chrome must not linger on the menu
   hud.setChakraVisible(false); hud.setChakraAura(0); hud.hideStatus();
@@ -770,6 +770,7 @@ function respawnPlayer() {
   if (sp.yaw !== undefined) player.yaw = sp.yaw;
   health = 20; hud.setHealth(20); invuln = 1.6;
   grenadeCount = 2; hud.setGrenades(2);
+  flashCharges = FLASH_MAX; flashRegen = 0; flashCD = 0;   // fresh flash steps on respawn
   if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
 }
 
@@ -1417,6 +1418,7 @@ function resetMatch() {
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   health = 20; hud.setHealth(20); invuln = 1.5; lastHitBy = null;
   streak = 0; grenadeCount = 2; hud.setGrenades(2);
+  flashCharges = FLASH_MAX; flashRegen = 0; flashCD = 0;
   if (gameMode === 'gungame') applyGunGameLevel(true);
   if (mp.isHost) mp.broadcast({ t: 'roundreset' });
   rebuildBoard(); broadcastBoard();
@@ -1468,6 +1470,56 @@ function updateDyingAvatars(dt) {
     }
   }
 }
+
+// ---- Flash step: double-tap a movement direction to instantly blink that way,
+// leaving fading after-images behind. Has charges that regenerate over time. ----
+const FLASH_MAX = 2, FLASH_DIST = 7, FLASH_REGEN = 3.0;
+let flashCharges = FLASH_MAX, flashRegen = 0, flashCD = 0;
+const flashTap = { KeyW: -1, KeyA: -1, KeyS: -1, KeyD: -1 };
+const afterImages = [];   // { mesh, t, dur } — translucent silhouettes left along the blink
+function spawnAfterImages(start, end, name, skin, n) {
+  const yaw = Math.atan2(end.x - start.x, end.z - start.z);   // face the travel direction
+  for (let i = 0; i < n; i++) {
+    const f = (i + 0.5) / n;
+    const m = makeAvatar(name, skin);
+    m.traverse((o) => { if (o.isMesh) { o.material.transparent = true; o.material.opacity = 0.55; if (o.material.emissive) o.material.emissive.setHex(0x2a6cff); } });
+    m.position.set(start.x + (end.x - start.x) * f, start.y + (end.y - start.y) * f, start.z + (end.z - start.z) * f);
+    m.rotation.y = yaw;
+    scene.add(m); afterImages.push({ mesh: m, t: 0, dur: 0.42 });
+  }
+  for (let s = 1; s <= 5; s++) { const f = s / 6; particles.burst(start.x + (end.x - start.x) * f, start.y + 0.9, start.z + (end.z - start.z) * f, [120, 170, 255], 4); }
+  particles.burst(start.x, start.y + 0.9, start.z, [150, 200, 255], 14);
+  particles.burst(end.x, end.y + 0.9, end.z, [200, 230, 255], 20);
+}
+function updateAfterImages(dt) {
+  for (let i = afterImages.length - 1; i >= 0; i--) {
+    const a = afterImages[i]; a.t += dt; const k = a.t / a.dur;
+    if (k >= 1) { scene.remove(a.mesh); disposeAvatar(a.mesh); afterImages.splice(i, 1); continue; }
+    const op = (1 - k) * 0.55;
+    a.mesh.traverse((o) => { if (o.material) o.material.opacity = op; });
+  }
+}
+function clearAfterImages() { for (const a of afterImages) { scene.remove(a.mesh); disposeAvatar(a.mesh); } afterImages.length = 0; }
+function flashStep(code) {
+  if (mode !== BATTLE && mode !== SURVIVAL) return;
+  if (!player.locked || dead || eliminated || inventory.open || deathCam.active || killCam.active || player.flying) return;
+  if (flashCharges <= 0 || flashCD > 0) return;
+  const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+  let dx = 0, dz = 0;                                          // match the player's WASD basis exactly
+  if (code === 'KeyW') { dx = -sinY; dz = -cosY; }
+  else if (code === 'KeyS') { dx = sinY; dz = cosY; }
+  else if (code === 'KeyD') { dx = cosY; dz = -sinY; }
+  else if (code === 'KeyA') { dx = -cosY; dz = sinY; }
+  const start = player.pos.clone();
+  const moved = player.flashTeleport(dx, dz, FLASH_DIST);
+  if (moved < 0.3) return;                                     // blocked at the wall — don't burn a charge
+  const end = player.pos.clone();
+  flashCharges--; flashCD = 0.4; flashRegen = 0; invuln = Math.max(invuln, 0.4);   // brief i-frames through the blink
+  spawnAfterImages(start, end, myName(), getSkin(mp.skin), 3);
+  addShake(0.12); sfx.flashStep();
+  broadcastFire('flash', start, _fdir.set(dx, 0, dz), { ex: end.x, ey: end.y, ez: end.z, skin: mp.skin });
+}
+const _fdir = new THREE.Vector3();
 function onBotKilled(b) {
   particles.burst(b.pos.x, b.pos.y + 1, b.pos.z, [200, 60, 60], 18);
   const killer = (performance.now() / 1000 - (b.lastHitTime || 0) < 10) ? b.lastHitByName : null;
@@ -1645,6 +1697,12 @@ function setDifficultyDirect(d) { difficulty = d; hud.setDifficulty(DIFF_NAMES[d
 window.addEventListener('keydown', (e) => {
   if (isTyping()) return; // don't trigger game keys while typing in chat/menu
   if (deathCam.active && (e.code === 'Space' || e.code === 'Enter')) { e.preventDefault(); skipDeathCam(); return; }
+  // Flash step: a quick double-tap of a movement key blinks you that way.
+  if (!e.repeat && (e.code === 'KeyW' || e.code === 'KeyA' || e.code === 'KeyS' || e.code === 'KeyD')) {
+    const now = performance.now();
+    if (now - flashTap[e.code] < 280) { flashTap[e.code] = -1; flashStep(e.code); }
+    else flashTap[e.code] = now;
+  }
   if (e.code === 'KeyE') {
     if (dead) return;
     if (inventory.open) closeInventory(); else if (player.locked) openInventory(2);  // not from pause/menu
@@ -1964,6 +2022,7 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
+  else if (k === 'flash') { const end = new THREE.Vector3(d.ex ?? d.x, d.ey ?? d.y, d.ez ?? d.z); spawnAfterImages(muzzle, end, '', getSkin(d.skin), 3); if (withSound) sfx.flashStep(); }
 }
 function fireGun(gun, secondary) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
@@ -2845,6 +2904,9 @@ function frame() {
   shakeAmt *= Math.max(0, 1 - 9 * dt);
   if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
   updateDyingAvatars(dt);   // topple/fade dying avatars
+  updateAfterImages(dt);    // fade flash-step silhouettes
+  if (flashCD > 0) flashCD -= dt;
+  if (flashCharges < FLASH_MAX) { flashRegen += dt; if (flashRegen >= FLASH_REGEN) { flashRegen = 0; flashCharges++; } }
   updateDeathCam(dt);       // your-death cam (tap to skip)
   updateKillCam(dt);        // takes over the camera for the Gun Game final-kill cam
   camera.getWorldDirection(_camFwd);
@@ -2894,6 +2956,8 @@ window.__game = {
   get settings() { return settings; },
   __dyingCount: () => dyingAvatars.length,
   __spawnBlackHole: () => { player.eyePosition(_eye); _dir.set(0.15, -0.12, -1).normalize(); const gun = gunOf(BLACK_HOLE_BOMB); blackholes.spawn(_eye.clone(), _dir.clone(), gun, mp.myId || 'me'); return { radius: gun.radius, duration: gun.duration, pull: gun.pull, damage: gun.damage, splash: gun.splash }; },
+  __flashStep: (code) => { const before = player.pos.clone(); flashStep(code || 'KeyW'); return { moved: +player.pos.distanceTo(before).toFixed(2), charges: flashCharges, afterImages: afterImages.length }; },
+  get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
   __killSelf: (killer) => { lastHitBy = killer || 'Tester'; lastHitTime = performance.now() / 1000; battleDeath(); },
   __skipDeathCam: () => skipDeathCam(),
   get sharingan() { return { precogT: +precogT.toFixed(2), precogCD: +precogCD.toFixed(2), burns: amaBurn.size, gazeHold: +gazeHold.toFixed(2), gazeId: gazeTargetId, fx: sharinganFx.group.visible }; },

@@ -289,6 +289,13 @@ export class SFX {
     this._noise(0.7, 360, 0.6, 0.13, 'lowpass');      // airy suck
     this._noise(0.5, 1800, 3.0, 0.06, 'bandpass');    // swirling whine
   }
+  // Flash step — a sharp whoosh of displaced air as you blink across the field.
+  flashStep() {
+    if (!this.ctx) return;
+    this._tone(880, 240, 0.16, 0.12, 'sine');          // fast descending zip
+    this._noise(0.16, 2600, 1.4, 0.12, 'highpass');    // airy swish
+    this._noise(0.1, 700, 0.8, 0.07, 'bandpass');      // low whump body
+  }
   rasengan() {
     if (!this.ctx) return;
     // Dense swirling grind of compressed chakra.

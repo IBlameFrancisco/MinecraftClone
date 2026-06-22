@@ -297,4 +297,33 @@ export class Player {
   eyePosition(out) {
     return out.set(this.pos.x, this.pos.y + EYE, this.pos.z);
   }
+
+  // Flash step: blink up to `dist` blocks along the horizontal (dx,dz). Steps in
+  // small increments, hopping one-block ledges, stopping before walls. Cancels the
+  // fall, carries a little momentum and pops the FOV; returns blocks travelled.
+  flashTeleport(dx, dz, dist) {
+    const dl = Math.hypot(dx, dz); if (dl < 1e-4) return 0; dx /= dl; dz /= dl;
+    const free = (x, y, z) => {
+      const minX = Math.floor(x - HALF), maxX = Math.floor(x + HALF);
+      const minY = Math.floor(y), maxY = Math.floor(y + HEIGHT - 0.02);
+      const minZ = Math.floor(z - HALF), maxZ = Math.floor(z + HALF);
+      for (let bx = minX; bx <= maxX; bx++) for (let by = minY; by <= maxY; by++) for (let bz = minZ; bz <= maxZ; bz++)
+        if (isSolid(this.world.getBlock(bx, by, bz))) return false;
+      return true;
+    };
+    const step = 0.3; let px = this.pos.x, py = this.pos.y, pz = this.pos.z, moved = 0;
+    while (moved + step <= dist) {
+      const nx = px + dx * step, nz = pz + dz * step;
+      if (free(nx, py, nz)) { px = nx; pz = nz; }
+      else if (free(nx, py + 1, nz)) { py += 1; px = nx; pz = nz; }   // dash up a one-block ledge
+      else break;
+      moved += step;
+    }
+    if (moved < 0.3) return 0;
+    this.pos.set(px, py, pz);
+    this.vel.x = dx * 7; this.vel.z = dz * 7;     // carry momentum out of the blink
+    if (this.vel.y < 0) this.vel.y = 0;           // cancel the fall so you don't drop mid-dash
+    this.fov += 9;                                // speed FOV punch (eases back in _updateCamera)
+    return moved;
+  }
 }
