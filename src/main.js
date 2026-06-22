@@ -242,6 +242,10 @@ let breakKey = null, breakProgress = 0, breakCD = 0, placeCD = 0, attackCD = 0;
 let fireCD = 0, fire2CD = 0, zoomed = false, viewModel = null, viewGunId = -1;
 let triggerConsumed = false;   // for semi-auto guns: one shot per click
 let chargeT = 0, chargeGunId = -1, vmCharge = 0;   // chakra jutsu charge-up (hold to gather)
+// Chakra reserve (the Naruto power-up): hold C to channel chakra, which powers jutsu.
+const CHAKRA_MAX = 100, CHAKRA_REGEN = 7, CHAKRA_CHANNEL = 52;   // per second
+const RASENGAN_COST = 28, RASENSHURIKEN_COST = 55;
+let chakraEnergy = CHAKRA_MAX, chargingChakra = false, chakraAuraI = 0, chakraSnd = false, chakraBurstReady = true;
 let grenadeCount = 0, grenadeCD = 0, streak = 0;   // grenades + killstreaks
 const ammo = {};
 let reloadingGun = -1, reloadTimer = 0, reloadDur = 1, recoilPitch = 0, recoilYaw = 0, vmRecoil = 0;
@@ -644,6 +648,11 @@ function setGameMode(m) {
     hud.setBattle(false); hud.setMode(m === SURVIVAL); hud.showRadar(false); pickups.clear(); hud.setGrenades(0);
     if (m === SURVIVAL) { hud.setHealth(health); hud.setHunger(hunger); }
   }
+  // Chakra reserve is usable wherever jutsu are (battle + creative); start full.
+  const chakraOn = (m === BATTLE || m === CREATIVE);
+  hud.setChakraVisible(chakraOn);
+  chakraEnergy = CHAKRA_MAX; chargingChakra = false; chakraAuraI = 0;
+  if (chakraSnd) { sfx.chakraChannelStop(); chakraSnd = false; }
   resetBreak();
 }
 // Tear down any leftover battle state so it can't leak into survival/creative (or a
@@ -1253,10 +1262,13 @@ window.addEventListener('keydown', (e) => {
   } else if (e.code === 'KeyR') {
     const g2 = gunOf(inventory.selectedId());
     if (g2 && g2.mag && player.locked && !dead) startReload(g2, inventory.selectedId());
+  } else if (e.code === 'KeyC') {
+    if (!dead && !inventory.open && player.locked) chargingChakra = true;   // hold to channel chakra
   } else if (e.code === 'KeyT' || e.code === 'Enter') {
     if (player.locked && !inventory.open && !dead && !hud.isChatOpen()) { e.preventDefault(); player.keys.clear(); hud.openChat(); }
   }
 });
+window.addEventListener('keyup', (e) => { if (e.code === 'KeyC') chargingChakra = false; });
 
 // ---------- Mouse ----------
 let mouseLeft = false, mouseRight = false;
@@ -1669,8 +1681,18 @@ function rocketImpact(pos, gun) {
   blastCover(pos, 2);
 }
 
-// Unleash a charged jutsu (cf = 0..1 charge fraction).
+// Unleash a charged jutsu (cf = 0..1 charge fraction). Jutsu draw from the chakra
+// reserve — a weak tap costs less, a full charge costs the most. No chakra → fizzle.
 function releaseCharge(gun, cf) {
+  const cost = Math.round((gun.kind === 'rasenshuriken' ? RASENSHURIKEN_COST : RASENGAN_COST) * (0.5 + 0.5 * cf));
+  if (chakraEnergy < cost) {                       // not enough chakra — sputter out
+    player.eyePosition(_eye); camera.getWorldDirection(_dir);
+    const p = _eye.clone().addScaledVector(_dir, 0.5);
+    particles.burst(p.x, p.y, p.z, [110, 150, 200], 8);
+    hud.setChakra(chakraEnergy / CHAKRA_MAX, false);
+    return;
+  }
+  chakraEnergy -= cost;
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   if (gun.kind === 'rasengan') fireRasengan(gun, cf);
   else if (gun.kind === 'rasenshuriken') {
@@ -1681,6 +1703,25 @@ function releaseCharge(gun, cf) {
     sfx.rasenshuriken(); addShake(0.06 + 0.2 * cf);
   }
   vmRecoil = Math.min(1, vmRecoil + 0.6);
+}
+
+// Peak-chakra power-up: a chakra shockwave that flashes out and shoves nearby enemies
+// back (the "explosion of chakra" when you max out, like the Naruto games).
+function chakraPowerBurst() {
+  const c = new THREE.Vector3(player.pos.x, player.pos.y + 1, player.pos.z);
+  chakra.burst(c.clone(), 4.5, 0x6fc8ff, false);
+  particles.burst(c.x, c.y, c.z, [150, 210, 255], 64);
+  sfx.chakraBurst(); addShake(0.4);
+  const R = 6.5, KB = 17;
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    const dx = b.pos.x - player.pos.x, dz = b.pos.z - player.pos.z, d = Math.hypot(dx, dz);
+    if (d > R) continue;
+    const f = 1 - d / R, dl = d || 1;
+    b.vel.x += (dx / dl) * KB * f; b.vel.z += (dz / dl) * KB * f; b.vel.y += 7 * f;
+  }
+  for (const m of mobs.list) { const d = Math.hypot(m.pos.x - player.pos.x, m.pos.z - player.pos.z); if (d <= R) m.hurt(1, player.pos.x, player.pos.z); }
+  if (mp.online) for (const { id } of mp.playersNear(c, R)) { if (!friendly(id)) mp.sendHit(id, 1); }
 }
 
 // ---- Rasengan: a point-blank chakra grind — heavy single burst + hard knockback. ----
@@ -2038,6 +2079,28 @@ function frame() {
     if (mouseRight && placeCD <= 0) { handleUse(); placeCD = 0.25; }
   }
   setScoped(active && !!gun && !!gun.zoom && mouseRight);
+
+  // ---- Chakra reserve: hold C to channel (the Naruto power-up), else slow regen. ----
+  const chakraOn = (mode === BATTLE || mode === CREATIVE);
+  const channelling = active && chargingChakra && chakraOn;
+  if (channelling && !chakraSnd) { sfx.chakraChannelStart(); chakraSnd = true; }
+  if (!channelling && chakraSnd) { sfx.chakraChannelStop(); chakraSnd = false; }
+  if (channelling) {
+    chakraEnergy = Math.min(CHAKRA_MAX, chakraEnergy + CHAKRA_CHANNEL * sdt);
+    chakraAuraI += (1 - chakraAuraI) * Math.min(1, 8 * sdt);
+    sfx.chakraChannelRamp(chakraEnergy / CHAKRA_MAX);
+    addShake(0.02 + 0.05 * chakraAuraI);
+    if (Math.random() < 0.7) { const a = Math.random() * 6.2832, r = 0.6 + Math.random() * 0.5;
+      particles.burst(player.pos.x + Math.cos(a) * r, player.pos.y + 0.15, player.pos.z + Math.sin(a) * r, [120, 200, 255], 2); }
+    if (chakraEnergy >= CHAKRA_MAX && chakraBurstReady) { chakraPowerBurst(); chakraBurstReady = false; }
+  } else {
+    if (chakraOn) chakraEnergy = Math.min(CHAKRA_MAX, chakraEnergy + CHAKRA_REGEN * sdt);
+    chakraAuraI += (0 - chakraAuraI) * Math.min(1, 8 * sdt);
+  }
+  if (chakraEnergy < CHAKRA_MAX - 1) chakraBurstReady = true;   // re-arm the peak shockwave
+  chakra.updateAura(player.pos, chakraAuraI, sdt);
+  if (chakraOn) { hud.setChakra(chakraEnergy / CHAKRA_MAX, chakraEnergy >= CHAKRA_MAX - 0.5); hud.setChakraAura(chakraAuraI * 0.85); }
+
   if (active) survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
 
   // Aim-down-sights (every non-scope gun) + animated viewmodel.
@@ -2094,6 +2157,7 @@ const TIPS = [
   'Host a co-op game from the menu and share the code', 'Portal Gun: left-click + right-click two portals',
   'Right-click the sniper to look down the scope', 'Different ground makes different footstep sounds',
   '⚔ Battle mode drops you into an arena to fight other players', 'In co-op you can damage other players — watch the kill feed',
+  'Hold C to charge your chakra — it powers the Rasengan & Rasenshuriken', 'Max your chakra to unleash a shockwave that blasts enemies back',
 ];
 setInterval(() => { const el = document.getElementById('loadingTip'); if (el && !loaded) el.textContent = TIPS[Math.floor(Math.random() * TIPS.length)]; }, 2200);
 
@@ -2113,6 +2177,9 @@ window.__game = {
   __testFire: (id) => fireGun(gunOf(id)),
   __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
   __trigger: (down) => { mouseLeft = !!down; triggerConsumed = false; },   // drive the charge-up loop in tests
+  __channel: (on) => { chargingChakra = !!on; },                           // simulate holding C in tests
   get vmCharge() { return vmCharge; },
+  get chakraEnergy() { return chakraEnergy; },
+  set chakraEnergy(v) { chakraEnergy = v; },
   get viewModel() { return viewModel; },
 };
