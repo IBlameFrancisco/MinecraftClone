@@ -369,17 +369,26 @@ export class ChakraFx {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.proj = []; this.fx = []; }
 
   // Throw a spinning Rasenshuriken; on impact it detonates the dome and calls onImpact.
+  // It flies as the charged buzzsaw — a flat saw blade on a (near-)vertical axle,
+  // banked back toward the thrower so the spinning face stays readable in flight.
   throw(pos, dir, gun, ownerId, onImpact) {
     const g = new THREE.Group(); g.position.copy(pos);
-    const orient = new THREE.Group(); orient.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir.clone().normalize());
+    const d = dir.clone().normalize();
+    const dirH = new THREE.Vector3(d.x, 0, d.z); if (dirH.lengthSq() < 1e-4) dirH.set(0, 0, -1); dirH.normalize();
+    const axle = new THREE.Vector3(0, 0.82, 0).addScaledVector(dirH, -0.5).normalize();   // up, tilted back at the thrower
+    const pivot = new THREE.Group(); pivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axle); g.add(pivot);
+    const spinner = new THREE.Group(); pivot.add(spinner);                                // spins about the vertical axle
     const disc = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4),
       new THREE.MeshBasicMaterial({ map: SHURIKEN_TEX, color: 0xbfe9ff, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    orient.add(disc);
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x6fc8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); glow.scale.setScalar(2.6);
-    g.add(orient, core, glow);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.06, 8, 56),
+      new THREE.MeshBasicMaterial({ color: 0xeaffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    disc.rotation.x = -Math.PI / 2; rim.rotation.x = -Math.PI / 2;                        // lay the saw flat under the axle
+    spinner.add(disc, rim);
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x8fd6ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); glow.scale.setScalar(2.8);
+    g.add(core, glow);
     this.group.add(g);
-    this.proj.push({ g, disc, pos: pos.clone(), vel: dir.clone().normalize().multiplyScalar(gun.speed), gun, ownerId, onImpact, travelled: 0 });
+    this.proj.push({ g, spinner, pos: pos.clone(), vel: d.multiplyScalar(gun.speed), gun, ownerId, onImpact, travelled: 0 });
   }
 
   // A chakra burst: an expanding additive sphere; `needles` adds the radiating
@@ -406,7 +415,7 @@ export class ChakraFx {
       const p = this.proj[i];
       const step = p.vel.clone().multiplyScalar(dt); p.pos.add(step); p.travelled += step.length();
       p.g.position.copy(p.pos);
-      p.disc.rotation.z += dt * 42;
+      p.spinner.rotation.y -= dt * 34;                  // clockwise buzzsaw about the vertical axle
       const solid = isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
       if (solid || p.travelled > p.gun.range || (hooks && hooks.anchorAt && hooks.anchorAt(p.pos))) {
         this.burst(p.pos.clone(), p.gun.radius, 0xbfe9ff, true);
