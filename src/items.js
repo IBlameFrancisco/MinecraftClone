@@ -77,7 +77,7 @@ export const ITEMS = {
   [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, recoil: 0.01, color: 0xdadada } },
   // Lobs a singularity that anchors, drags every nearby combatant into its core
   // (shredding DOT), then collapses in a final implosion blast.
-  [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 8, range: 70, speed: 24, radius: 12, pull: 26, duration: 3.6, splash: 70, mag: 2, reload: 3.0, recoil: 0.05, color: 0x7b3ff2 } },
+  [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 15, range: 82, speed: 24, radius: 16, pull: 38, duration: 4.4, splash: 100, mag: 2, reload: 3.4, recoil: 0.05, color: 0x7b3ff2 } },
   // Belt-fed LMG (MG42): a brutal sustained-fire weapon — the bunker nest gun.
   [HEAVY_MG]: { name: 'MG42', gun: { kind: 'hitscan', rate: 0.055, damage: 5, range: 82, auto: true, spread: 0.05, mag: 75, reload: 3.2, recoil: 0.022, color: 0x2b2b2f } },
   // Ninjutsu: channel the chakra (hold to gather), then grind the spinning sphere

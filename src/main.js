@@ -1961,7 +1961,7 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'rasengan') { const nd = dir.clone().normalize(), cf = d.cf || 1; chakra.grind(muzzle.clone().addScaledVector(nd, 2.4), nd, 0x4aa3ff, 0.3 + 0.18 * cf, 0.8 + 0.6 * cf); if (withSound) sfx.rasengan(); }
   else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); if (withSound) sfx.rasenshuriken(); }
   else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); snd('rail'); }
-  else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 70, radius: d.rad || 12, duration: d.du || 3.6, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
+  else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
 }
@@ -2461,16 +2461,38 @@ const blackHoleHooks = {
   onField: (pos, dt, gun) => blackHoleField(pos, dt, gun),
   onCollapse: (pos, gun) => {
     // A violent implosion-then-blast: a bright core flash + layered purple/gold debris.
-    particles.burst(pos.x, pos.y, pos.z, [255, 255, 255], 30);
-    particles.burst(pos.x, pos.y, pos.z, [180, 120, 255], 110);
-    particles.burst(pos.x, pos.y, pos.z, [255, 230, 200], 56);
-    particles.burst(pos.x, pos.y, pos.z, [120, 80, 220], 40);
+    particles.burst(pos.x, pos.y, pos.z, [255, 255, 255], 46);
+    particles.burst(pos.x, pos.y, pos.z, [180, 120, 255], 150);
+    particles.burst(pos.x, pos.y, pos.z, [255, 230, 200], 70);
+    particles.burst(pos.x, pos.y, pos.z, [120, 80, 220], 60);
+    // An expanding ground shock ring of debris (the blast wave rolling outward).
+    for (let i = 0; i < 30; i++) { const a = (i / 30) * 6.2832, r = 3.2; particles.burst(pos.x + Math.cos(a) * r, pos.y - 0.4, pos.z + Math.sin(a) * r, [160, 120, 255], 4); }
     sfx.explosionAt(pos.x, pos.y, pos.z);
-    shockShake(pos, 1.0, 32);
-    explodeDamage(pos, gun.radius * 0.5, gun.splash, 0.4);
-    blastCover(pos, 4);
+    shockShake(pos, 1.5, 42);
+    explodeDamage(pos, gun.radius * 0.62, gun.splash, 0.4);
+    blackHoleBlast(pos, gun);     // fling survivors outward
+    blastCover(pos, 5);
   },
 };
+// The collapse shockwave: everything the singularity didn't swallow gets flung
+// violently outward (feeds the new ragdoll death-fling for a clean blow-away).
+function blackHoleBlast(pos, gun) {
+  const R = gun.radius * 0.95, KB = 26;
+  const impulse = (ex, ey, ez, apply) => {
+    const dx = ex - pos.x, dy = ey - pos.y, dz = ez - pos.z, d = Math.hypot(dx, dy, dz) || 0.001;
+    if (d > R) return;
+    const f = (0.35 + 0.65 * (1 - d / R)) * KB;
+    apply((dx / d) * f, Math.abs(dy / d) * f * 0.5 + f * 0.45, (dz / d) * f);
+  };
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    impulse(b.pos.x, b.pos.y + 1, b.pos.z, (vx, vy, vz) => { b.vel.x += vx; b.vel.y += Math.min(12, vy); b.vel.z += vz; });
+  }
+  for (const m of mobs.list) impulse(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, (vx, vy, vz) => { m.vel.x += vx; m.vel.y += Math.min(11, vy); m.vel.z += vz; });
+  if ((mode === BATTLE || mode === SURVIVAL) && !dead && !eliminated) {
+    impulse(player.pos.x, player.pos.y + 0.9, player.pos.z, (vx, vy, vz) => { player.vel.x += vx; player.vel.y += Math.min(8, vy); player.vel.z += vz; });
+  }
+}
 
 // Thrown frag explosion.
 function grenadeExplode(pos) {
@@ -2871,6 +2893,7 @@ window.__game = {
   get deathCamState() { return { active: deathCam.active, t: +deathCam.t.toFixed(2), dur: deathCam.dur, killer: deathCam.killer, hasCorpse: !!deathCam.corpse }; },
   get settings() { return settings; },
   __dyingCount: () => dyingAvatars.length,
+  __spawnBlackHole: () => { player.eyePosition(_eye); _dir.set(0.15, -0.12, -1).normalize(); const gun = gunOf(BLACK_HOLE_BOMB); blackholes.spawn(_eye.clone(), _dir.clone(), gun, mp.myId || 'me'); return { radius: gun.radius, duration: gun.duration, pull: gun.pull, damage: gun.damage, splash: gun.splash }; },
   __killSelf: (killer) => { lastHitBy = killer || 'Tester'; lastHitTime = performance.now() / 1000; battleDeath(); },
   __skipDeathCam: () => skipDeathCam(),
   get sharingan() { return { precogT: +precogT.toFixed(2), precogCD: +precogCD.toFixed(2), burns: amaBurn.size, gazeHold: +gazeHold.toFixed(2), gazeId: gazeTargetId, fx: sharinganFx.group.visible }; },
