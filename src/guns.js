@@ -99,7 +99,7 @@ export class Plasmas {
       p.halo.scale.setScalar(1.1 + Math.sin(p.t * 34) * 0.2);
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
-      if (portals) portals.redirect(p);          // fly through portals
+      if (portals) portals.redirect(p, dt);      // fly through portals
       p.m.position.copy(p.pos);
       this._spawnTrail(p.pos);
       let hit = p.travelled > p.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
@@ -164,7 +164,7 @@ export class Rockets {
       const p = this.list[i];
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
-      if (portals) portals.redirect(p);          // fly through portals
+      if (portals) portals.redirect(p, dt);      // fly through portals
       p.m.position.copy(p.pos);
       this._puff(p.pos);
       let hit = p.travelled > p.gun.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
@@ -505,9 +505,9 @@ export class Portals {
 
   // Redirect a projectile that flies into a portal out of the paired one (keeps
   // speed, reorients along the exit normal). Returns true if teleported.
-  redirect(proj) {
+  redirect(proj, dt = 0.016) {
     if (!this.slots[0] || !this.slots[1]) return false;
-    if (proj._portalCD > 0) { proj._portalCD -= 0.016; return false; }
+    if (proj._portalCD > 0) { proj._portalCD -= dt; return false; }   // real dt so the cooldown is frame-rate independent
     for (let s = 0; s < 2; s++) {
       if (proj.pos.distanceToSquared(this.slots[s].pos) < 0.64) {
         const dest = this.slots[1 - s];

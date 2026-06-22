@@ -198,7 +198,7 @@ export class Multiplayer {
     const now = performance.now();
     if (now - this._lastPos < 50) return;          // ~20 Hz
     this._lastPos = now;
-    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw });
+    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive !== false });
   }
   sendEdit(x, y, z, id) { if (this.online) this.broadcast({ t: 'edit', x, y, z, id }); }
   sendEdits(list) { if (this.online && list.length) this.broadcast({ t: 'edits', list }); }
@@ -262,6 +262,7 @@ export class Multiplayer {
     let r = this.remotes.get(id);
     if (!r) { r = { group: makeAvatar(d.name || 'Player', getSkin(d.skin)) }; this.group.add(r.group); this.remotes.set(id, r); }
     r.target = { x: d.x, y: d.y, z: d.z, yaw: d.yaw };
+    r.group.visible = d.alive !== false;          // hide dead/spectating players (mirrors _updateBot)
   }
 
   // Guest-side bot avatar (driven by the host's 'bpos'); team-coloured, hidden when dead.
@@ -288,7 +289,11 @@ export class Multiplayer {
   _removeRemote(id) {
     const r = this.remotes.get(id);
     if (r) {
-      this.group.remove(r.group); r.group.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      this.group.remove(r.group);
+      r.group.traverse((o) => {
+        if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); }
+        else if (o.isSprite && o.material) { o.material.map?.dispose(); o.material.dispose(); }   // name-tag texture
+      });
       this.remotes.delete(id);
     }
   }
@@ -304,5 +309,5 @@ export class Multiplayer {
     }
   }
 
-  get playerCount() { return this.remotes.size + (this.online ? 1 : 0); }
+  get playerCount() { let n = 0; for (const r of this.remotes.values()) if (!r.bot) n++; return n + (this.online ? 1 : 0); }
 }
