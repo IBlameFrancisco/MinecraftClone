@@ -1922,29 +1922,33 @@ function fireBeam(gun, id, dt) {
   const muzzle = _eye.clone().addScaledVector(_dir, 0.55);
   const block = voxelRaycast(_eye, _dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
   const blockDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
-  const enemy = raycastEnemies(_eye, _dir, blockDist);
-  const mobHit = mobs.raycast(_eye, _dir, blockDist);
-  const hitDist = Math.min(blockDist, enemy ? enemy.dist : Infinity, mobHit ? mobHit.dist : Infinity);
-  const end = _eye.clone().addScaledVector(_dir, hitDist);
+  // A beam of destruction: it PIERCES every enemy along its length up to the wall.
+  const end = _eye.clone().addScaledVector(_dir, blockDist);
   laser.set(true, muzzle, end, gun.color);
   beamTickCD -= dt;
   if (beamTickCD <= 0) {
     beamTickCD = gun.tick;
     const dmg = Math.max(1, Math.round(gun.dps * gun.tick));
-    if (enemy && enemy.dist <= hitDist + 0.01 && !friendly(enemy.id)) {
-      const d = enemy.head ? Math.round(dmg * 1.4) : dmg;
-      if (enemy.bot) botHurt(enemy.id, d, myName(), enemy.head); else mp.sendHit(enemy.id, d, enemy.head);
-      hud.hitMarker(enemy.head); damageNumbers.spawn(end, d, enemy.head);
-    } else if (mobHit && mobHit.dist <= hitDist + 0.01) {
-      mobHit.mob.hurt(dmg, player.pos.x, player.pos.z); hud.hitMarker(false);
+    let any = false;
+    for (const m of mobs.list) { const t = m.rayHit(_eye.x, _eye.y, _eye.z, _dir.x, _dir.y, _dir.z, blockDist); if (t < blockDist) { m.hurt(dmg, player.pos.x, player.pos.z); any = true; } }
+    const enemies = [];
+    if (mp.online) for (const ph of mp.raycastAll(_eye, _dir, blockDist)) enemies.push({ id: ph.id, head: ph.head, bot: false });
+    if (isAuthority()) for (const bh of botMgr.raycastAll(_eye, _dir, blockDist, null)) enemies.push({ id: bh.id, head: bh.head, bot: true });
+    for (const e of enemies) {
+      if (friendly(e.id)) continue;
+      const d = e.head ? Math.round(dmg * 1.4) : dmg;
+      if (e.bot) botHurt(e.id, d, myName(), e.head); else mp.sendHit(e.id, d, e.head);
+      any = true;
     }
-    particles.burst(end.x, end.y, end.z, [255, 90, 120], 5);
+    if (any) { hud.hitMarker(false); damageNumbers.spawn(end, dmg, false); }
+    blastCover(end, 1);                                   // melt through soft cover the beam touches
+    particles.burst(end.x, end.y, end.z, [255, 90, 120], 6);
   }
   beamDrainAcc += gun.drain * dt;
   if (beamDrainAcc >= 1) { const n = Math.floor(beamDrainAcc); beamDrainAcc -= n; ammo[id] = Math.max(0, ammoFor(gun, id) - n); if (ammoFor(gun, id) <= 0) { laser.set(false); startReload(gun, id); } }
-  addShake(0.022); vmRecoil = Math.min(1, vmRecoil + 0.05); beamSnd = true;
+  addShake(0.03); vmRecoil = Math.min(1, vmRecoil + 0.05); beamSnd = true;
   beamSndCD -= dt; if (beamSndCD <= 0) { beamSndCD = 0.14; sfx.gunAt('rail', muzzle.x, muzzle.y, muzzle.z); }
-  beamBroadcastCD -= dt; if (beamBroadcastCD <= 0) { beamBroadcastCD = 0.1; broadcastFire('beam', muzzle, _dir, { r: hitDist, c: gun.color }); }
+  beamBroadcastCD -= dt; if (beamBroadcastCD <= 0) { beamBroadcastCD = 0.1; broadcastFire('beam', muzzle, _dir, { r: blockDist, c: gun.color }); }
 }
 
 // Hollow Purple (Gojo): clap red + blue together and erase a wide corridor with an

@@ -232,6 +232,25 @@ function drawGun(ctx, id) {
     grad.addColorStop(0, '#000'); grad.addColorStop(0.45, '#000');
     grad.addColorStop(0.7, '#9b6bff'); grad.addColorStop(1, 'rgba(123,63,242,0)');
     ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(11.5, 8, 3.2, 0, Math.PI * 2); ctx.fill();
+  } else if (id === LASER_CANNON) {
+    ctx.fillStyle = '#2a2030'; ctx.fillRect(1, 6, 10, 4); ctx.fillRect(3, 9.5, 3, 3.4);   // emitter body + grip
+    ctx.fillStyle = '#140c1c'; ctx.fillRect(10, 5, 3, 6);                                  // muzzle housing
+    ctx.fillStyle = '#ff2e54'; ctx.fillRect(2, 7, 9, 0.9);                                 // energy rail
+    const grad = ctx.createRadialGradient(12.5, 8, 0, 12.5, 8, 4);                         // glowing red lens + beam
+    grad.addColorStop(0, '#fff'); grad.addColorStop(0.4, '#ff516e'); grad.addColorStop(1, 'rgba(255,46,84,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(12.5, 8, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,90,120,0.5)'; ctx.fillRect(13, 7.4, 3, 1.2);                 // beam streak
+  } else if (id === HOLLOW_PURPLE) {
+    const halo = ctx.createRadialGradient(8, 8, 0, 8, 8, 7);                               // purple imaginary-mass haze
+    halo.addColorStop(0, 'rgba(176,96,255,0.9)'); halo.addColorStop(1, 'rgba(120,40,200,0)');
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(8, 8, 7, 0, Math.PI * 2); ctx.fill();
+    const red = ctx.createRadialGradient(5.5, 8, 0, 5.5, 8, 3);                            // limitless red
+    red.addColorStop(0, '#ff5a72'); red.addColorStop(1, 'rgba(255,42,68,0)');
+    ctx.fillStyle = red; ctx.beginPath(); ctx.arc(5.5, 8, 3, 0, Math.PI * 2); ctx.fill();
+    const blue = ctx.createRadialGradient(10.5, 8, 0, 10.5, 8, 3);                         // limitless blue
+    blue.addColorStop(0, '#5a8bff'); blue.addColorStop(1, 'rgba(42,107,255,0)');
+    ctx.fillStyle = blue; ctx.beginPath(); ctx.arc(10.5, 8, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(8, 8, 1.5, 0, Math.PI * 2); ctx.fill();  // bright purple core
   } else { // PORTAL_GUN
     ctx.fillStyle = '#d6d6d6'; ctx.fillRect(2, 6, 9, 3.6); ctx.fillRect(3, 9, 3, 4);
     ctx.fillStyle = '#ff8c2b'; ctx.fillRect(10, 6, 2, 1.8);

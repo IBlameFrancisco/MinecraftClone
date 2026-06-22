@@ -555,9 +555,9 @@ export class LaserBeam {
     const cyl = (r, c, o) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 14, 1, true),
       new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
     this.beam = new THREE.Group();
-    this.core = cyl(0.05, 0xffffff, 1);
-    this.glow = cyl(0.16, 0xff2e54, 0.6);
-    this.outer = cyl(0.34, 0xff5570, 0.22);
+    this.core = cyl(0.08, 0xffffff, 1);
+    this.glow = cyl(0.24, 0xff2e54, 0.7);
+    this.outer = cyl(0.52, 0xff5570, 0.28);
     this.beam.add(this.outer, this.glow, this.core);
     this.beam.renderOrder = 999;
     const sprite = (c) => new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
