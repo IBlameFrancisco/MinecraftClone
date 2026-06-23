@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows. A tight,
@@ -884,6 +884,85 @@ export class HollowPurple {
   _dispose(g) { this.group.remove(g); g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
 }
 
+// ---------------- Cleave & Dismantle (Sukuna) ----------------
+// A single sweeping crescent slash: a thin curved blade-stroke, white-hot at the
+// core, bleeding to crimson at the tapered tips.
+function slashTexture() {
+  const W = 256, H = 96, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'); g.translate(0, H / 2);
+  // A bowed crescent: a top and bottom edge meeting at the two tips.
+  const bow = 30;
+  g.beginPath();
+  g.moveTo(10, 0);
+  g.quadraticCurveTo(W / 2, -bow, W - 10, 0);     // outer (upper) edge
+  g.quadraticCurveTo(W / 2, -bow + 16, 10, 0);    // inner (lower) edge — thin sliver
+  g.closePath();
+  const grad = g.createLinearGradient(10, 0, W - 10, 0);
+  grad.addColorStop(0.00, 'rgba(224,20,60,0)');
+  grad.addColorStop(0.18, 'rgba(255,42,74,0.55)');
+  grad.addColorStop(0.46, 'rgba(255,235,240,1)');
+  grad.addColorStop(0.54, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.82, 'rgba(255,42,74,0.55)');
+  grad.addColorStop(1.00, 'rgba(224,20,60,0)');
+  g.fillStyle = grad; g.fill();
+  // A hot white keen edge running the slash so it stays razor-sharp.
+  g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 2; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(16, -1); g.quadraticCurveTo(W / 2, -bow + 2, W - 16, -1); g.stroke();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const SLASH_TEX = slashTexture();
+
+// A burst of crimson crescent slashes fanned across the aim — Sukuna's cleaving
+// arc. Each stroke snaps to full length, flashes, then thins out. Self-contained:
+// driven by update(dt) on the manager (no per-slash rAF).
+export class CleaveFx {
+  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; }
+  // origin = eye, dir = aim (normalised-ish), reach = how far ahead to plant the fan,
+  // half = cone half-angle (the slashes spread across it).
+  spawn(origin, dir, reach, half) {
+    const nd = dir.clone().normalize();
+    const center = origin.clone().addScaledVector(nd, Math.max(2, reach));
+    const g = new THREE.Group(); g.position.copy(center);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), nd);   // local +Z faces along the slash
+    const span = Math.max(3, reach) * (0.5 + (half || 1) * 0.7);       // slash width scales with the cone
+    const blades = [];
+    const N = 3;
+    for (let i = 0; i < N; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.32),
+        new THREE.MeshBasicMaterial({ map: SLASH_TEX, color: 0xff3a5e, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false }));
+      m.renderOrder = 1000;
+      // Fan the strokes across the view: varied roll + a little tip-pitch so they cross.
+      m.rotation.z = (-0.5 + i / (N - 1)) * 1.7 + (Math.random() - 0.5) * 0.3;
+      m.position.set((Math.random() - 0.5) * span * 0.3, (Math.random() - 0.5) * span * 0.3, (Math.random() - 0.5) * 1.2);
+      const w = span * (0.8 + Math.random() * 0.5), h = w * (0.28 + Math.random() * 0.1);
+      g.add(m); blades.push({ m, w, h, roll: m.rotation.z, delay: i * 0.025, sweepFrom: (Math.random() < 0.5 ? -1 : 1) });
+    }
+    const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff8aa0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false }));
+    flash.scale.setScalar(span * 0.5); g.add(flash);
+    this.group.add(g);
+    this.list.push({ g, blades, flash, span, t: 0, max: 0.34 });
+  }
+  update(dt) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const f = this.list[i]; f.t += dt;
+      const k = Math.min(1, f.t / f.max), fade = 1 - k;
+      for (const b of f.blades) {
+        const lt = Math.max(0, Math.min(1, (f.t - b.delay) / (f.max - b.delay)));
+        const grow = easeOutCubic(Math.min(1, lt * 2.2));               // the cut sweeps to full length fast
+        b.m.scale.set(b.w * grow, b.h, 1);
+        b.m.position.x += b.sweepFrom * b.w * dt * 1.1;                 // each stroke slides as it's drawn
+        const fl = (1 - lt) * (1 - lt);
+        b.m.material.opacity = Math.min(1, lt * 6) * (0.35 + 0.65 * fl);
+        b.m.material.color.setRGB(1, 0.22 + 0.5 * (1 - fl), 0.34 + 0.4 * (1 - fl));   // white-hot core cooling to crimson
+      }
+      f.flash.material.opacity = Math.max(0, (1 - k * 2.2)) * 0.9;
+      f.flash.scale.setScalar(f.span * (0.4 + easeOutCubic(k) * 0.5));
+      if (f.t >= f.max) { this._dispose(f.g); this.list.splice(i, 1); }
+    }
+  }
+  _dispose(g) { this.group.remove(g); g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
+}
+
 // ---------------- Sharingan (gaze) ----------------
 // A red tomoe ring + commas, drawn on transparent for the genjutsu/gaze marker.
 function tomoeRingTexture() {
@@ -1378,6 +1457,27 @@ export function makeViewModel(id) {
       tomoe.scale.setScalar(0.3 * (1 + 0.08 * Math.sin(t * 5)));
       halo.material.opacity = (0.5 + 0.3 * Math.abs(Math.sin(t * 4))) * (0.8 + 0.6 * c);
       halo.scale.setScalar(0.5 * (1 + 0.4 * c));                     // the gaze aura swells with charge
+    };
+  } else if (id === CLEAVE) {
+    // A bare cursed hand, fingers raised mid-slash, crimson energy bleeding off the
+    // claws — Sukuna's cleaving gesture.
+    box(0.2, 0.09, 0.2, 0xe8b89a, 0, -0.16, -0.3);          // back of the hand
+    const claws = [];
+    for (let i = 0; i < 4; i++) {
+      const fx = -0.09 + i * 0.06;
+      box(0.045, 0.2, 0.05, 0xe8b89a, fx, -0.04, -0.36);    // finger
+      const tip = box(0.05, 0.1, 0.05, 0xff1f44, fx, 0.08, -0.4);
+      tip.material = new THREE.MeshBasicMaterial({ color: 0xff3a5e, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });   // glowing claw
+      claws.push(tip);
+    }
+    box(0.09, 0.13, 0.08, 0xe8b89a, 0.14, -0.12, -0.26);    // thumb
+    const haze = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff2a4a, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    haze.scale.setScalar(0.45); haze.position.set(0, 0.02, -0.4); g.add(haze);
+    g.userData.chakraAnim = (charge, dt, t) => {
+      const p = 0.7 + 0.3 * Math.abs(Math.sin(t * 5));      // the cursed claws pulse
+      for (const c of claws) c.material.opacity = p;
+      haze.material.opacity = (0.3 + 0.2 * Math.abs(Math.sin(t * 4)));
+      haze.scale.setScalar(0.42 + 0.06 * Math.sin(t * 6));
     };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xe2e2e6, 0, 0, -0.2);            // white chassis

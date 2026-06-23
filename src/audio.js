@@ -340,6 +340,16 @@ export class SFX {
     this._noise(0.17, 3600, 3.2, 0.09, 'highpass');   // bladed hiss
     this._noise(0.1, 1800, 2.0, 0.06, 'bandpass');
   }
+  // Cleave & Dismantle: a sharp curse-energy cut — a fast downward metallic swoosh
+  // with a bright slicing hiss.
+  slash() {
+    if (!this.ctx) return;
+    this._noise(0.13, 5200, 2.6, 0.13, 'highpass');   // slicing air hiss
+    this._noise(0.07, 2600, 3.2, 0.10, 'bandpass');   // bladed shing
+    this._tone(1300, 360, 0.12, 0.11, 'sawtooth');    // downward cut sweep
+    this._tone(840, 210, 0.10, 0.06, 'triangle');     // body
+    this._tone(2200, 880, 0.07, 0.04, 'square');      // metallic glint
+  }
   // Chakra gathering — a rising swirling hum that ramps up while the orb forms.
   chakraCharge() {
     if (!this.ctx) return;
