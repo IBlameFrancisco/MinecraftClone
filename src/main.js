@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES, isHot,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, CleaveFx, Portals, makeViewModel, makeHeldWeapon, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, CleaveFx, Portals, makeViewModel, makeHeldWeapon, makeStandAvatar, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -42,7 +42,7 @@ const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
 // Deathmatch arsenal (one per hotbar key, slot 10 = key 0), one of each weapon class.
-const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, SHARINGAN];
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, SHARINGAN, STAR_PLATINUM, THE_WORLD];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -942,6 +942,7 @@ function damagePlayer(dmg, srcX, srcZ, pvp) {
     particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [120, 200, 255], 10);
   }
   if (precogT > 0 && dmg > 0) dmg = Math.max(0, Math.ceil(dmg * 0.4));   // Precognition: see it coming, take less
+  if (dmg > 0 && (pvp || srcX !== undefined)) dmg = standDeflect(dmg);   // an equipped Stand catches incoming attacks
   health -= dmg; if (!pvp) invuln = 0.5;
   hud.setHealth(Math.max(0, health)); hud.flashHurt(); sfx.hurt(); addShake(0.12 + dmg * 0.004);
   if (srcX !== undefined) {
@@ -2275,6 +2276,7 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
   else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), (d.r || 15) * 0.5, d.arc || 1.1); if (withSound) sfx.slash(); }
+  else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) sfx.standBarrage({ x: d.x, y: d.y, z: d.z }); }
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
   else if (k === 'flash') { const end = new THREE.Vector3(d.ex ?? d.x, d.ey ?? d.y, d.ez ?? d.z); spawnAfterImages(muzzle, end, '', getSkin(d.skin), 3); if (withSound) sfx.flashStep(); }
 }
@@ -2330,6 +2332,89 @@ function fireCleave(gun, muzzle) {
   cleaveFx.spawn(_eye.clone(), aim, range * 0.5, gun.arc || 1.1);
   sfx.slash(); addShake(0.13);
   broadcastFire('cleave', muzzle, _dir, { r: range, arc: gun.arc || 1.1 });
+}
+
+// ---------------- Stands (JoJo) ----------------
+// An equipped Stand manifests a spirit at your side: it auto-deflects incoming
+// attacks (damagePlayer routes through standDeflect) and barrages the nearest enemy
+// in reach. Each client runs its own Stand for its own player; damage flows through
+// the usual channels (botHurt on the authority, sendHit to remotes), so co-op needs
+// no extra state beyond a visual 'ora' burst relayed to onlookers.
+const stand = { id: -1, group: null, t: 0, attackCD: 0, atk: 0, blockK: 0, blockSnd: 0 };
+const _standDesired = new THREE.Vector3();
+function currentStand() { const m = gunOf(inventory.selectedId()); return m && m.kind === 'stand' ? m : null; }
+// A Stand catches part of an incoming attack (called from damagePlayer).
+function standDeflect(dmg) {
+  const m = currentStand(); if (!m) return dmg;
+  stand.blockK = 1;
+  if (stand.blockSnd <= 0) { sfx.standBlock({ x: player.pos.x, y: player.pos.y + 1, z: player.pos.z }); stand.blockSnd = 0.1; }
+  particles.burst(player.pos.x, player.pos.y + 1.2, player.pos.z, [225, 225, 255], 7);
+  return Math.max(0, Math.round(dmg * (1 - m.block)));
+}
+// Nearest enemy within reach (by distance) and how to damage it.
+function nearestStandTarget(m) {
+  const ox = player.pos.x, oy = player.pos.y + 1.0, oz = player.pos.z, reach = m.reach;
+  let best = null, bd = reach * reach;
+  const pick = (x, y, z, apply) => {
+    const dx = x - ox, dy = y - oy, dz = z - oz, d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > bd) return;
+    bd = d2; best = { x, y, z, apply };
+  };
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    pick(b.pos.x, b.pos.y + 1, b.pos.z, (dmg) => {
+      botHurt(b.id, dmg, myName(), false);
+      const dx = b.pos.x - ox, dz = b.pos.z - oz, dl = Math.hypot(dx, dz) || 1;
+      b.vel.x += (dx / dl) * m.knockback; b.vel.z += (dz / dl) * m.knockback; b.vel.y += m.knockback * 0.2;
+    });
+  }
+  if (mp.online) for (const [id, r] of mp.remotes) {
+    if (friendly(id)) continue;
+    const gp = r.group.position; pick(gp.x, gp.y + 1, gp.z, (dmg) => mp.sendHit(id, dmg));
+  }
+  for (const mb of mobs.list) pick(mb.pos.x, mb.pos.y + mb.height * 0.5, mb.pos.z, (dmg) => mb.hurt(dmg, player.pos.x, player.pos.z));
+  return best;
+}
+function despawnStand() {
+  if (stand.group) { scene.remove(stand.group); stand.group.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); stand.group = null; }
+  stand.id = -1; stand.atk = 0; stand.blockK = 0;
+}
+function updateStand(active, dt) {
+  const m = active ? currentStand() : null;
+  if (!m) { if (stand.group) stand.group.visible = false; stand.atk = 0; stand.blockK = 0; return; }
+  stand.t += dt; stand.blockSnd -= dt;
+  const sid = inventory.selectedId();
+  if (stand.id !== sid) { despawnStand(); stand.group = makeStandAvatar(m); scene.add(stand.group); stand.id = sid; stand.group.position.copy(player.pos); sfx.standSummon(); }
+  stand.group.visible = true;
+  stand.attackCD -= dt; stand.atk = Math.max(0, stand.atk - dt);
+  // Barrage the nearest enemy on the attack timer (one LoS check, only when ready).
+  const tgt = nearestStandTarget(m);
+  if (tgt && stand.attackCD <= 0 && losClear(player.pos.x, player.pos.y + 1, player.pos.z, tgt.x, tgt.y, tgt.z)) {
+    stand.attackCD = m.attackRate; stand.atk = Math.min(0.36, m.attackRate);
+    tgt.apply(m.attackDamage);
+    const ac = [(m.accent >> 16) & 255, (m.accent >> 8) & 255, m.accent & 255];
+    particles.burst(tgt.x, tgt.y, tgt.z, ac, 16); particles.burst(tgt.x, tgt.y, tgt.z, [255, 255, 255], 6);
+    damageNumbers.spawn(new THREE.Vector3(tgt.x, tgt.y + 0.7, tgt.z), m.attackDamage, false);
+    hud.hitMarker(false); sfx.standBarrage({ x: tgt.x, y: tgt.y, z: tgt.z }); addShake(0.05);
+    if (Math.random() < 0.33) hud.showName(m.callout);
+    if (mp.online) mp.broadcast({ t: 'pfire', k: 'ora', x: tgt.x, y: tgt.y, z: tgt.z, dx: 0, dy: 0, dz: 0, ac: m.accent });
+  }
+  // Float just off the user's right shoulder (slightly forward so it stays in view),
+  // surging toward the target on the barrage.
+  const s = Math.sin(player.yaw), c = Math.cos(player.yaw);
+  const fX = -s, fZ = -c, rX = c, rZ = -s;     // player forward / right
+  let dX = player.pos.x + rX * 1.25 + fX * 0.3, dZ = player.pos.z + rZ * 1.25 + fZ * 0.3;
+  let faceX = fX, faceZ = fZ;
+  if (tgt) {
+    const tx = tgt.x - player.pos.x, tz = tgt.z - player.pos.z, tl = Math.hypot(tx, tz) || 1;
+    faceX = tx / tl; faceZ = tz / tl;
+    if (stand.atk > 0) { dX += faceX * 0.7; dZ += faceZ * 0.7; }   // surge toward the target on the barrage
+  }
+  _standDesired.set(dX, player.pos.y + 0.02, dZ);
+  stand.group.position.lerp(_standDesired, Math.min(1, 12 * dt));
+  stand.group.rotation.y = Math.atan2(faceX, faceZ);
+  stand.group.userData.anim(stand.t, stand.atk > 0 ? 1 : 0, stand.blockK);
+  stand.blockK = Math.max(0, stand.blockK - dt * 4);
 }
 
 // Nearest damageable enemy (remote humans + local bots) along a ray.
@@ -3131,6 +3216,9 @@ function frame() {
       if (lmb && (gameMode === 'gungame' || chakraEnergy > 0)) sharinganGaze(gun, dt);
       else { gazeTargetId = null; gazeHold = 0; sharinganFx.set(false); }
     }
+    // Stands are passive: the manifested spirit (updateStand) blocks + barrages on
+    // its own, so the hand never "fires".
+    else if (gun.kind === 'stand') { /* no manual fire */ }
     // Auto guns fire while held; the rest fire once per click.
     else if (lmb && fireCD <= 0 && (gun.auto || !triggerConsumed)) {
       if (gun.mag && reloadingGun === id) { /* busy reloading */ }
@@ -3183,7 +3271,7 @@ function frame() {
   if (active && (mode === SURVIVAL || mode === BATTLE) && invuln <= 0) lavaContact(dt);   // standing in lava burns
 
   // Aim-down-sights (every non-scope gun) + animated viewmodel.
-  const adsActive = active && gun && !gun.zoom && gun.kind !== 'portal' && mouseRight;
+  const adsActive = active && gun && !gun.zoom && gun.kind !== 'portal' && gun.kind !== 'stand' && mouseRight;
   adsAmount += ((adsActive ? 1 : 0) - adsAmount) * Math.min(1, 13 * dt);
   if (adsAmount < 0.002) adsAmount = 0;
   if (!zoomed) { const f = player.fov * (1 - 0.17 * adsAmount); if (Math.abs(camera.fov - f) > 0.04) { camera.fov = f; camera.updateProjectionMatrix(); } }
@@ -3214,6 +3302,8 @@ function frame() {
   chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
   chakra.update(sdt, world, chakraHooks);
   laser.update(dt); hollowPurple.update(sdt); cleaveFx.update(sdt); sharinganFx.update(dt);
+  updateStand(active, sdt);
+
   grenades.update(sdt, world);
   grenadeCD -= sdt;
   portals.update(dt, portalBodies());
@@ -3286,6 +3376,8 @@ window.__game = {
   __lobbyState: (d) => onLobbyState(d),
   __flashStep: (code) => { const before = player.pos.clone(); flashStep(code || 'KeyW'); return { moved: +player.pos.distanceTo(before).toFixed(2), charges: flashCharges, afterImages: afterImages.length }; },
   get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
+  get standInfo() { return { equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
+  __standDeflect: (dmg) => standDeflect(dmg),
   __warDebug: () => {
     const targets = buildTargets(); const out = [];
     for (const b of botMgr.bots) {

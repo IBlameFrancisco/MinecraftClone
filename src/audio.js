@@ -350,6 +350,36 @@ export class SFX {
     this._tone(840, 210, 0.10, 0.06, 'triangle');     // body
     this._tone(2200, 880, 0.07, 0.04, 'square');      // metallic glint
   }
+  // Stand barrage — a rapid flurry of punch impacts (ORA ORA ORA), staggered over
+  // ~0.35s. `pos` spatialises it to the target.
+  standBarrage(pos = null) {
+    if (!this.ctx) return;
+    const o = pos ? this._spatial(pos.x, pos.y, pos.z) : null;
+    if (pos && !o) return;
+    const punch = () => {
+      this._noise(0.04, 1700 + Math.random() * 700, 1.4, 0.16, 'bandpass', o);   // knuckle thud
+      this._noise(0.03, 5200, 0.7, 0.06, 'highpass', o);                          // air whip
+      this._tone(150 + Math.random() * 40, 80, 0.05, 0.10, 'square', o);          // body of the hit
+    };
+    punch();
+    for (let i = 1; i < 7; i++) setTimeout(punch, i * 52);
+  }
+  // Stand deflect — a bright metallic ting as a hit is caught.
+  standBlock(pos = null) {
+    if (!this.ctx) return;
+    const o = pos ? this._spatial(pos.x, pos.y, pos.z) : null;
+    if (pos && !o) return;
+    this._tone(1400, 2100, 0.09, 0.10, 'triangle', o);
+    this._tone(2300, 3000, 0.06, 0.05, 'sine', o);
+    this._noise(0.05, 3800, 2.4, 0.08, 'highpass', o);
+  }
+  // Stand summon — a short rising whoosh as the spirit manifests.
+  standSummon() {
+    if (!this.ctx) return;
+    this._tone(220, 720, 0.32, 0.12, 'sawtooth');
+    this._tone(140, 360, 0.32, 0.07, 'triangle');
+    this._noise(0.3, 900, 1.6, 0.08, 'bandpass');
+  }
   // Chakra gathering — a rising swirling hum that ramps up while the orb forms.
   chakraCharge() {
     if (!this.ctx) return;
