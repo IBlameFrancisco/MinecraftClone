@@ -16,7 +16,7 @@ import {
   LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, SAND, LOG, PLANK, SNOW, GRAVEL, WOOL, CACTUS, LAVA,
   hardness, BLOCK_TOOL, BLOCK_REQUIRES, isHot,
 } from './blocks.js';
-import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
+import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf, itemName,
   HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
@@ -403,9 +403,11 @@ function updateLoading() {
 function finishLoading() {
   loaded = true;
   if (arena) {
+    if (gameMode === 'hunger') clearHungerPlaza();   // open the central battleground before placing tributes
     const sp = teamSpawnPoint(myTeam);
     player.pos.set(sp.x, sp.y, sp.z);
     if (sp.yaw !== undefined) player.yaw = sp.yaw;
+    if (gameMode === 'hunger') { invuln = 2.5; protect = 2.5; }   // a moment's grace at the cornucopia gong (set at real spawn)
   } else {
     player.pos.set(SPAWN.x, world.surfaceHeight(Math.floor(SPAWN.x), Math.floor(SPAWN.z)) + 2, SPAWN.z);
     SPAWN.y = player.pos.y;
@@ -556,7 +558,7 @@ const bsMap = document.getElementById('bsMap');
 const bsMapRow = document.getElementById('bsMapRow');
 const bsStand = document.getElementById('bsStand');
 // Modes that force free-for-all / co-op rather than letting you pick teams.
-const FORCES_FFA = { gungame: true, br: true };
+const FORCES_FFA = { gungame: true, br: true, hunger: true };
 const FORCES_COOP = { wave: true };
 function fillSizeOptions() {
   const war = battleCfg.mode === 'war';
@@ -572,7 +574,7 @@ function fillSizeOptions() {
 function refreshBattleSetup() {
   const m = battleCfg.mode, war = m === 'war';
   bsTeamRow.style.display = (FORCES_FFA[m] || FORCES_COOP[m]) ? 'none' : 'flex';
-  bsScoreRow.style.display = (m === 'gungame' || m === 'br' || m === 'wave' || war) ? 'none' : 'flex';   // auto win conditions
+  bsScoreRow.style.display = (m === 'gungame' || m === 'br' || m === 'hunger' || m === 'wave' || war) ? 'none' : 'flex';   // auto win conditions
   // For War the FFA/Teams chips become an Allied/Axis side picker.
   bsFFA.textContent = war ? '⚔ Storm (Allied)' : 'Free-for-all';
   bsTeam.textContent = war ? '🛡 Hold (Axis)' : 'Teams';
@@ -913,6 +915,7 @@ function setGameMode(m) {
 function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0; protect = 0;
   wornStand = 0; despawnStand();                 // dismiss any Stand on the way out
+  setupCornucopia(false);                        // tear down the Hunger Games loot altar
   matchWinner = null; matchOverTimer = 0;
   abortDeathCam(); clearAfterImages();
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
@@ -977,12 +980,13 @@ function battleDeath() {
   if (isAuthority()) registerKill(killer, selfId(), myName());
   particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 80, 80], 30);
   sfx.gun('sniper'); lastHitBy = null; streak = 0;
-  if (gameMode === 'br') {
+  if (gameMode === 'br' || gameMode === 'hunger') {
     eliminated = true;
     player.flying = true;                 // free-fly spectator
     player.pos.set(0.5, ARENA.FLOOR + 24, 0.5); player.vel.set(0, 0, 0);
     health = 20; hud.setHealth(20); invuln = 999; protect = 999;
-    hud.announce('Eliminated — spectating', '#ff5b5b'); hud.flashHurt();
+    hud.announce(gameMode === 'hunger' ? 'You have fallen — spectating' : 'Eliminated — spectating', '#ff5b5b'); hud.flashHurt();
+    if (isAuthority()) checkLastStanding();   // your death may end the games
     return;
   }
   hud.flashHurt();
@@ -1012,6 +1016,11 @@ let gunLevelShown = -1;          // gun game: which ladder weapon we're holding
 let wornStand = 0;               // equipped Stand item id (0 = none) — worn, not held
 let hillTimer = 0;               // koth scoring tick
 let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
+// Hunger Games: ring spawn around a central cornucopia, scavenge loot, last one
+// standing. The arena only starts closing in after a scavenge grace period.
+let hungerTime = 0, hungerClosing = false, hungerSpawnIdx = 0, hungerArsenal = [];
+let cornucopiaMesh = null;
+const HUNGER_GRACE = 26;        // seconds to loot before the ring begins to close
 let waveNum = 0, waveBreak = 0;  // wave survival
 // War (D-Day): Allied attack from the sea, Axis defend the bunker line.
 const WAR_ALLIED = TEAM_RED, WAR_AXIS = TEAM_BLUE;
@@ -1046,6 +1055,14 @@ function colorForBot(team) { return (teamMode && team === myTeam) ? 0x57d977 : 0
 function friendly(id) { return teamMode && myTeam !== TEAM_NONE && teamOf(id) === myTeam; }
 
 function teamSpawnPoint(team) {
+  if (gameMode === 'hunger') {
+    // Tributes ring the cornucopia, evenly spaced and facing the centre. Spots are
+    // handed out in order (bots first, then the player) from a reset index.
+    const total = Math.max(2, battleCfg.size), i = hungerSpawnIdx++;
+    const ang = (i / total) * Math.PI * 2, R = 14;   // tight ring around the cornucopia (inside the cleared plaza)
+    const x = Math.cos(ang) * R, z = Math.sin(ang) * R;
+    return { x: x + 0.5, y: ARENA.FLOOR + 1.2, z: z + 0.5, yaw: Math.atan2(x, z) };   // yaw faces (0,0)
+  }
   if (gameMode === 'war') {
     const pool = team === WAR_AXIS ? BEACH_SPAWN_AXIS : BEACH_SPAWN_ALLIED;
     const [x, z] = pool[(Math.random() * pool.length) | 0];
@@ -1083,7 +1100,7 @@ function setupMatch() {
   gameMode = battleCfg.mode;
   wornStand = battleCfg.stand || 0;   // don the Stand chosen in setup (X re-cycles it in-match)
   teamMode = battleCfg.team;
-  if (gameMode === 'gungame' || gameMode === 'br') teamMode = false;
+  if (gameMode === 'gungame' || gameMode === 'br' || gameMode === 'hunger') teamMode = false;
   if (gameMode === 'wave' || gameMode === 'war') teamMode = true;
   scoreLimit = gameMode === 'gungame' ? GUNGAME_LADDER.length : battleCfg.scoreLimit;
   myKills = 0; myDeaths = 0; humanScore.clear(); teamAssign.clear();
@@ -1093,13 +1110,15 @@ function setupMatch() {
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
   health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; dead = false;   // clean slate (also clears 999 invuln left by a BR elimination)
   hud.hideScoreboard();
-  zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
+  zoneRadius = (gameMode === 'br' || gameMode === 'hunger') ? ARENA.HALF - 2 : 999;
   botMgr.clear();
   computeCoverPoints();
   setupHill(gameMode === 'koth');
-  setupZone(gameMode === 'br');
+  setupZone(gameMode === 'br' || gameMode === 'hunger');
+  setupCornucopia(gameMode === 'hunger');
   sky.setArena(gameMode !== 'war'); sky.setWar(gameMode === 'war');
   if (gameMode === 'war') pickups.clear();
+  if (gameMode === 'hunger') hungerReset();   // ring spawn order, loot, pistol-only loadout
 
   const humans = [selfId()];
   if (mp.online) for (const id of mp.roster.keys()) humans.push(id);
@@ -1136,6 +1155,7 @@ function setupMatch() {
     botTeams = new Array(Math.max(0, battleCfg.size - humans.length)).fill(TEAM_NONE);
   }
   if (isAuthority() && botTeams.length) botMgr.spawn(botTeams.length, botTeams, battleCfg.botDiff, teamSpawnPoint, colorForBot);
+  if (gameMode === 'hunger') armHungerBots();   // tributes spawn already toting scavenged gear
   if (gameMode === 'gungame') applyGunGameLevel(true);
   if (gameMode === 'wave' && isAuthority()) startWave(1);
   rebuildBoard(); broadcastBoard();
@@ -1224,6 +1244,97 @@ function applyGunGameLevel(force, killsOverride) {
   // gun stays locked to your kill count (you can't keep a gun you didn't earn).
   if (force || lvl !== gunLevelShown || inventory.selectedId() !== want) { gunLevelShown = lvl; inventory.setLoadout([want]); }
 }
+
+// ---- Hunger Games ----
+// A golden loot altar at the arena centre + a tall beacon so it's findable from the
+// spawn ring (decor only; the actual loot are the weapon crates around it).
+function setupCornucopia(on) {
+  if (cornucopiaMesh) { scene.remove(cornucopiaMesh); cornucopiaMesh.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } }); cornucopiaMesh = null; }
+  if (!on) return;
+  const g = new THREE.Group(); g.position.set(0, ARENA.FLOOR + 1, 0);   // sits on the cleared plaza floor
+  const lam = (col, emi, ei = 0.5) => new THREE.MeshLambertMaterial({ color: col, emissive: emi, emissiveIntensity: ei });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 4.2, 0.6, 28), lam(0x6b5320, 0x2a2008)); base.position.y = 0.3; g.add(base);
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 3.2, 0.5, 28), lam(0xb8902f, 0x3a2c0a, 0.7)); top.position.y = 0.78; g.add(top);
+  for (let i = 0; i < 7; i++) {   // a pile of gold loot crates on the altar
+    const a = (i / 7) * 6.2832, r = 1.5 + (i % 2) * 0.5;
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), lam(0xe0b84a, 0x6a5012, 0.6));
+    c.position.set(Math.cos(a) * r, 1.4 + (i % 3) * 0.3, Math.sin(a) * r); c.rotation.y = a; g.add(c);
+  }
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 16, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xffe27a, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+  beam.position.y = 8; g.add(beam);
+  scene.add(g); cornucopiaMesh = g;
+}
+// Loot crates: power weapons clustered at the cornucopia (one-time), common weapons
+// on a mid ring, and respawning health/ammo further out.
+function setupHungerLoot() {
+  const F = ARENA.FLOOR + 1.4, spots = [];
+  const center = [ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, CLEAVE, SNIPER, PLASMA_GUN];
+  center.forEach((gid, i) => { const a = (i / center.length) * 6.2832; spots.push({ x: Math.cos(a) * 2.7, y: F + 0.7, z: Math.sin(a) * 2.7, kind: 'weapon', gun: gid, color: 0xffcf4a, once: true }); });
+  const mid = [SMG, ASSAULT_RIFLE, SHOTGUN, ASSAULT_RIFLE, SMG, SHOTGUN, PLASMA_GUN, SNIPER];
+  mid.forEach((gid, i) => { const a = (i / mid.length) * 6.2832 + 0.4; spots.push({ x: Math.cos(a) * 10, y: F, z: Math.sin(a) * 10, kind: 'weapon', gun: gid, color: 0xbcc4cf, once: true }); });
+  for (let i = 0; i < 6; i++) { const a = (i / 6) * 6.2832 + 0.2; spots.push({ x: Math.cos(a) * 22, y: F, z: Math.sin(a) * 22, kind: i % 2 ? 'health' : 'ammo' }); }   // outer scavenge for fleeing tributes
+  pickups.setup(spots);
+}
+// Carve a flat, open arena around the cornucopia so loot + the spawn ring sit on clear
+// ground regardless of the map's central feature (mesa / ziggurat / lava pit / ice).
+function clearHungerPlaza() {
+  const F = ARENA.FLOOR, R = 16;
+  for (let x = -R; x <= R; x++) for (let z = -R; z <= R; z++) {
+    if (x * x + z * z > R * R) continue;
+    for (let y = F - 2; y <= F; y++) world.setBlock(x, y, z, STONE);          // solid floor (fills pits / lava / ice)
+    for (let y = F + 1; y <= F + 12; y++) world.setBlock(x, y, z, AIR);       // clear structures above the floor
+  }
+}
+// Tributes spawn already toting scavenged gear — most with a common weapon, a couple
+// with a power weapon from the cornucopia.
+function armHungerBots() {
+  if (!isAuthority()) return;
+  const pool = [SMG, ASSAULT_RIFLE, SHOTGUN, ASSAULT_RIFLE, SMG, PLASMA_GUN], strong = [RAILGUN, ROCKET_LAUNCHER, SNIPER, CLEAVE];
+  botMgr.bots.forEach((b, i) => {
+    const gid = i < 2 ? _pick(strong) : _pick(pool);
+    b.gunId = gid; b.gun = gunOf(gid); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0;
+  });
+}
+// Reset the round's hunger state: ring-spawn order, fresh loot, pistol-only loadout.
+function hungerReset() {
+  hungerSpawnIdx = 0; hungerTime = 0; hungerClosing = false;
+  zoneRadius = ARENA.HALF - 2; if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
+  hungerArsenal = [HANDGUN]; inventory.setLoadout(hungerArsenal);
+  setupHungerLoot();
+  hud.announce('🏹 Let the Games begin — loot the Cornucopia!', '#ffd24a'); sfx.announce('multi');
+}
+// Last-one-standing check shared by Battle Royale + Hunger Games.
+function checkLastStanding() {
+  if (matchWinner) return;
+  const aliveBots = botMgr.bots.filter((b) => b.alive).length;
+  const meAlive = (!eliminated && health > 0) ? 1 : 0;
+  const aliveRemotes = mp.online ? [...mp.remotes].filter(([, r]) => !r.bot && r.group.visible) : [];
+  if (aliveBots + meAlive + aliveRemotes.length <= 1) {
+    const winner = meAlive ? myName()
+      : (botMgr.bots.find((b) => b.alive)?.name
+         || (aliveRemotes[0] && mp.roster.get(aliveRemotes[0][0]))
+         || 'Nobody');
+    endMatch(winner);
+  }
+}
+function hungerTick(dt) {
+  hungerTime += dt;
+  if (hungerTime > HUNGER_GRACE) {       // scavenge grace, then the ring closes in
+    if (!hungerClosing) { hungerClosing = true; hud.announce('⚠ The arena is closing in!', '#ff5b5b'); sfx.announce('multi'); }
+    zoneRadius = Math.max(4, zoneRadius - 0.5 * dt);
+    if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
+    stormTimer -= dt;
+    if (stormTimer <= 0) {
+      stormTimer = 1.0;
+      const out = (x, z) => (x * x + z * z) > zoneRadius * zoneRadius;
+      if (!eliminated && health > 0 && out(player.pos.x, player.pos.z)) damagePlayer(8);
+      for (const b of botMgr.bots) if (b.alive && out(b.pos.x, b.pos.z)) b.hurt(10);
+      if (mp.online) for (const [id, r] of mp.remotes) if (r.group.visible && out(r.group.position.x, r.group.position.z)) mp.sendHit(id, 8);
+    }
+  }
+  checkLastStanding();
+}
 function myBoardKills() { const e = board.find((x) => x.id === selfId()); return e ? e.kills : 0; }
 // KOTH/objective: give one point to a combatant (frags double as the score).
 function awardScore(id) {
@@ -1260,16 +1371,7 @@ function brTick(dt) {
     for (const b of botMgr.bots) if (b.alive && out(b.pos.x, b.pos.z)) b.hurt(8);
     if (mp.online) for (const [id, r] of mp.remotes) if (r.group.visible && out(r.group.position.x, r.group.position.z)) mp.sendHit(id, 6);
   }
-  const aliveBots = botMgr.bots.filter((b) => b.alive).length;
-  const meAlive = (!eliminated && health > 0) ? 1 : 0;
-  const aliveRemotes = mp.online ? [...mp.remotes].filter(([, r]) => !r.bot && r.group.visible) : [];
-  if (aliveBots + meAlive + aliveRemotes.length <= 1 && !matchWinner) {
-    const winner = meAlive ? myName()
-      : (botMgr.bots.find((b) => b.alive)?.name
-         || (aliveRemotes[0] && mp.roster.get(aliveRemotes[0][0]))
-         || 'Nobody');
-    endMatch(winner);
-  }
+  checkLastStanding();
 }
 function startWave(n) {
   waveNum = n; waveBreak = 0;
@@ -1294,6 +1396,7 @@ function modeTick(dt) {
     }
   } else if (gameMode === 'koth') { hillTimer -= dt; if (hillTimer <= 0) { hillTimer = 1.0; kothAward(); } }
   else if (gameMode === 'br') brTick(dt);
+  else if (gameMode === 'hunger') hungerTick(dt);
   else if (gameMode === 'wave') waveTick(dt);
   else if (gameMode === 'war') warTick(dt);
 }
@@ -1378,7 +1481,7 @@ function registerKill(killerName, victimId) {
   checkWin(); rebuildBoard(); broadcastBoard();
 }
 function checkWin() {
-  if (matchWinner || gameMode === 'br' || gameMode === 'wave' || gameMode === 'war') return;   // those have their own win logic
+  if (matchWinner || gameMode === 'br' || gameMode === 'hunger' || gameMode === 'wave' || gameMode === 'war') return;   // those have their own win logic
   if (teamMode) {
     let red = 0, blue = 0;
     (myTeam === TEAM_RED ? red += myKills : blue += myKills);
@@ -1665,13 +1768,15 @@ function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
-  zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
+  zoneRadius = (gameMode === 'br' || gameMode === 'hunger') ? ARENA.HALF - 2 : 999;
   matchWinner = null; endKillCam(false); abortDeathCam(); resetReel(); resetSharingan(); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
     warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
   }
+  if (gameMode === 'hunger') hungerReset();   // fresh loot + ring-spawn order before reviving tributes
   if (gameMode === 'wave') { if (isAuthority()) startWave(1); }
   else { for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); } }
+  if (gameMode === 'hunger') armHungerBots();
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; lastHitBy = null;
   streak = 0; grenadeCount = 2; hud.setGrenades(2);
@@ -1800,7 +1905,7 @@ function respawnBot(b) {
   b.mesh.position.copy(b.pos); b.mesh.visible = true;
 }
 function manageBots(dt) {
-  const respawns = gameMode !== 'br' && gameMode !== 'wave';   // BR eliminates; waves replace
+  const respawns = gameMode !== 'br' && gameMode !== 'hunger' && gameMode !== 'wave';   // BR + Hunger Games eliminate; waves replace
   for (const b of botMgr.bots) {
     if (!b.alive && !b.deathProcessed) { b.deathProcessed = true; onBotKilled(b); }
     else if (respawns && !b.alive && b.respawnIn > 0) {
@@ -1817,7 +1922,21 @@ function setupArenaPickups() {
   for (const [x, z] of [[16, 16], [-16, 16], [16, -16], [-16, -16]]) spots.push({ x, y: F, z, kind: 'ammo' });
   pickups.setup(spots);
 }
-function applyPickup(kind) {
+function applyPickup(kind, gun) {
+  if (kind === 'weapon') {
+    if (gun == null) return false;
+    if (!hungerArsenal.includes(gun)) {
+      const prevIdx = inventory.selected;                  // appending keeps existing slots' indices
+      hungerArsenal.push(gun);
+      inventory.setLoadout(hungerArsenal);                 // (resets selection to slot 0)
+      inventory.select(prevIdx === 0 ? hungerArsenal.length - 1 : prevIdx);   // auto-equip your first real weapon
+      hud.showName('Looted: ' + itemName(gun));
+      sfx.place(); particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 210, 90], 22);
+      return true;
+    }
+    const g = gunOf(gun); if (g && g.mag) ammo[gun] = g.mag;   // already own it → top its ammo up
+    sfx.place(); return true;
+  }
   if (kind === 'health') {
     if (health >= 20) return false;
     health = Math.min(20, health + 8); hud.setHealth(health);
@@ -1825,7 +1944,7 @@ function applyPickup(kind) {
     return true;
   }
   let refilled = false;
-  for (const id of BATTLE_LOADOUT) { const g = gunOf(id); if (g && g.mag && (ammo[id] === undefined || ammo[id] < g.mag)) { ammo[id] = g.mag; refilled = true; } }
+  for (const id of (gameMode === 'hunger' ? hungerArsenal : BATTLE_LOADOUT)) { const g = gunOf(id); if (g && g.mag && (ammo[id] === undefined || ammo[id] < g.mag)) { ammo[id] = g.mag; refilled = true; } }
   if (grenadeCount < 3) { grenadeCount = 3; hud.setGrenades(3); refilled = true; }
   if (refilled) {
     if (reloadingGun >= 0) reloadingGun = -1;
@@ -3180,6 +3299,11 @@ function frame() {
     if (gameMode === 'gungame') info = `Gun Game · Level ${Math.min((isAuthority() ? myKills : myBoardKills()), GUNGAME_LADDER.length - 1) + 1}/${GUNGAME_LADDER.length}`;
     else if (gameMode === 'koth') info = `King of the Hill · ${scoreLimit} to win`;
     else if (gameMode === 'br') { const a = botMgr.bots.filter((b) => b.alive).length + (!eliminated && health > 0 ? 1 : 0); info = eliminated ? `Spectating · ${a} alive` : `Battle Royale · ${a} alive · zone ${Math.round(zoneRadius)}m`; }
+    else if (gameMode === 'hunger') {
+      const a = botMgr.bots.filter((b) => b.alive).length + (!eliminated && health > 0 ? 1 : 0);
+      const phase = hungerClosing ? `closing · ${Math.round(zoneRadius)}m` : `cornucopia open · ${Math.max(0, Math.ceil(HUNGER_GRACE - hungerTime))}s`;
+      info = eliminated ? `Spectating · ${a} tributes left` : `🏹 Hunger Games · ${a} left · ${phase}`;
+    }
     else if (gameMode === 'wave') info = `Wave ${waveNum}/${WAVE_TARGET} · ${botMgr.bots.filter((b) => b.alive).length} left`;
     else if (gameMode === 'war') {
       const role = myTeam === WAR_ALLIED ? '🪖 Allied' : '🛡 Axis';
@@ -3392,6 +3516,10 @@ window.__game = {
   get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
   get standInfo() { return { worn: wornStand, equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
   __standDeflect: (dmg) => standDeflect(dmg),
+  get hungerInfo() {
+    const weapons = pickups.list.filter((p) => p.kind === 'weapon').map((p) => ({ x: +p.mesh.position.x.toFixed(2), z: +p.mesh.position.z.toFixed(2), y: +p.base.toFixed(2), gun: p.gun, gone: !!p.gone }));
+    return { mode: gameMode, eliminated, closing: hungerClosing, time: +hungerTime.toFixed(1), zone: +zoneRadius.toFixed(1), arsenal: hungerArsenal.slice(), weapons, aliveBots: botMgr.bots.filter((b) => b.alive).length, hasCornucopia: !!cornucopiaMesh, winner: matchWinner };
+  },
   __wearStand: (id) => { wornStand = id || 0; if (!wornStand) despawnStand(); },
   __cycleStand: () => cycleStand(),
   __warDebug: () => {
