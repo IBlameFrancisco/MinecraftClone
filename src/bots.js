@@ -326,6 +326,25 @@ export class BotManager {
       b.pitch += (0 - b.pitch) * Math.min(1, 2 * dt);
     }
 
+    // --- Obstacle avoidance: auto-step clears 1-block ledges, but tall obstacles
+    // (D-Day hedgehogs, dragon's teeth, gate posts, wrecks) are walls a simple steerer
+    // would wedge against. If something un-steppable is dead ahead, veer around it. ---
+    if (b.onGround) {
+      const dn = Math.hypot(desiredX, desiredZ);
+      if (dn > 0.001) {
+        const fx = desiredX / dn, fz = desiredZ / dn, fy = Math.floor(b.pos.y + 1.1);   // head height: clear of a 1-step
+        const tall = (ox, oz) => ctx.world.getBlock(Math.floor(b.pos.x + ox), fy, Math.floor(b.pos.z + oz)) !== 0;
+        if (tall(fx * 1.0, fz * 1.0)) {                          // un-steppable obstacle straight ahead
+          const px = -fz, pz = fx;                               // perpendicular
+          const lBlk = tall(fx * 0.6 + px * 1.1, fz * 0.6 + pz * 1.1);
+          const rBlk = tall(fx * 0.6 - px * 1.1, fz * 0.6 - pz * 1.1);
+          let side = lBlk && !rBlk ? -1 : rBlk && !lBlk ? 1 : (b._avoidSide || (b._avoidSide = Math.random() < 0.5 ? 1 : -1));
+          b._avoidT = 0.4;                                       // commit to this side briefly so we don't jitter
+          desiredX = fx * 0.8 + px * side * 1.1; desiredZ = fz * 0.8 + pz * side * 1.1;   // mostly forward, slip past
+        } else if (b._avoidT > 0) { b._avoidT -= dt; } else { b._avoidSide = 0; }
+      }
+    }
+
     // --- Locomotion (shared AABB voxel collision + 1-block hop) ---
     // Smooth the steering intent: ease the actual move direction toward the per-frame
     // desired vector so direction changes (strafe flips, approach↔retreat) bend instead
@@ -354,7 +373,7 @@ export class BotManager {
 
     b.vel.y -= GRAVITY * dt;
     if (b.vel.y < -34) b.vel.y = -34;
-    b.onGround = moveEntity(ctx.world, b.pos, b.vel, HALF, HEIGHT, dt);
+    b.onGround = moveEntity(ctx.world, b.pos, b.vel, HALF, HEIGHT, dt, 1.05);   // auto-step 1-block rubble/ledges
 
     // Fell off the map → eliminate (counts as a death, no killer — clear any recent
     // hit so it isn't credited to whoever last tagged it).
