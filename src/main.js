@@ -42,7 +42,7 @@ const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
 // Deathmatch arsenal (one per hotbar key, slot 10 = key 0), one of each weapon class.
-const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, SHARINGAN, STAR_PLATINUM, THE_WORLD];
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, SHARINGAN];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -542,7 +542,7 @@ modeBattleBtn.addEventListener('click', () => { menuMode = BATTLE; refreshModePi
 document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
 
 // ---------- Battle setup (game mode, FFA/Teams, size, bot difficulty, score) ----------
-const battleCfg = { mode: 'dm', team: false, side: 'allied', size: 6, botDiff: 'normal', scoreLimit: 20, map: 'random' };
+const battleCfg = { mode: 'dm', team: false, side: 'allied', size: 6, botDiff: 'normal', scoreLimit: 20, map: 'random', stand: 0 };
 const bsGameMode = document.getElementById('bsGameMode');
 const bsTeamRow = document.getElementById('bsTeamRow');
 const bsFFA = document.getElementById('bsModeFFA');
@@ -554,6 +554,7 @@ const bsScore = document.getElementById('bsScore');
 const bsScoreRow = bsScore.closest('.bsrow');
 const bsMap = document.getElementById('bsMap');
 const bsMapRow = document.getElementById('bsMapRow');
+const bsStand = document.getElementById('bsStand');
 // Modes that force free-for-all / co-op rather than letting you pick teams.
 const FORCES_FFA = { gungame: true, br: true };
 const FORCES_COOP = { wave: true };
@@ -587,6 +588,7 @@ bsSize.addEventListener('change', (e) => { battleCfg.size = parseInt(e.target.va
 bsBotDiff.addEventListener('change', (e) => { battleCfg.botDiff = e.target.value; });
 bsScore.addEventListener('change', (e) => { battleCfg.scoreLimit = parseInt(e.target.value, 10); });
 if (bsMap) bsMap.addEventListener('change', (e) => { battleCfg.map = e.target.value; });
+if (bsStand) bsStand.addEventListener('change', (e) => { battleCfg.stand = parseInt(e.target.value, 10) || 0; });
 fillSizeOptions(); refreshBattleSetup();
 refreshModePicker();
 
@@ -910,6 +912,7 @@ function setGameMode(m) {
 // resumed/quit match): spectate flags, god-mode i-frames, and battle-only HUD cards.
 function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0; protect = 0;
+  wornStand = 0; despawnStand();                 // dismiss any Stand on the way out
   matchWinner = null; matchOverTimer = 0;
   abortDeathCam(); clearAfterImages();
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
@@ -1006,6 +1009,7 @@ let teamMode = false, myTeam = TEAM_NONE, scoreLimit = 20;
 // Game-mode state (dm / gungame / koth / br / wave).
 let gameMode = 'dm';
 let gunLevelShown = -1;          // gun game: which ladder weapon we're holding
+let wornStand = 0;               // equipped Stand item id (0 = none) — worn, not held
 let hillTimer = 0;               // koth scoring tick
 let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
 let waveNum = 0, waveBreak = 0;  // wave survival
@@ -1077,6 +1081,7 @@ function computeCoverPoints() {
 // Build the match (authority spawns bots; everyone rebuilds the board).
 function setupMatch() {
   gameMode = battleCfg.mode;
+  wornStand = battleCfg.stand || 0;   // don the Stand chosen in setup (X re-cycles it in-match)
   teamMode = battleCfg.team;
   if (gameMode === 'gungame' || gameMode === 'br') teamMode = false;
   if (gameMode === 'wave' || gameMode === 'war') teamMode = true;
@@ -1978,6 +1983,8 @@ window.addEventListener('keydown', (e) => {
     if (!dead && !inventory.open) { keyPlace = true; placeCD = 0; }                                          // place/use without a mouse
   } else if (e.code === 'KeyC') {
     if (!dead && !inventory.open && player.locked) chargingChakra = true;   // hold to channel chakra
+  } else if (e.code === 'KeyX') {
+    if (!dead && !inventory.open && player.locked) cycleStand();            // don / switch / dismiss the worn Stand
   } else if (e.code === 'KeyT' || e.code === 'Enter') {
     if (player.locked && !inventory.open && !dead && !hud.isChatOpen()) { e.preventDefault(); player.keys.clear(); hud.openChat(); }
   }
@@ -2342,7 +2349,7 @@ function fireCleave(gun, muzzle) {
 // no extra state beyond a visual 'ora' burst relayed to onlookers.
 const stand = { id: -1, group: null, t: 0, attackCD: 0, atk: 0, blockK: 0, blockSnd: 0 };
 const _standDesired = new THREE.Vector3();
-function currentStand() { const m = gunOf(inventory.selectedId()); return m && m.kind === 'stand' ? m : null; }
+function currentStand() { const m = wornStand ? gunOf(wornStand) : null; return m && m.kind === 'stand' ? m : null; }
 // A Stand catches part of an incoming attack (called from damagePlayer).
 function standDeflect(dmg) {
   const m = currentStand(); if (!m) return dmg;
@@ -2379,11 +2386,18 @@ function despawnStand() {
   if (stand.group) { scene.remove(stand.group); stand.group.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); stand.group = null; }
   stand.id = -1; stand.atk = 0; stand.blockK = 0;
 }
+// Press X to don / switch / dismiss the worn Stand (works in battle and the sandbox).
+function cycleStand() {
+  const order = [0, STAR_PLATINUM, THE_WORLD];
+  wornStand = order[(order.indexOf(wornStand) + 1) % order.length];
+  if (wornStand) { hud.showName('✦ ' + gunOf(wornStand).name); sfx.standSummon(); }
+  else { hud.showName('Stand dismissed'); despawnStand(); }
+}
 function updateStand(active, dt) {
   const m = active ? currentStand() : null;
   if (!m) { if (stand.group) stand.group.visible = false; stand.atk = 0; stand.blockK = 0; return; }
   stand.t += dt; stand.blockSnd -= dt;
-  const sid = inventory.selectedId();
+  const sid = wornStand;
   if (stand.id !== sid) { despawnStand(); stand.group = makeStandAvatar(m); scene.add(stand.group); stand.id = sid; stand.group.position.copy(player.pos); sfx.standSummon(); }
   stand.group.visible = true;
   stand.attackCD -= dt; stand.atk = Math.max(0, stand.atk - dt);
@@ -3376,8 +3390,10 @@ window.__game = {
   __lobbyState: (d) => onLobbyState(d),
   __flashStep: (code) => { const before = player.pos.clone(); flashStep(code || 'KeyW'); return { moved: +player.pos.distanceTo(before).toFixed(2), charges: flashCharges, afterImages: afterImages.length }; },
   get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
-  get standInfo() { return { equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
+  get standInfo() { return { worn: wornStand, equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
   __standDeflect: (dmg) => standDeflect(dmg),
+  __wearStand: (id) => { wornStand = id || 0; if (!wornStand) despawnStand(); },
+  __cycleStand: () => cycleStand(),
   __warDebug: () => {
     const targets = buildTargets(); const out = [];
     for (const b of botMgr.bots) {

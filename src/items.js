@@ -46,7 +46,9 @@ export const THE_WORLD = 291;
 // incoming attacks and barrages whatever enemy strays into its reach.
 export const STANDS = [STAR_PLATINUM, THE_WORLD];
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD, PORTAL_GUN];
+// Stands aren't held weapons — they're worn (see STANDS), so they stay out of GUNS
+// (the selectable hotbar/creative-palette set).
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
