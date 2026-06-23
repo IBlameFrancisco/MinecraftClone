@@ -7,7 +7,7 @@ import { SimplexNoise } from './noise.js';
 import { CHUNK_SIZE, CHUNK_HEIGHT, SEA_LEVEL, WORLD_SEED } from './constants.js';
 import {
   AIR, GRASS, DIRT, STONE, SAND, LOG, LEAVES, WATER, SNOW,
-  COAL_ORE, IRON_ORE, BEDROCK, GRAVEL, CACTUS, COBBLE, PLANK, WOOL, GLOWSTONE, TORCH, GLASS,
+  COAL_ORE, IRON_ORE, BEDROCK, GRAVEL, CACTUS, COBBLE, PLANK, WOOL, GLOWSTONE, TORCH, GLASS, ICE, LAVA,
 } from './blocks.js';
 
 export const BIOME_PLAINS = 0;
@@ -328,9 +328,12 @@ export class WorldGen {
   // perimeter wall, a raised central beacon, pillars and cover. Outside the
   // bounds is void, so the wall keeps everyone in the fight.
   generateArena(chunk) {
-    // Each theme can supply its own unique topology builder; others fall back to the
-    // classic re-skinnable arena. (Jungle = a moated temple ziggurat in dense forest.)
+    // Each theme supplies its own unique topology builder; ruins falls back to the
+    // classic re-skinnable arena layout.
     if (this.arenaThemeName === 'jungle') return this._buildJungleArena(chunk);
+    if (this.arenaThemeName === 'frozen') return this._buildFrozenArena(chunk);
+    if (this.arenaThemeName === 'desert') return this._buildDesertArena(chunk);
+    if (this.arenaThemeName === 'ruins') return this._buildRuinsArena(chunk);
     const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
     const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
     const T = this.T || ARENA_THEMES.ruins;       // active theme palette
@@ -485,6 +488,181 @@ export class WorldGen {
     const h = hash2(ax * 7 + 3, az * 7 + 3);
     if (h > 0.94) chunk.setLocal(lx, F + 1, lz, LEAVES);        // shrub
     else if (h < 0.035) for (let y = 1; y <= 2; y++) chunk.setLocal(lx, F + y, lz, LOG);  // fallen-log cover
+  }
+
+  // ---- FROZEN arena (unique topology) ----
+  // A wide, open frozen lake — slippery ice underfoot, sweeping sightlines for snipers,
+  // ringed by snowy mountain ramparts. Stepped ice perches give the high ground; the
+  // centre is thin ice over a freezing pool you crash through if you linger there.
+  _buildFrozenArena(chunk) {
+    const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
+    const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
+    const PERCHES = [[30, 30], [12, 30], [30, 12]];
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const wx = ox + lx, wz = oz + lz;
+        const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az), inr = Math.min(ax, az);
+        if (m > HALF) continue;
+        chunk.setLocal(lx, F - 2, lz, BEDROCK);
+        chunk.setLocal(lx, F - 1, lz, BEDROCK);
+
+        // Snowy mountain rampart with an icy parapet.
+        if (m >= HALF - 1) {
+          for (let y = 1; y <= WH; y++) chunk.setLocal(lx, F + y, lz, m === HALF - 1 && (y === 4 || y === 8) ? GLASS : SNOW);
+          chunk.setLocal(lx, F + WH + 1, lz, ((ax + az) & 1) === 0 ? GLASS : SNOW);
+          continue;
+        }
+
+        // Frozen lake floor (slippery ice everywhere; structures overwrite).
+        chunk.setLocal(lx, F, lz, ICE);
+
+        // Central thin ice → a freezing pool you fall into in the open (1 deep, so you
+        // can still wade/scramble out — it slows you in the exposed middle).
+        if (m <= 6) {
+          if (m <= 5) chunk.setLocal(lx, F, lz, WATER);
+          else if (((ax + az) & 1) === 0) chunk.setLocal(lx, F, lz, GLASS);   // cracked-ice lip ring
+          continue;
+        }
+
+        // Stepped ice perches (the sniper high ground) + a glowing cap.
+        let onPerch = false;
+        for (const [cx, cz] of PERCHES) {
+          const d = Math.max(Math.abs(ax - cx), Math.abs(az - cz));
+          if (d > 3) continue;
+          onPerch = true;
+          const h = 4 - d;                                  // stepped pyramid, 1-high treads
+          for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, y === h ? GLASS : COBBLE);
+          if (d === 0) chunk.setLocal(lx, F + h + 1, lz, GLOWSTONE);
+        }
+        if (onPerch) continue;
+
+        // Sparse low snow drifts for a sliver of cover (kept off the spawn pads).
+        if ([[34, 0], [0, 34], [24, 24]].some(([sx, sz]) => Math.max(Math.abs(ax - sx), Math.abs(az - sz)) <= 1)) continue;
+        const hs = hash2(ax * 5 + 9, az * 5 + 9);
+        if (hs > 0.965) chunk.setLocal(lx, F + 1, lz, SNOW);
+      }
+    }
+    chunk.recomputeHeightMap();
+    chunk.generated = true;
+  }
+
+  // ---- DESERT arena (unique topology) ----
+  // A mesa canyon: a tall central butte you fight up to, four raised corner plateaus
+  // with stepped ramp skirts, and plank catwalks bridging them over the sand floor.
+  // Strong verticality — high ground and banked rockets / black-holes rule.
+  _buildDesertArena(chunk) {
+    const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
+    const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
+    const MESA = [[31, 31, 6, 4], [11, 30, 6, 3], [30, 11, 6, 3]];   // [cx, cz, radius, height] (clear of the corner spawn pads)
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const wx = ox + lx, wz = oz + lz;
+        const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az), inr = Math.min(ax, az);
+        if (m > HALF) continue;
+        chunk.setLocal(lx, F - 2, lz, BEDROCK);
+        chunk.setLocal(lx, F - 1, lz, BEDROCK);
+        chunk.setLocal(lx, F, lz, SAND);                  // flat canyon floor (structures rise above)
+
+        // Banded sandstone canyon wall ringing the arena.
+        if (m >= HALF - 1) {
+          for (let y = 1; y <= WH; y++) chunk.setLocal(lx, F + y, lz, (y === 3 || y === 7) ? COBBLE : SAND);
+          chunk.setLocal(lx, F + WH + 1, lz, SAND);
+          continue;
+        }
+
+        // Central butte: a tall stepped mesa with a glowing top (the prize / KOTH).
+        if (m <= 9) {
+          const h = m <= 1 ? 7 : m <= 3 ? 6 : m <= 5 ? 5 : m <= 7 ? 4 : 2;   // 2-wide treads, climbable
+          for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, y === h ? COBBLE : SAND);
+          if (m === 0) for (let y = 8; y <= 9; y++) chunk.setLocal(lx, F + y, lz, GLOWSTONE);
+          else if (m <= 1) chunk.setLocal(lx, F + 8, lz, COBBLE);
+          continue;
+        }
+
+        // Corner plateaus with a stepped ramp skirt so they're walkable up.
+        let built = false;
+        for (const [cx, cz, r, ph] of MESA) {
+          const d = Math.max(Math.abs(ax - cx), Math.abs(az - cz));
+          if (d > r) continue;
+          built = true;
+          const top = d <= r - ph ? ph : Math.max(1, ph - (d - (r - ph)));   // flat top, stepped rim
+          for (let y = 1; y <= top; y++) chunk.setLocal(lx, F + y, lz, y === top ? COBBLE : SAND);
+        }
+        if (built) continue;
+
+        // Plank catwalks along the axes linking the butte to the corner plateaus.
+        if (inr <= 1 && m >= 9 && m <= 21) { chunk.setLocal(lx, F + 3, lz, PLANK); continue; }
+
+        // A little low cover on the open sand (off the spawn pads).
+        if ([[34, 0], [0, 34], [24, 24]].some(([sx, sz]) => Math.max(Math.abs(ax - sx), Math.abs(az - sz)) <= 1)) continue;
+        if (hash2(ax * 5 + 2, az * 5 + 2) > 0.955) chunk.setLocal(lx, F + 1, lz, SAND);
+      }
+    }
+    chunk.recomputeHeightMap();
+    chunk.generated = true;
+  }
+
+  // ---- RUINS arena (unique topology) ----
+  // An inverted map: a sunken central LAVA pit (a ring-out hazard you knock foes into)
+  // crowned by a glowing broken obelisk, framed by a low rim, and ringed by a raised
+  // colonnade of broken pillars for mid-range cover. The pit's rim lip keeps bots from
+  // wandering in — only knockback (rockets / black hole / melee) dunks them.
+  _buildRuinsArena(chunk) {
+    const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
+    const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const wx = ox + lx, wz = oz + lz;
+        const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az), inr = Math.min(ax, az);
+        if (m > HALF) continue;
+        chunk.setLocal(lx, F - 2, lz, BEDROCK);
+        chunk.setLocal(lx, F - 1, lz, BEDROCK);
+
+        // Dark ritual perimeter wall with glowing bands + crenellations.
+        if (m >= HALF - 1) {
+          for (let y = 1; y <= WH; y++) {
+            let wmat = COBBLE;
+            if (m === HALF - 1 && (y === 4 || y === 8)) wmat = GLOWSTONE;
+            if (m === HALF - 1 && y === 6 && inr % 6 === 2) wmat = GLOWSTONE;
+            chunk.setLocal(lx, F + y, lz, wmat);
+          }
+          chunk.setLocal(lx, F + WH + 1, lz, ((ax + az) & 1) === 0 ? GLASS : COBBLE);
+          continue;
+        }
+
+        // Checkered stone floor everywhere (the colonnade ring surface).
+        chunk.setLocal(lx, F, lz, (((wx >> 2) + (wz >> 2)) & 1) ? STONE : COBBLE);
+
+        // Sunken lava pit + a 2-high rim lip that protects roamers (only knockback dunks you).
+        if (m <= 10) {
+          if (m >= 9) { chunk.setLocal(lx, F + 1, lz, COBBLE); chunk.setLocal(lx, F + 2, lz, COBBLE); }   // rim lip
+          else {
+            chunk.setLocal(lx, F, lz, AIR); chunk.setLocal(lx, F - 1, lz, AIR);
+            chunk.setLocal(lx, F - 4, lz, BEDROCK);
+            for (let y = F - 3; y <= F - 1; y++) chunk.setLocal(lx, y, lz, LAVA);   // 3-deep lava
+          }
+          // Broken obelisk rising from the lava through the pit (glowing crown).
+          if (m === 0) { for (let y = F - 3; y <= F + 5; y++) chunk.setLocal(lx, y, lz, y >= F + 4 ? GLOWSTONE : COBBLE); }
+          else if (m <= 1) { for (let y = F - 3; y <= F + 2; y++) chunk.setLocal(lx, y, lz, COBBLE); }
+          continue;
+        }
+
+        // Raised colonnade: broken stone pillars for cover, mirrored to all quadrants.
+        this._ruinsColonnade(chunk, lx, lz, F, ax, az);
+      }
+    }
+    chunk.recomputeHeightMap();
+    chunk.generated = true;
+  }
+  _ruinsColonnade(chunk, lx, lz, F, ax, az) {
+    const PILL = [[14, 14, 5], [22, 14, 4], [14, 22, 4], [26, 26, 6], [32, 16, 3], [16, 32, 3], [33, 33, 5]];
+    for (const [cx, cz, ph] of PILL) {
+      if (ax === cx && az === cz) { for (let y = 1; y <= ph; y++) chunk.setLocal(lx, F + y, lz, y === ph ? GLOWSTONE : COBBLE); return; }
+      // A broken stub beside some pillars (rubble cover).
+      if (Math.abs(ax - cx) + Math.abs(az - cz) === 1 && ph >= 4) { chunk.setLocal(lx, F + 1, lz, COBBLE); return; }
+    }
+    // Low broken walls linking pillar pairs for waist-high cover.
+    if ((ax === 18 && az >= 14 && az <= 22) || (az === 18 && ax >= 14 && ax <= 22)) { chunk.setLocal(lx, F + 1, lz, COBBLE); }
   }
 
   // Select the arena re-skin (materials + decoration) used by generateArena.

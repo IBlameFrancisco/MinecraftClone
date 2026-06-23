@@ -13,8 +13,8 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { REACH, SEA_LEVEL } from './constants.js';
 import {
   AIR, WATER, BEDROCK, GRASS, DIRT, STONE, COBBLE, COAL_ORE, IRON_ORE,
-  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, SAND, LOG, PLANK, SNOW, GRAVEL, WOOL, CACTUS,
-  hardness, BLOCK_TOOL, BLOCK_REQUIRES,
+  LEAVES, GLASS, GLOWSTONE, CRAFTING_TABLE, CHEST, SAND, LOG, PLANK, SNOW, GRAVEL, WOOL, CACTUS, LAVA,
+  hardness, BLOCK_TOOL, BLOCK_REQUIRES, isHot,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
   HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN } from './items.js';
@@ -261,7 +261,8 @@ let invuln = 0, regenTimer = 0, hungerTimer = 0, starveTimer = 0;
 let arena = false;                 // is the current world a battle map (arena/beach)?
 let battleMap = 'arena';           // which battle map: 'arena' or 'beach' (D-Day)
 let arenaTheme = 'ruins';          // arena re-skin (ruins/jungle/frozen/desert), random per match
-const pickArenaTheme = () => ARENA_THEME_NAMES[(Math.random() * ARENA_THEME_NAMES.length) | 0];
+let _forceTheme = null;   // test hook: pin the next arena theme
+const pickArenaTheme = () => _forceTheme || ARENA_THEME_NAMES[(Math.random() * ARENA_THEME_NAMES.length) | 0];
 let lastHitBy = null, lastHitTime = -100;   // for PvP kill attribution
 let shakeAmt = 0;                  // screen-shake magnitude
 let combo = 0, comboTimer = 0, firstBlood = true;   // announcer multikill tracking
@@ -2700,6 +2701,32 @@ function cactusContact(dt) {
     if (world.getBlock(x, y, z) === CACTUS) { damagePlayer(1); cactusCD = 0.5; return; }
   }
 }
+// Standing in lava (the ruins pit) burns fast — heavy damage-over-time + embers.
+let lavaCD = 0;
+function lavaContact(dt) {
+  lavaCD -= dt;
+  const feet = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y + 0.2), Math.floor(player.pos.z));
+  const shin = world.getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y + 0.9), Math.floor(player.pos.z));
+  if (!isHot(feet) && !isHot(shin)) return;
+  particles.burst(player.pos.x, player.pos.y + 0.6, player.pos.z, [255, 140, 40], 4);
+  if (lavaCD > 0) return;
+  damagePlayer(4); lavaCD = 0.45; hud.flashHurt();
+}
+// Authority: burn any bots/mobs caught in lava (knocked into the pit).
+function lavaBurnEntities(dt) {
+  const hot = (x, y, z) => isHot(world.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)));
+  for (const b of botMgr.bots) {
+    if (!b.alive) continue;
+    if (hot(b.pos.x, b.pos.y + 0.2, b.pos.z) || hot(b.pos.x, b.pos.y + 0.9, b.pos.z)) {
+      b.lavaCD = (b.lavaCD || 0) - dt;
+      particles.burst(b.pos.x, b.pos.y + 0.6, b.pos.z, [255, 140, 40], 2);
+      if (b.lavaCD <= 0) { botHurt(b.id, 6, null, false); b.lavaCD = 0.4; }
+    }
+  }
+  for (const mb of mobs.list) {
+    if (hot(mb.pos.x, mb.pos.y + 0.2, mb.pos.z)) { mb.lavaCD = (mb.lavaCD || 0) - dt; if (mb.lavaCD <= 0) { mb.hurt(6, mb.pos.x, mb.pos.z); mb.lavaCD = 0.4; } }
+  }
+}
 function survivalTick(dt, moving) {
   if (mode !== SURVIVAL || dead) return;
   const peaceful = difficulty === PEACEFUL;
@@ -2806,6 +2833,7 @@ function frame() {
       botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
       botMgr.update(botDt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
       if (!frozen) manageBots(dt);
+      if (!frozen && arenaTheme === 'ruins' && gameMode !== 'war') lavaBurnEntities(dt);   // ruins pit ring-out
       if (!matchWinner && !frozen) modeTick(dt);
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
     }
@@ -2932,6 +2960,7 @@ function frame() {
 
   if (active) survivalTick(dt, Math.hypot(player.vel.x, player.vel.z) > 1.2);
   if (active && (mode === SURVIVAL || mode === BATTLE)) cactusContact(dt);   // brushing a cactus hurts (each client damages itself → co-op safe)
+  if (active && (mode === SURVIVAL || mode === BATTLE) && invuln <= 0) lavaContact(dt);   // standing in lava burns
 
   // Aim-down-sights (every non-scope gun) + animated viewmodel.
   const adsActive = active && gun && !gun.zoom && gun.kind !== 'portal' && mouseRight;
@@ -3031,6 +3060,7 @@ window.__game = {
   __dyingCount: () => dyingAvatars.length,
   __spawnBlackHole: () => { player.eyePosition(_eye); _dir.set(0.15, -0.12, -1).normalize(); const gun = gunOf(BLACK_HOLE_BOMB); blackholes.spawn(_eye.clone(), _dir.clone(), gun, mp.myId || 'me'); return { radius: gun.radius, duration: gun.duration, pull: gun.pull, damage: gun.damage, splash: gun.splash }; },
   get lensState() { return { on: lensPass.enabled, count: lensPass.uniforms.uCount.value, r: +lensPass.uniforms.uParams.value[0].x.toFixed(3), s: +lensPass.uniforms.uParams.value[0].y.toFixed(2) }; },
+  __forceTheme: (t) => { _forceTheme = t; },
   __flashStep: (code) => { const before = player.pos.clone(); flashStep(code || 'KeyW'); return { moved: +player.pos.distanceTo(before).toFixed(2), charges: flashCharges, afterImages: afterImages.length }; },
   get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
   __warDebug: () => {
