@@ -56,6 +56,14 @@ function buildModel(kind) {
     const head = at(box(0.5, 0.5, 0.5, skin), 0, 1.75, 0);
     g.add(head);
     g.userData.head = head;
+    // Sunken glowing eyes give the undead a face that the head-look can carry around.
+    const eyeC = sk ? 0x202020 : 0x141a10;
+    const le = at(box(0.12, 0.08, 0.06, eyeC), -0.12, 0.02, 0.26);
+    const re = at(box(0.12, 0.08, 0.06, eyeC), 0.12, 0.02, 0.26);
+    head.add(le); head.add(re);
+    g.userData.eyes = [le, re];
+    if (sk) head.add(at(box(0.18, 0.04, 0.05, 0x6f6a62), 0, -0.14, 0.27)); // bony jaw line
+    else head.add(at(box(0.34, 0.05, 0.04, 0x2c3a22), 0, -0.16, 0.26));    // zombie grimace
     limbs.push(limb(g, 0.2, 0.75, 0.22, -0.3, 1.5, 0, skin));  // arms (forward)
     limbs.push(limb(g, 0.2, 0.75, 0.22, 0.3, 1.5, 0, skin));
     limbs[0].rotation.x = limbs[1].rotation.x = -1.4;
@@ -86,7 +94,26 @@ function buildModel(kind) {
     const head = at(box(0.55, 0.55, 0.5, headC), 0, bodyY + 0.12, 0.72);
     g.add(head);
     g.userData.head = head;
+    // Little dark eyes so the head reads as a face when it turns to look at you.
+    head.add(at(box(0.07, 0.09, 0.05, 0x1a1410), -0.16, 0.06, 0.24));
+    head.add(at(box(0.07, 0.09, 0.05, 0x1a1410), 0.16, 0.06, 0.24));
     if (kind === 'pig') head.add(at(box(0.28, 0.2, 0.1, 0x9c5560), 0, -0.08, 0.26)); // snout follows the head
+    // Ears flick on idle as a sign of life; kept as pivots so they can twitch.
+    const ears = [];
+    if (kind === 'pig') {
+      ears.push(limb(head, 0.14, 0.12, 0.05, -0.18, 0.24, 0.04, headC));
+      ears.push(limb(head, 0.14, 0.12, 0.05, 0.18, 0.24, 0.04, headC));
+    } else if (kind === 'cow') {
+      ears.push(limb(head, 0.16, 0.1, 0.06, -0.3, 0.12, 0.02, headC));
+      ears.push(limb(head, 0.16, 0.1, 0.06, 0.3, 0.12, 0.02, headC));
+      head.add(at(box(0.06, 0.16, 0.06, 0xe8e4dc), -0.12, 0.36, 0)); // stubby horns
+      head.add(at(box(0.06, 0.16, 0.06, 0xe8e4dc), 0.12, 0.36, 0));
+    } else { // sheep: woolly cap + floppy ears
+      head.add(at(box(0.5, 0.28, 0.42, 0xeeede8), 0, 0.18, -0.06));
+      ears.push(limb(head, 0.1, 0.16, 0.05, -0.26, 0.04, 0, 0xd8d4cc));
+      ears.push(limb(head, 0.1, 0.16, 0.05, 0.26, 0.04, 0, 0xd8d4cc));
+    }
+    g.userData.ears = ears;
     const lx = 0.24, lz = 0.38, legLen = 0.34;
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       limbs.push(limb(g, 0.2, legLen, 0.2, sx * lx, legLen, sz * lz, legC));
@@ -126,6 +153,10 @@ class Mob {
     this.hiss = 0;                   // creeper: 0..1 charge while armed and near
     this.startleCD = 0;             // passive: cooldown before it can startle again
     this.hurtFlash = 0;
+    this.hurtKick = 0;              // brief recoil/squash impulse on being struck (visual)
+    this.blink = 2 + Math.random() * 4; // countdown to next idle blink/ear-flick
+    this.blinkT = 0;               // 0..1 progress through the current blink
+    this.gait = 0;                 // eased walk-cycle strength (no snap when stopping)
     this.dead = false;
     // Per-individual temperament so a herd/horde doesn't move in lockstep.
     this.bias = 0.85 + Math.random() * 0.3;        // personal speed multiplier
@@ -136,6 +167,10 @@ class Mob {
     this.legs = built.group.userData.legs;
     this.arms = built.group.userData.arms;
     this.head = built.group.userData.head || null;
+    this.eyes = built.group.userData.eyes || null;   // undead: blink by squashing the eye boxes
+    this.ears = built.group.userData.ears || null;   // passives: idle ear flicks
+    this.earBaseRot = this.ears ? this.ears.map((e) => e.rotation.z) : null;
+    this.legBaseY = this.legs.map((l) => l.position.y); // pivot heights to add the walk lift onto
     this.headBaseY = this.head ? this.head.position.y : 0;
     this.mesh.position.copy(this.pos);
   }
@@ -151,7 +186,9 @@ class Mob {
 
   hurt(dmg, fromX, fromZ) {
     this.health -= dmg;
-    this.hurtFlash = 0.2;
+    this.hurtFlash = 0.22;
+    this.hurtKick = 1;            // drives a quick flinch/squash that decays in update()
+    this.blink = 0.05;           // a struck mob blinks/winces almost immediately
     const dx = this.pos.x - fromX, dz = this.pos.z - fromZ;
     const d = Math.hypot(dx, dz) || 1;
     this.vel.x += (dx / d) * 6; this.vel.z += (dz / d) * 6; this.vel.y = 5;
@@ -304,22 +341,39 @@ class Mob {
     // --- Animation ---
     const biped = this.kind === 'zombie' || this.kind === 'skeleton';
     const sp = Math.hypot(this.vel.x, this.vel.z);
-    if (sp > 0.1) this.walk += dt * (6 + sp);
-    // Gait strength eases in/out so legs don't snap to a pose when stopping.
-    const gait = Math.min(0.9, 0.3 + sp * 0.15) * Math.min(1, sp / 0.6);
-    const swing = Math.sin(this.walk) * gait;
+    // Cadence scales with pace; faster movers take quicker strides.
+    if (sp > 0.1) this.walk += dt * (5 + sp * 1.4);
+    // Target gait strength, then ease the actual value toward it so legs spin up
+    // and settle smoothly instead of snapping between a walk pose and a hard stop.
+    const gaitTarget = Math.min(0.95, 0.3 + sp * 0.15) * Math.min(1, sp / 0.6);
+    this.gait += (gaitTarget - this.gait) * Math.min(1, 12 * dt);
+    const swing = Math.sin(this.walk) * this.gait;
+    // A slight knee-style lift (forward leg rises a touch) reads less like a metronome.
+    const lift = Math.abs(Math.cos(this.walk)) * this.gait * 0.12;
     if (biped && this.legs.length >= 2) {
       this.legs[0].rotation.x = swing; this.legs[1].rotation.x = -swing;
+      this.legs[0].position.y = this.legBaseY[0] + (swing > 0 ? lift : 0);
+      this.legs[1].position.y = this.legBaseY[1] + (swing < 0 ? lift : 0);
       // Zombies hold arms forward (set at build time); add a gentle counter-swing
       // and a slow menacing reach so they don't look frozen.
       if (this.arms.length >= 2) {
         const reach = -1.4 + Math.sin(this.walk * 0.5) * 0.12;
         this.arms[0].rotation.x = reach - swing * 0.5;
         this.arms[1].rotation.x = reach + swing * 0.5;
+        // Faint sideways drift on the arms so the reach doesn't look perfectly rigid.
+        this.arms[0].rotation.z = Math.sin(this.idlePhase * 0.7) * 0.05;
+        this.arms[1].rotation.z = -Math.sin(this.idlePhase * 0.7) * 0.05;
       }
     } else if (this.legs.length === 4) {
+      // Diagonal gait (front-left + back-right together), with a subtle vertical
+      // lift so hooves look like they leave the ground rather than just rotate.
       this.legs[0].rotation.x = swing; this.legs[3].rotation.x = swing;
       this.legs[1].rotation.x = -swing; this.legs[2].rotation.x = -swing;
+      const liftA = swing > 0 ? lift : 0, liftB = swing < 0 ? lift : 0;
+      this.legs[0].position.y = this.legBaseY[0] + liftA;
+      this.legs[3].position.y = this.legBaseY[3] + liftA;
+      this.legs[1].position.y = this.legBaseY[1] + liftB;
+      this.legs[2].position.y = this.legBaseY[2] + liftB;
     }
 
     // Idle breathing/sway: a subtle bob plus body lean, fading out while moving.
@@ -328,10 +382,32 @@ class Mob {
     const breath = Math.sin(this.idlePhase) * 0.012 * idle;
     const sway = Math.sin(this.idlePhase * 0.6) * 0.03 * idle;
 
+    // Hurt-kick: a quick flinch that squashes the whole mob, then springs back.
+    if (this.hurtKick > 0) this.hurtKick = Math.max(0, this.hurtKick - dt * 5);
+    const kick = this.hurtKick * this.hurtKick;   // ease-out so the snap lands early
+
+    // Occasional blink / ear flick so a still mob still looks alive.
+    this.blink -= dt;
+    if (this.blink <= 0) { this.blinkT = 1; this.blink = 2.5 + Math.random() * 4; }
+    if (this.blinkT > 0) this.blinkT = Math.max(0, this.blinkT - dt * 6);
+    if (this.eyes) {
+      const open = 1 - this.blinkT;          // squash eye boxes shut at the peak of a blink
+      this.eyes[0].scale.y = this.eyes[1].scale.y = 0.15 + open * 0.85;
+    }
+    if (this.ears && this.earBaseRot) {
+      // Ears twitch on the blink beat plus a slow idle waggle.
+      const flick = this.blinkT * 0.5 + Math.sin(this.idlePhase * 0.9) * 0.06 * idle;
+      this.ears[0].rotation.z = this.earBaseRot[0] + flick;
+      this.ears[1].rotation.z = this.earBaseRot[1] - flick;
+    }
+
     // --- Smooth body turning (shortest-arc toward AI yaw; visual only) ---
+    // Calm wandering turns gently; an alarmed mob whips around to face its target.
+    const alarmed = this.fleeTimer > 0 || this.aggro || (this.def.bomb && distP < 24);
+    const turnRate = alarmed ? 16 : 9;
     let dyaw = this.yaw - this.renderYaw;
     dyaw = ((dyaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI; // wrap to [-PI,PI]
-    this.renderYaw += dyaw * Math.min(1, 10 * dt);
+    this.renderYaw += dyaw * Math.min(1, turnRate * dt);
 
     // --- Head look toward the player when close (and a touch of idle scan). ---
     if (this.head) {
@@ -347,17 +423,23 @@ class Mob {
         const dy = (ctx.player.pos.y + 1.4) - (this.pos.y + this.height * 0.85);
         tPitch = Math.max(-0.5, Math.min(0.5, Math.atan2(dy, Math.max(0.5, dist)))) * look;
       }
-      this.headYaw += (tYaw - this.headYaw) * Math.min(1, 8 * dt);
-      this.headPitch += (tPitch - this.headPitch) * Math.min(1, 8 * dt);
+      // Snap the head around faster when alarmed (locks on), drift lazily otherwise.
+      const headRate = alarmed ? 13 : 7;
+      this.headYaw += (tYaw - this.headYaw) * Math.min(1, headRate * dt);
+      this.headPitch += (tPitch - this.headPitch) * Math.min(1, headRate * dt);
       this.head.rotation.y = this.headYaw;
-      this.head.rotation.x = -this.headPitch + breath * (biped ? 3 : 6);
+      // A tiny extra dip on the flinch sells the wince through the head too.
+      this.head.rotation.x = -this.headPitch + breath * (biped ? 3 : 6) + kick * 0.25;
       this.head.position.y = this.headBaseY + breath * 1.5;
     }
 
     this.mesh.position.copy(this.pos);
-    this.mesh.position.y += breath;
+    this.mesh.position.y += breath - kick * 0.12;          // flinch dips the body briefly
     this.mesh.rotation.y = this.renderYaw;
     this.mesh.rotation.z = sway;
+    // Squash-and-stretch on the flinch: widen and shorten, then spring back to 1.
+    const sq = 1 + kick * 0.18, st = 1 - kick * 0.22;
+    this.mesh.scale.set(sq, st, sq);
 
     let er = 0, eg = 0, eb = 0;
     if (this.hurtFlash > 0) { this.hurtFlash -= dt; er = 0.5; }

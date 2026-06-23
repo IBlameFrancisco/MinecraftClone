@@ -1,5 +1,6 @@
-// Gradient sky dome, distance fog, sun/moon, and a smooth day/night cycle that
-// drives sky colours, fog colour, and the global world light tint together.
+// Gradient sky dome, distance fog, sun/moon, drifting clouds, a procedural night
+// starfield, and a smooth day/night cycle that drives sky colours, fog colour, and
+// the global world light tint together — plus per-arena cinematic atmospheres.
 
 import * as THREE from 'three';
 import { DAY_LENGTH, RENDER_DISTANCE, CHUNK_SIZE } from './constants.js';
@@ -11,50 +12,62 @@ function sc(r, g, b) {
 }
 
 // Palettes (authored in sRGB 0..1): [skyTop, horizon].
-const DAY = [sc(0.25, 0.50, 0.93), sc(0.70, 0.84, 0.97)];
-const NIGHT = [sc(0.015, 0.025, 0.075), sc(0.04, 0.07, 0.17)];
-const DUSK = [sc(0.20, 0.22, 0.48), sc(0.98, 0.46, 0.24)];
+const DAY = [sc(0.21, 0.47, 0.95), sc(0.74, 0.87, 0.99)];
+const NIGHT = [sc(0.012, 0.022, 0.072), sc(0.035, 0.065, 0.165)];
+const DUSK = [sc(0.17, 0.20, 0.50), sc(1.0, 0.45, 0.21)];
 
 // Light tints applied to the world (already ~linear multipliers).
 const LIGHT_DAY = new THREE.Color(1.0, 0.99, 0.96);
-const LIGHT_NIGHT = new THREE.Color(0.16, 0.20, 0.34);
-const LIGHT_DUSK = new THREE.Color(1.02, 0.64, 0.42);
+const LIGHT_NIGHT = new THREE.Color(0.15, 0.19, 0.34);
+const LIGHT_DUSK = new THREE.Color(1.05, 0.62, 0.40);
+
+// Sun-disc tint fed to the dome's in-shader glow, per time-of-day band.
+const SUNCOL_DAY = sc(1.0, 0.97, 0.88);
+const SUNCOL_DUSK = sc(1.0, 0.52, 0.26);
+const SUNCOL_NIGHT = sc(0.55, 0.64, 0.92); // moon glow stand-in
 
 // ---- Battle arena: per-theme cinematic atmospheres — each map gets its own time-of-day mood,
 // sun colour and fog so it reads as a wholly different place. (sky top/horizon/fog
 // authored in sRGB; tint is a linear world-light multiplier; sun is a direction.)
 const ARENA_SKIES = {
-  // Golden-hour ritual ground: warm amber light, a low dramatic sun.
-  ruins:  { top: sc(0.18, 0.27, 0.58), horizon: sc(1.0, 0.6, 0.34), fog: sc(0.95, 0.66, 0.46), tint: new THREE.Color(1.16, 0.99, 0.82),
-            sun: new THREE.Vector3(0.55, 0.42, 0.22).normalize(), sunCol: [1.0, 0.74, 0.46], dir: [1.05, 0.83, 0.6], dirI: 1.05, ambI: 0.7, cloud: [1.0, 0.82, 0.66], cloudOp: 0.6 },
-  // Humid jungle noon: lush green-tinted daylight, soft canopy haze.
-  jungle: { top: sc(0.2, 0.5, 0.74), horizon: sc(0.78, 0.92, 0.72), fog: sc(0.72, 0.88, 0.68), tint: new THREE.Color(1.0, 1.12, 0.92),
-            sun: new THREE.Vector3(0.28, 0.86, 0.32).normalize(), sunCol: [1.0, 0.99, 0.82], dir: [0.92, 1.04, 0.8], dirI: 1.12, ambI: 0.86, cloud: [0.94, 1.0, 0.9], cloudOp: 0.7 },
-  // Frozen tundra: pale cold blue, a weak low sun — a cooler, dimmer haze with real
-  // shading contrast so the white snow/ice reads instead of blowing out to a flat glare.
-  frozen: { top: sc(0.34, 0.5, 0.78), horizon: sc(0.64, 0.76, 0.9), fog: sc(0.58, 0.68, 0.8), tint: new THREE.Color(0.88, 0.95, 1.06),
-            sun: new THREE.Vector3(0.36, 0.62, 0.5).normalize(), sunCol: [0.82, 0.9, 1.0], dir: [0.9, 0.98, 1.1], dirI: 1.12, ambI: 0.62, cloud: [0.84, 0.89, 0.97], cloudOp: 0.58 },
-  // Scorched desert: hot hazy orange-tan sky, blazing high sun, dust.
-  desert: { top: sc(0.3, 0.5, 0.86), horizon: sc(1.0, 0.83, 0.54), fog: sc(0.96, 0.82, 0.58), tint: new THREE.Color(1.18, 1.04, 0.82),
-            sun: new THREE.Vector3(0.4, 0.84, 0.26).normalize(), sunCol: [1.0, 0.92, 0.7], dir: [1.08, 0.97, 0.73], dirI: 1.2, ambI: 0.82, cloud: [1.0, 0.94, 0.8], cloudOp: 0.55 },
+  // Golden-hour ritual ground: warm amber light, a low dramatic sun, deep violet zenith.
+  ruins:  { top: sc(0.15, 0.22, 0.56), horizon: sc(1.0, 0.58, 0.31), fog: sc(0.96, 0.64, 0.43), tint: new THREE.Color(1.17, 0.98, 0.80),
+            sun: new THREE.Vector3(0.55, 0.42, 0.22).normalize(), sunCol: [1.0, 0.72, 0.42], glow: sc(1.0, 0.62, 0.34), glowI: 0.85,
+            dir: [1.07, 0.82, 0.58], dirI: 1.05, ambI: 0.7, cloud: [1.0, 0.80, 0.62], cloudOp: 0.62 },
+  // Humid jungle noon: lush green-tinted daylight, soft canopy haze, high soft sun.
+  jungle: { top: sc(0.18, 0.49, 0.76), horizon: sc(0.80, 0.94, 0.73), fog: sc(0.70, 0.88, 0.66), tint: new THREE.Color(1.0, 1.13, 0.91),
+            sun: new THREE.Vector3(0.28, 0.86, 0.32).normalize(), sunCol: [1.0, 1.0, 0.80], glow: sc(0.92, 1.0, 0.78), glowI: 0.5,
+            dir: [0.91, 1.05, 0.79], dirI: 1.12, ambI: 0.86, cloud: [0.93, 1.0, 0.88], cloudOp: 0.72 },
+  // Frozen tundra: pale cold blue, a weak low sun — deliberately cool/dim fog and
+  // moderate ambient with real shading contrast so the white snow/ice reads instead
+  // of blowing out to a flat glare. (Do not brighten.)
+  frozen: { top: sc(0.33, 0.50, 0.80), horizon: sc(0.63, 0.75, 0.90), fog: sc(0.56, 0.66, 0.79), tint: new THREE.Color(0.87, 0.94, 1.06),
+            sun: new THREE.Vector3(0.36, 0.62, 0.5).normalize(), sunCol: [0.84, 0.91, 1.0], glow: sc(0.78, 0.88, 1.0), glowI: 0.45,
+            dir: [0.89, 0.97, 1.10], dirI: 1.12, ambI: 0.62, cloud: [0.82, 0.88, 0.97], cloudOp: 0.56 },
+  // Scorched desert: hot hazy orange-tan sky, blazing high sun, suspended dust.
+  desert: { top: sc(0.28, 0.50, 0.88), horizon: sc(1.0, 0.82, 0.51), fog: sc(0.97, 0.81, 0.55), tint: new THREE.Color(1.19, 1.04, 0.81),
+            sun: new THREE.Vector3(0.4, 0.84, 0.26).normalize(), sunCol: [1.0, 0.91, 0.66], glow: sc(1.0, 0.86, 0.56), glowI: 0.7,
+            dir: [1.09, 0.97, 0.71], dirI: 1.2, ambI: 0.82, cloud: [1.0, 0.93, 0.78], cloudOp: 0.54 },
 };
 
 // ---- War mode (D-Day beach): a bleak, overcast, smoke-hazed grey morning with a
 // warm horizon stain from the fires up the beach. ----
-const WAR_TOP = sc(0.28, 0.31, 0.37);
-const WAR_HORIZON = sc(0.54, 0.49, 0.43);
+const WAR_TOP = sc(0.26, 0.30, 0.37);
+const WAR_HORIZON = sc(0.56, 0.50, 0.43);
 const WAR_FOG = sc(0.52, 0.49, 0.46);
 const WAR_TINT = new THREE.Color(0.70, 0.67, 0.63);
+const WAR_GLOW = sc(0.78, 0.56, 0.34); // dull ember stain near the horizon
 
 function radialSprite(inner, outer, mid) {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d');
-  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
+  const grad = g.createRadialGradient(64, 64, 1.5, 64, 64, 64);
   grad.addColorStop(0, inner);
-  grad.addColorStop(0.22, inner);
-  // A softer mid falloff gives the disc a luminous corona instead of a hard ring.
-  grad.addColorStop(0.42, mid || inner);
+  grad.addColorStop(0.18, inner);
+  // A two-stop mid falloff gives the disc a luminous corona instead of a hard ring.
+  grad.addColorStop(0.34, mid || inner);
+  grad.addColorStop(0.62, mid || inner);
   grad.addColorStop(1, outer);
   g.fillStyle = grad;
   g.fillRect(0, 0, 128, 128);
@@ -69,11 +82,17 @@ export class Sky {
     this.camera = camera;
     this.time = 0.30; // start mid-morning
 
-    // Dome
-    const geo = new THREE.SphereGeometry(600, 32, 16);
+    // Dome. Higher tessellation keeps the gradient + starfield smooth across the sphere.
+    const geo = new THREE.SphereGeometry(600, 48, 24);
     this.uniforms = {
       topColor: { value: DAY[0].clone() },
       horizonColor: { value: DAY[1].clone() },
+      // Extra uniforms drive in-shader sun glow + a procedural night starfield. These
+      // are additive to the public contract (main.js only reads topColor).
+      sunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
+      sunGlow: { value: SUNCOL_DAY.clone() },
+      glowStrength: { value: 0.0 },
+      starOpacity: { value: 0.0 },
     };
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
@@ -89,18 +108,56 @@ export class Sky {
       fragmentShader: `
         uniform vec3 topColor;
         uniform vec3 horizonColor;
+        uniform vec3 sunDir;
+        uniform vec3 sunGlow;
+        uniform float glowStrength;
+        uniform float starOpacity;
         varying vec3 vDir;
+
+        // Cheap hash-based starfield: a sparse field of crisp points that only shows
+        // at night (starOpacity) and fades out toward the horizon haze.
+        float hash(vec3 p) {
+          p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+          p *= 17.0;
+          return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+        float stars(vec3 d) {
+          vec3 g = floor(d * 220.0);
+          float n = hash(g);
+          // sparse: only the rare high-hash cells light up, with a soft point falloff
+          float s = smoothstep(0.992, 1.0, n);
+          vec3 f = fract(d * 220.0) - 0.5;
+          float pt = smoothstep(0.5, 0.0, length(f));
+          return s * pt;
+        }
+
         void main() {
           float h = vDir.y;
-          // Smoother zenith->horizon falloff; the slightly higher exponent keeps
-          // the upper sky a clean deep colour while the horizon band stays wide.
-          float t = pow(clamp(h, 0.0, 1.0), 0.42);
+          // Smooth zenith->horizon falloff; the exponent keeps the upper sky a clean
+          // deep colour while the horizon band stays wide and luminous.
+          float t = pow(clamp(h, 0.0, 1.0), 0.40);
           vec3 col = mix(horizonColor, topColor, t);
+          // Subtle extra deepening at the very top for more vertical depth.
+          col = mix(col, topColor * 0.82, smoothstep(0.55, 1.0, h) * 0.35);
           // Soft haze glow hugging the horizon for atmospheric depth.
-          float haze = exp(-abs(h) * 7.0) * 0.18;
+          float haze = exp(-abs(h) * 7.0) * 0.20;
           col += horizonColor * haze;
+
+          // In-shader sun/moon glow: a broad warm bloom around the light direction,
+          // strongest near the horizon, that bleeds the sun colour into the sky.
+          float sd = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+          float bloom = pow(sd, 6.0) * 0.55 + pow(sd, 80.0) * 0.9;
+          col += sunGlow * bloom * glowStrength;
+
+          // Procedural stars at night, above the horizon, fading into the haze band.
+          if (starOpacity > 0.001 && h > 0.0) {
+            float band = smoothstep(0.02, 0.30, h);
+            float twk = 0.7 + 0.3 * hash(floor(vDir * 220.0) + 1.0);
+            col += vec3(0.9, 0.93, 1.0) * stars(vDir) * band * twk * starOpacity;
+          }
+
           // slight darkening below the horizon
-          col = mix(col, horizonColor * 0.55, clamp(-h * 1.5, 0.0, 1.0));
+          col = mix(col, horizonColor * 0.52, clamp(-h * 1.6, 0.0, 1.0));
           // colour is consumed by the post pipeline (OutputPass) in linear space
           gl_FragColor = vec4(col, 1.0);
         }`,
@@ -117,13 +174,13 @@ export class Sky {
     // Sun + moon billboards. The sun gets a warm white core fading through a
     // golden corona; the moon a cool bright disc with a faint blue halo.
     this.sun = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: radialSprite('rgba(255,252,240,1)', 'rgba(255,234,180,0)', 'rgba(255,243,205,0.85)'),
+      map: radialSprite('rgba(255,253,244,1)', 'rgba(255,232,172,0)', 'rgba(255,244,206,0.9)'),
       transparent: true, depthWrite: false, depthTest: false, fog: false,
       blending: THREE.AdditiveBlending,
     }));
     this.sun.scale.setScalar(64);
     this.moon = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: radialSprite('rgba(235,240,252,1)', 'rgba(170,188,228,0)', 'rgba(205,216,242,0.8)'),
+      map: radialSprite('rgba(238,243,255,1)', 'rgba(166,186,230,0)', 'rgba(206,218,246,0.82)'),
       transparent: true, depthWrite: false, depthTest: false, fog: false,
     }));
     this.moon.scale.setScalar(42);
@@ -142,6 +199,7 @@ export class Sky {
     this._tmpTop = new THREE.Color();
     this._tmpHorizon = new THREE.Color();
     this._tmpLight = new THREE.Color();
+    this._tmpGlow = new THREE.Color();
 
     // Exposed for entity lighting / mob spawning / water.
     this.sunDir = new THREE.Vector3(0.5, 0.8, 0.3);
@@ -168,6 +226,7 @@ export class Sky {
     this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1];
     this.moon.material.color.setRGB(1, 1, 1); this.moon.scale.setScalar(42);
     this.sun.material.color.setRGB(1, 1, 1); this.sun.scale.setScalar(64); this.clouds.material.opacity = 0.8;
+    this.uniforms.glowStrength.value = 0.0; this.uniforms.starOpacity.value = 0.0;
   }
 
   // Toggle the bright battle-arena atmosphere.
@@ -204,15 +263,28 @@ export class Sky {
     let duskW = 1 - dayW - nightW;
     if (duskW < 0) duskW = 0;
     const sum = dayW + nightW + duskW || 1;
+    const wd = dayW / sum, wn = nightW / sum, wk = duskW / sum;
 
-    blend3(this._tmpTop, DAY[0], NIGHT[0], DUSK[0], dayW / sum, nightW / sum, duskW / sum);
-    blend3(this._tmpHorizon, DAY[1], NIGHT[1], DUSK[1], dayW / sum, nightW / sum, duskW / sum);
-    blend3(this._tmpLight, LIGHT_DAY, LIGHT_NIGHT, LIGHT_DUSK, dayW / sum, nightW / sum, duskW / sum);
+    blend3(this._tmpTop, DAY[0], NIGHT[0], DUSK[0], wd, wn, wk);
+    blend3(this._tmpHorizon, DAY[1], NIGHT[1], DUSK[1], wd, wn, wk);
+    blend3(this._tmpLight, LIGHT_DAY, LIGHT_NIGHT, LIGHT_DUSK, wd, wn, wk);
+    blend3(this._tmpGlow, SUNCOL_DAY, SUNCOL_NIGHT, SUNCOL_DUSK, wd, wn, wk);
 
     this.uniforms.topColor.value.copy(this._tmpTop);
     this.uniforms.horizonColor.value.copy(this._tmpHorizon);
     this.fog.color.copy(this._tmpHorizon);
     setWorldTint(this._tmpLight.r, this._tmpLight.g, this._tmpLight.b);
+
+    // Feed the in-shader sun glow + starfield. Glow swells warmly through dusk and
+    // dims at deep night (where it doubles as a faint moon halo); stars fade in only
+    // once the sun is well below the horizon.
+    this.uniforms.sunDir.value.copy(e >= -0.06 ? sunDir : sunDir.clone().negate());
+    this.uniforms.sunGlow.value.copy(this._tmpGlow);
+    const duskGlow = THREE.MathUtils.clamp(1 - Math.abs(e) * 2.6, 0, 1);
+    this.uniforms.glowStrength.value = e >= -0.06
+      ? 0.5 + 0.7 * duskGlow                 // daytime/dusk sun bloom
+      : 0.16 * smooth(-0.06, -0.5, e);       // faint moon halo at night
+    this.uniforms.starOpacity.value = smooth(-0.05, -0.22, e);
 
     // Drive water + entity lighting from the same solar state.
     this.sunDir.copy(sunDir);
@@ -231,9 +303,10 @@ export class Sky {
     // Golden-hour swell + warm tint as the sun nears the horizon; it returns to a
     // crisp white disc when high. `horizonNear` peaks at the horizon (e≈0).
     const horizonNear = THREE.MathUtils.clamp(1 - Math.abs(e) * 3.2, 0, 1);
-    this.sun.scale.setScalar(64 + 26 * horizonNear);
-    this.sun.material.color.setRGB(1.0, 1.0 - 0.18 * horizonNear, 1.0 - 0.42 * horizonNear);
+    this.sun.scale.setScalar(64 + 30 * horizonNear);
+    this.sun.material.color.setRGB(1.0, 1.0 - 0.20 * horizonNear, 1.0 - 0.46 * horizonNear);
     this.sun.material.opacity = smooth(-0.10, 0.06, e);
+    // The moon brightens to a cool disc and picks up a faint warm tint near setting.
     this.moon.material.color.setRGB(1, 1, 1);
     this.moon.material.opacity = smooth(-0.04, -0.14, e);
 
@@ -243,8 +316,8 @@ export class Sky {
     this.clouds.position.z = cam.z;
     this.clouds.material.map.offset.x += dt * 0.004;
     this.clouds.material.map.offset.y += dt * 0.0016;
-    this._tmpLight.r += 0.10 * horizonNear;
-    this._tmpLight.g += 0.02 * horizonNear;
+    this._tmpLight.r += 0.12 * horizonNear;
+    this._tmpLight.g += 0.03 * horizonNear;
     this.clouds.material.color.copy(this._tmpLight);
     this.clouds.material.opacity = 0.8 * THREE.MathUtils.clamp(e * 3 + 0.5, 0.22, 1);
 
@@ -264,6 +337,12 @@ export class Sky {
     this.fog.near = this._normalFog[0]; this.fog.far = this._normalFog[1] * 1.15;   // open, distant fog
     setWorldTint(S.tint.r * f, S.tint.g * f, S.tint.b * f);
 
+    // In-shader glow bloom around the themed sun; no stars in the bright arena sky.
+    this.uniforms.sunDir.value.copy(S.sun);
+    this.uniforms.sunGlow.value.copy(S.glow);
+    this.uniforms.glowStrength.value = S.glowI * f;
+    this.uniforms.starOpacity.value = 0.0;
+
     // Bright, even lighting so figures + the map pop — coloured per theme.
     this.isNight = false;
     this.sunDir.copy(S.sun);
@@ -275,7 +354,7 @@ export class Sky {
     // A themed sun; airy drifting clouds; no moon.
     const cam = this.camera.position;
     this.dome.position.copy(cam);
-    this.sun.material.color.setRGB(S.sunCol[0], S.sunCol[1], S.sunCol[2]); this.sun.scale.setScalar(72);
+    this.sun.material.color.setRGB(S.sunCol[0], S.sunCol[1], S.sunCol[2]); this.sun.scale.setScalar(74);
     this.sun.material.opacity = 1;
     this.sun.position.copy(cam).addScaledVector(S.sun, 480);
     this.moon.material.opacity = 0;
@@ -290,16 +369,19 @@ export class Sky {
   // A bleak overcast grey morning over the channel — flat diffuse light, smoke haze.
   _updateWar(dt) {
     this.uniforms.topColor.value.copy(WAR_TOP);
-    this.uniforms.horizonColor.value.copy(WAR_HORIZON);
     this.fog.color.copy(WAR_FOG);
     this.fog.near = 26; this.fog.far = 210;   // hazy, but open enough to read the fleet, bluff + capital ship
     setWorldTint(WAR_TINT.r, WAR_TINT.g, WAR_TINT.b);
 
     // Flat overcast daylight — soft directional, no harsh sun; a faint warm flicker
-    // from the fires on the beach.
+    // from the fires on the beach that stains the horizon and a dull ember glow band.
     this._flickT += dt;
     const ember = 1 + 0.05 * Math.sin(this._flickT * 3.3) + 0.03 * Math.sin(this._flickT * 11);
     this.uniforms.horizonColor.value.copy(WAR_HORIZON).multiplyScalar(ember);
+    this.uniforms.sunDir.value.set(0.2, 0.18, 0.96).normalize(); // low ember glow up the beach
+    this.uniforms.sunGlow.value.copy(WAR_GLOW);
+    this.uniforms.glowStrength.value = 0.28 * ember;
+    this.uniforms.starOpacity.value = 0.0;
     this.isNight = false;
     this.sunDir.set(0.25, 0.85, 0.35).normalize();
     this.dirColor.setRGB(0.74, 0.71, 0.68);
@@ -339,21 +421,29 @@ function cloudTexture() {
   g.clearRect(0, 0, 256, 256);
   // Build clouds in clumps: a few large soft cores with smaller puffs clustered
   // around them, so the layer reads as billowing masses rather than even noise.
-  for (let cl = 0; cl < 14; cl++) {
+  // Each clump gets a brighter crown puff to suggest a sunlit top edge.
+  for (let cl = 0; cl < 15; cl++) {
     const cx = Math.random() * 256, cy = Math.random() * 256;
-    const puffs = 5 + (Math.random() * 6 | 0);
+    const puffs = 6 + (Math.random() * 7 | 0);
     for (let i = 0; i < puffs; i++) {
-      const x = cx + (Math.random() - 0.5) * 70;
-      const y = cy + (Math.random() - 0.5) * 50;
-      const r = 14 + Math.random() * 40;
-      const a = 0.05 + Math.random() * 0.13;
+      const x = cx + (Math.random() - 0.5) * 74;
+      const y = cy + (Math.random() - 0.5) * 52;
+      const r = 13 + Math.random() * 42;
+      const a = 0.05 + Math.random() * 0.14;
       const grad = g.createRadialGradient(x, y, 0, x, y, r);
       grad.addColorStop(0, `rgba(255,255,255,${a})`);
-      grad.addColorStop(0.5, `rgba(255,255,255,${a * 0.55})`);
+      grad.addColorStop(0.45, `rgba(255,255,255,${(a * 0.6).toFixed(3)})`);
       grad.addColorStop(1, 'rgba(255,255,255,0)');
       g.fillStyle = grad;
       g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
     }
+    // A small bright crown puff toward the top of the clump for soft volume.
+    const r2 = 10 + Math.random() * 16;
+    const cgr = g.createRadialGradient(cx, cy - 14, 0, cx, cy - 14, r2);
+    cgr.addColorStop(0, 'rgba(255,255,255,0.16)');
+    cgr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = cgr;
+    g.beginPath(); g.arc(cx, cy - 14, r2, 0, Math.PI * 2); g.fill();
   }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;

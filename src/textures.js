@@ -61,10 +61,10 @@ const generators = {
   grass_top(x, y) {
     // Tileable clumpy noise gives a soft patchy lawn; a few crisp blades on top.
     const n = fbm2(x, y, 4, 8, 11);       // -0.75..0.75 seamless
-    let g = 150 + n * 34, r = 96 + n * 22, b = 58 + n * 12;
-    const mottle = vary(0, 6); r += mottle; g += mottle; b += mottle * 0.5;
-    if (rand() < 0.07) { g -= 30; r -= 20; b -= 8; }       // dark blade gaps
-    else if (rand() < 0.06) { g += 24; r += 14; b += 6; }  // sunlit tips
+    let g = 148 + n * 30, r = 92 + n * 18, b = 56 + n * 10;
+    const mottle = vary(0, 5); r += mottle; g += mottle; b += mottle * 0.5;
+    if (rand() < 0.06) { g -= 26; r -= 16; b -= 6; }       // dark blade gaps
+    else if (rand() < 0.05) { g += 22; r += 12; b += 5; }  // sunlit tips
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
   grass_side(x, y) {
@@ -73,9 +73,9 @@ const generators = {
     const blade = (x % 3 === 1) && rand() < 0.5 ? 1.6 : 0;
     if (y < edge + blade) {
       const n = fbm2(x, y, 4, 8, 11);
-      let g = 148 + n * 30, r = 94 + n * 18, b = 56 + n * 10;
-      if (y > edge - 1) { g -= 22; r -= 16; b -= 8; }       // shaded underside
-      if (rand() < 0.09) g -= 26;
+      let g = 146 + n * 28, r = 90 + n * 16, b = 54 + n * 9;
+      if (y > edge - 1) { g -= 26; r -= 18; b -= 9; }       // shaded underside lip
+      if (rand() < 0.09) g -= 24;
       return [clamp255(r), clamp255(g), clamp255(b), 255];
     }
     return generators.dirt(x, y);
@@ -83,40 +83,42 @@ const generators = {
   dirt(x, y) {
     // Lumpy soil: low-frequency brightness drift plus scattered pebbles/specks.
     const n = fbm2(x, y, 4, 8, 3);
-    let r = 122 + n * 22, g = 88 + n * 18, b = 58 + n * 12;
-    const s = vary(0, 7); r += s; g += s; b += s * 0.6;
-    if (rand() < 0.06) { r -= 30; g -= 26; b -= 18; }   // dark pebble
-    else if (rand() < 0.05) { r += 16; g += 12; b += 6; } // light grit
+    let r = 120 + n * 20, g = 86 + n * 16, b = 56 + n * 10;
+    const s = vary(0, 5); r += s; g += s; b += s * 0.6;
+    if (rand() < 0.05) { r -= 28; g -= 24; b -= 16; }   // dark pebble
+    else if (rand() < 0.04) { r += 14; g += 10; b += 5; } // light grit
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
   stone(x, y) {
     // Mottled granite with faint blue cast and a couple of hairline cracks.
     const n = fbm2(x, y, 4, 8, 7);
-    let v = 126 + n * 26 + vary(0, 5);
-    if (rand() < 0.05) v -= 26;
-    else if (rand() < 0.04) v += 18;
-    // Seamless thin cracks following a wrapped wave.
+    let v = 128 + n * 22 + vary(0, 4);
+    if (rand() < 0.04) v -= 22;
+    else if (rand() < 0.03) v += 16;
+    // Seamless thin cracks following a wrapped wave; soft halo for depth.
     const crackA = Math.abs(y - (8 + wsin(x, 1) * 3 + wsin(x, 3) * 1.5));
     const crackB = Math.abs(x - (5 + wsin(y, 1) * 4));
-    if (crackA < 0.6 || crackB < 0.55) v -= 30;
+    const crack = Math.min(crackA, crackB);
+    if (crack < 0.6) v -= 32;
+    else if (crack < 1.3) v -= 8;                          // soft crack shadow
     return [clamp255(v - 1), clamp255(v + 1), clamp255(v + 6), 255];
   },
   sand(x, y) {
     // Fine wind-rippled grains: gentle horizontal banding plus tight speckle.
-    const ripple = wsin(y * 1 + wsin(x, 1) * 1.5, 4) * 4;
-    const n = fbm2(x, y, 8, 16, 9) * 10;
-    let r = 223 + ripple + n, g = 208 + ripple + n, b = 150 + ripple * 0.6 + n;
-    const s = vary(0, 5); r += s; g += s; b += s;
-    if (rand() < 0.05) { r -= 16; g -= 16; b -= 14; }
+    const ripple = wsin(y * 1 + wsin(x, 1) * 1.5, 4) * 3.5;
+    const n = fbm2(x, y, 8, 16, 9) * 8;
+    let r = 222 + ripple + n, g = 206 + ripple + n, b = 148 + ripple * 0.6 + n;
+    const s = vary(0, 4); r += s; g += s; b += s;
+    if (rand() < 0.04) { r -= 14; g -= 14; b -= 12; }
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
   log_top(x, y) {
     // Concentric growth rings around an off-center pith, with grain jitter.
     const dx = x - 8, dy = y - 8;
     const d = Math.sqrt(dx * dx + dy * dy) + fbm2(x, y, 4, 8, 21) * 1.4;
-    const ring = wsin(d * 2.4, 1) * 0 + (Math.sin(d * 2.1) * 0.5 + 0.5);
-    let base = mix(94, 140, ring) + vary(0, 8);
-    if (d < 1.3) base -= 14;                       // dark pith center
+    const ring = Math.sin(d * 2.1) * 0.5 + 0.5;
+    let base = mix(96, 140, ring) + vary(0, 6);
+    if (d < 1.3) base -= 16;                       // dark pith center
     return [clamp255(base), clamp255(base * 0.72), clamp255(base * 0.45), 255];
   },
   log_side(x, y) {
@@ -132,10 +134,10 @@ const generators = {
   leaves(x, y) {
     // Clustered foliage: noise-driven leaf clumps with backlit gaps and highlights.
     const clump = tileNoise(x, y, 4, 31) + tileNoise(x, y, 8, 5) * 0.5;
-    let g = 108 + clump * 40, r = 54 + clump * 24, b = 40 + clump * 14;
-    g += vary(0, 14); r += vary(0, 8); b += vary(0, 6);
-    if (rand() < 0.14) { g -= 44; r -= 20; b -= 12; }   // shadowed gaps between leaves
-    else if (rand() < 0.09) { g += 28; r += 10; }       // sunlit leaf edge
+    let g = 110 + clump * 36, r = 56 + clump * 22, b = 42 + clump * 12;
+    g += vary(0, 10); r += vary(0, 6); b += vary(0, 4);
+    if (rand() < 0.12) { g -= 40; r -= 18; b -= 11; }   // shadowed gaps between leaves
+    else if (rand() < 0.08) { g += 26; r += 9; }        // sunlit leaf edge
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
   water(x, y) {
@@ -151,17 +153,17 @@ const generators = {
   snow(x, y) {
     // Soft drifts: very low contrast with a faint cool sparkle.
     const n = fbm2(x, y, 4, 8, 41);
-    let v = 240 + n * 10 + vary(0, 4);
-    if (rand() < 0.04) v += 12;            // glints
-    return [clamp255(v - 5), clamp255(v), clamp255(v + 7), 255];
+    let v = 242 + n * 7 + vary(0, 3);
+    if (rand() < 0.03) v += 10;            // glints
+    return [clamp255(v - 6), clamp255(v - 1), clamp255(v + 8), 255];
   },
   snow_side(x, y) {
     const edge = 5 + (wsin(x, 2) + wsin(x, 4) * 0.5 + 1.5) * 1.2;
     if (y < edge) {
       const n = fbm2(x, y, 4, 8, 41);
-      let v = 240 + n * 10 + vary(0, 4);
-      if (y > edge - 1.2) v -= 16;          // shaded snow lip
-      return [clamp255(v - 5), clamp255(v), clamp255(v + 7), 255];
+      let v = 242 + n * 7 + vary(0, 3);
+      if (y > edge - 1.2) v -= 18;          // shaded snow lip
+      return [clamp255(v - 6), clamp255(v - 1), clamp255(v + 8), 255];
     }
     return generators.dirt(x, y);
   },
@@ -200,12 +202,13 @@ const generators = {
     const inX = ((x + offset) % 8) % 4, inY = y % 4;
     const isMortar = inX === 0 || inY === 0 || ox % 8 === 0;
     const tone = hash2(cellX + ((cellY % 2) ? 9 : 0), cellY, 2);
-    let v = 118 + tone * 28;
+    let v = 120 + tone * 24;
     // Top-left lit, bottom-right shaded within each 4px stone.
-    v += (1.5 - inY) * 5 + (1.5 - inX) * 3;
-    v += vary(0, 6);
-    if (isMortar) v -= 48;
-    else if (inX === 3 || inY === 3) v -= 12;
+    v += (1.5 - inY) * 6 + (1.5 - inX) * 4;
+    v += vary(0, 4);
+    if (isMortar) v -= 52;
+    else if (inX === 3 || inY === 3) v -= 14;             // recessed edge
+    else if (inX === 1 && inY === 1) v += 10;             // lit crown
     return [clamp255(v - 1), clamp255(v + 1), clamp255(v + 5), 255];
   },
   plank(x, y) {
@@ -236,23 +239,41 @@ const generators = {
     return [210, 230, 240, 30];
   },
   ice(x, y) {
-    // Pale frozen lake: cool blue with faint cracks and an occasional glint.
+    // Pale frozen lake: smooth cool blue with a branching crack network,
+    // each fissure cut by a dark core and lifted by a bright frost lip.
     const n = fbm2(x, y, 4, 8, 53);
-    let v = 214 + n * 14 + vary(0, 4);
-    let r = v - 20, g = v - 4, b = v + 12;
-    const crack = tileNoise(x, y, 6, 23);
-    if (crack > 0.74) { r -= 34; g -= 24; b -= 8; }    // crack vein
-    if (rand() < 0.03) { r += 16; g += 16; b += 12; }  // sparkle
+    let v = 216 + n * 10 + vary(0, 3);
+    let r = v - 22, g = v - 6, b = v + 14;             // cool blue body
+    // Distance to the nearest seamless crack ridge (two crossing fields).
+    const cr = Math.abs(fbm2(x, y, 4, 8, 23)) + Math.abs(fbm2(y, x, 4, 8, 91));
+    if (cr < 0.10) { r -= 56; g -= 42; b -= 14; }       // dark crack core
+    else if (cr < 0.20) { r += 12; g += 14; b += 16; }  // bright frost lip beside it
+    // Gentle diagonal sheen for a glassy frozen look (seamless via mod 16).
+    const sheen = (x + y) % 16;
+    if (sheen < 2) { r += 8; g += 10; b += 12; }
+    if (rand() < 0.025) { r += 18; g += 18; b += 14; }  // sparkle glint
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
   lava(x, y) {
-    // Molten rock: glowing orange channels between dark cooled crust.
+    // Molten rock: incandescent orange channels webbing through dark cooled
+    // crust. Crust plates are dim and grey-brown; the molten cracks ramp from
+    // deep red up to a white-hot core for a believable glow.
     const flow = fbm2(x, y * 0.6, 4, 8, 77);
     const crust = tileNoise(x, y, 5, 13);
     let r, g, b;
-    if (crust > 0.6) { const c = 36 + flow * 34; r = c + 26; g = c * 0.5; b = c * 0.3; }   // crust
-    else { r = 232 + flow * 23; g = 86 + flow * 86; b = 18 + flow * 22; }                   // molten
-    if (rand() < 0.04) { r = 255; g = 212; b = 96; }   // bright spark
+    if (crust > 0.58) {
+      // Cooled crust plate, slightly warm and unevenly lit.
+      const c = 40 + flow * 24 + crust * 22;
+      r = c + 18; g = c * 0.62; b = c * 0.42;
+      if (crust > 0.84) { r += 14; g += 8; b += 4; }    // raised plate highlight
+    } else {
+      // Molten channel: brighter toward the channel center (low crust value).
+      const heat = 1 - crust / 0.58;                    // 0 at edge .. 1 at core
+      r = mix(196, 255, heat) + flow * 14;
+      g = mix(58, 188, heat) + flow * 36;
+      b = mix(12, 48, heat) + flow * 14;
+    }
+    if (crust < 0.18 && rand() < 0.10) { r = 255; g = 226; b = 132; } // bright spark in core
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
   bedrock(x, y) {
@@ -268,12 +289,12 @@ const generators = {
   gravel(x, y) {
     // Loose pebble bed: noise picks pebble tone, dark crevices between stones.
     const peb = tileNoise(x, y, 8, 61);
-    let v = mix(112, 156, peb) + vary(0, 8);
+    let v = mix(114, 156, peb) + vary(0, 6);
     // Crevice shadow where two pebble cells meet.
     const edge = tileNoise(x + 1, y, 8, 61) + tileNoise(x, y + 1, 8, 61);
-    if (Math.abs(edge - peb * 2) > 0.42) v -= 26;
+    if (Math.abs(edge - peb * 2) > 0.42) v -= 28;
     let r = v, g = v - 5, b = v - 12;
-    if (rand() < 0.08) { r -= 22; g -= 20; b -= 18; }
+    if (rand() < 0.06) { r -= 20; g -= 18; b -= 16; }
     return [clamp255(r), clamp255(g), clamp255(b), 255];
   },
   glowstone(x, y) {
