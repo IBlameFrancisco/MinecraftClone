@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows. A tight,
@@ -1314,8 +1314,68 @@ function buildChakraOrb(g, P, opts = {}) {
 }
 
 // ---------------- First-person viewmodels ----------------
+// ---------------- Stands (JoJo) ----------------
+// A manifested spirit that floats at the user's side: a broad-shouldered humanoid
+// with pivoted arms (for the punch barrage), glowing eyes and a ghostly aura. The
+// avatar self-animates via g.userData.anim(t, attack01, blockK) so main only feeds
+// it state (idle bob / barrage / deflect flash).
+export function makeStandAvatar(meta) {
+  const color = meta.color ?? 0x7d5fff, accent = meta.accent ?? 0x35e6e0;
+  const g = new THREE.Group();
+  const mat = (c, o = 0.96) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, fog: false });
+  const box = (w, h, d, c, x, y, z, parent = g) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(c)); m.position.set(x, y, z); parent.add(m); return m; };
+  // Torso (broad chest tapering to the waist), built around shoulder height ~1.4.
+  const torso = new THREE.Group(); g.add(torso);
+  box(0.62, 0.34, 0.30, color, 0, 1.42, 0, torso);                 // chest
+  box(0.40, 0.30, 0.26, color, 0, 1.12, 0, torso);                 // abdomen
+  box(0.66, 0.12, 0.34, accent, 0, 1.58, 0, torso);                // shoulder yoke (accent)
+  // Head with a brow visor and glowing eyes.
+  const head = new THREE.Group(); head.position.set(0, 1.78, 0); torso.add(head);
+  box(0.26, 0.28, 0.26, color, 0, 0, 0, head);
+  box(0.28, 0.07, 0.04, accent, 0, 0.02, 0.13, head);              // visor
+  const eyeMat = new THREE.SpriteMaterial({ map: GLOW_TEX, color: accent, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  const eyes = new THREE.Sprite(eyeMat); eyes.scale.setScalar(0.34); eyes.position.set(0, 0.02, 0.16); head.add(eyes);
+  // Arms: shoulder-pivoted groups so they can throw rapid forward punches. Local -Y
+  // hangs the arm down; punching swings it to point forward (+Z).
+  const mkArm = (side) => {
+    const piv = new THREE.Group(); piv.position.set(side * 0.40, 1.54, 0); torso.add(piv);
+    box(0.16, 0.40, 0.16, color, 0, -0.22, 0, piv);                // upper+fore arm
+    const fist = box(0.20, 0.18, 0.20, accent, 0, -0.46, 0, piv);  // fist (accent)
+    return { piv, fist };
+  };
+  const lArm = mkArm(-1), rArm = mkArm(1);
+  // Legs trail down into the aura (it floats, so they taper off).
+  box(0.18, 0.42, 0.18, color, -0.14, 0.74, 0, torso);
+  box(0.18, 0.42, 0.18, color, 0.14, 0.74, 0, torso);
+  // Aura: a soft body glow + a brighter core behind the chest, lit under bloom.
+  const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color, transparent: true, opacity: 0.26, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  aura.scale.setScalar(1.85); aura.position.set(0, 1.3, -0.18); g.add(aura);
+  const flashSpr = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  flashSpr.scale.setScalar(2.6); flashSpr.position.set(0, 1.35, 0); g.add(flashSpr);
+  g.userData.anim = (t, attack01, blockK) => {
+    const bob = Math.sin(t * 2.4) * 0.04;
+    torso.position.y = bob; torso.rotation.x = attack01 * 0.18;     // lean into the barrage
+    // Idle: arms hang with a slight sway. Barrage: alternate fast forward jabs.
+    const sway = Math.sin(t * 2.0) * 0.12;
+    const jab = attack01 > 0 ? (0.5 + 0.5 * Math.sin(t * 34)) : 0;
+    const jab2 = attack01 > 0 ? (0.5 + 0.5 * Math.sin(t * 34 + Math.PI)) : 0;
+    lArm.piv.rotation.x = sway - attack01 * (0.4 + 1.7 * jab);
+    rArm.piv.rotation.x = -sway - attack01 * (0.4 + 1.7 * jab2);
+    const fl = Math.max(0, Math.min(1, blockK));
+    flashSpr.material.opacity = fl * 0.9;
+    flashSpr.scale.setScalar(2.2 + fl * 1.2);
+    aura.material.opacity = 0.20 + 0.08 * Math.sin(t * 4) + attack01 * 0.16 + fl * 0.35;
+    eyes.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 3)) + attack01 * 0.3;
+  };
+  g.userData.fists = [lArm.fist, rArm.fist];
+  return g;
+}
+
 export function makeViewModel(id) {
   const g = new THREE.Group();
+  // Stands aren't held — they manifest in the world (see makeStandAvatar), so the
+  // first-person hand stays empty.
+  if (id === STAR_PLATINUM || id === THE_WORLD) return g;
   const box = (w, h, d, c, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: c, fog: false })); m.position.set(x, y, z); g.add(m); return m; };
   if (id === HANDGUN) {
     box(0.11, 0.13, 0.5, 0x3a3f47, 0, 0, -0.2);          // slide

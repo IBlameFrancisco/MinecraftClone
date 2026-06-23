@@ -39,8 +39,14 @@ export const LASER_CANNON = 286;
 export const HOLLOW_PURPLE = 287;
 export const SHARINGAN = 288;
 export const CLEAVE = 289;
+export const STAR_PLATINUM = 290;
+export const THE_WORLD = 291;
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, PORTAL_GUN];
+// Stands (JoJo): equip one and a manifested spirit floats at your side — it auto-blocks
+// incoming attacks and barrages whatever enemy strays into its reach.
+export const STANDS = [STAR_PLATINUM, THE_WORLD];
+
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -108,6 +114,11 @@ export const ITEMS = {
   // the closer the target as the cut "adjusts" to point-blank range (Cleave). A fast
   // close/mid slasher: `arc` is the cone half-angle, `cleave` the point-blank bonus.
   [CLEAVE]: { name: 'Cleave & Dismantle', gun: { kind: 'cleave', rate: 0.42, damage: 15, range: 15, arc: 1.12, cleave: 17, knockback: 15, recoil: 0.03, color: 0xe0143c } },
+  // Stands manifest a spirit at your side. Passive while equipped: `block` is the
+  // fraction of an attacker's damage it deflects, and it auto-barrages the nearest
+  // enemy within `reach` for `attackDamage` every `attackRate`s. No gun in hand.
+  [STAR_PLATINUM]: { name: 'Star Platinum', gun: { kind: 'stand', block: 0.78, reach: 6.5, attackRate: 0.6, attackDamage: 13, knockback: 12, color: 0x7d5fff, accent: 0x35e6e0, callout: 'ORA ORA ORA!' } },
+  [THE_WORLD]:     { name: 'The World',     gun: { kind: 'stand', block: 0.72, reach: 6.0, attackRate: 0.5, attackDamage: 15, knockback: 14, color: 0xf4c542, accent: 0xff4d6a, callout: 'MUDA MUDA MUDA!' } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
@@ -404,6 +415,19 @@ function drawGun(ctx, id) {
     slash(13.5, 3, 2.5, 12.5, 6.5, 5, 3.0, 'rgba(140,4,18,0.7)');      // crossing slash (under)
     slash(13.5, 3, 2.5, 12.5, 6.5, 5, 1.6, '#ff3a5e');
     slash(13.5, 3, 2.5, 12.5, 6.5, 5, 0.6, '#fff2f4');
+  } else if (id === STAR_PLATINUM || id === THE_WORLD) {
+    // A menacing Stand bust: broad shoulders, a helmeted head, glowing eyes + aura.
+    const sp = id === STAR_PLATINUM;
+    const body = sp ? '#7d5fff' : '#f4c542', dark = sp ? '#4a32b0' : '#a87a18', eye = sp ? '#7af6f0' : '#ff5a74';
+    const halo = ctx.createRadialGradient(8, 8, 1, 8, 8, 8);             // aura
+    halo.addColorStop(0, sp ? 'rgba(150,120,255,0.55)' : 'rgba(255,210,80,0.55)'); halo.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(8, 8, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = dark; ctx.beginPath(); ctx.moveTo(1.5, 15); ctx.quadraticCurveTo(8, 8.5, 14.5, 15); ctx.lineTo(14.5, 16); ctx.lineTo(1.5, 16); ctx.closePath(); ctx.fill();  // shoulders
+    ctx.fillStyle = body; ctx.beginPath(); ctx.moveTo(2.5, 14.5); ctx.quadraticCurveTo(8, 9, 13.5, 14.5); ctx.lineTo(13.5, 16); ctx.lineTo(2.5, 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = body; ctx.beginPath(); ctx.arc(8, 6.5, 3.6, 0, Math.PI * 2); ctx.fill();   // head
+    ctx.fillStyle = dark; ctx.fillRect(4.6, 5.8, 6.8, 1.5);                                     // brow visor
+    ctx.fillStyle = eye; ctx.fillRect(5.4, 6.0, 1.8, 1.0); ctx.fillRect(8.8, 6.0, 1.8, 1.0);    // glowing eyes
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(5.6, 6.1, 0.7, 0.5); ctx.fillRect(9.0, 6.1, 0.7, 0.5);  // eye glints
   } else { // PORTAL_GUN
     gunBody(ctx, 2, 6, 9, 3.6, '#d6d6d6');
     gunBody(ctx, 3, 9.4, 3, 3.6, '#c4c4c4');     // grip
