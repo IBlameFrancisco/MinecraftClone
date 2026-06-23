@@ -13,10 +13,13 @@ function softGlowTexture() {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
   const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  // A tighter, hotter pinhole core feeding a longer, smoother skirt — punchier under
+  // bloom while still falling to perfect black at the edge (no hard sprite seam).
   grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.18, 'rgba(255,255,255,0.92)');
-  grad.addColorStop(0.45, 'rgba(255,255,255,0.42)');
-  grad.addColorStop(0.75, 'rgba(255,255,255,0.10)');
+  grad.addColorStop(0.10, 'rgba(255,255,255,0.96)');
+  grad.addColorStop(0.26, 'rgba(255,255,255,0.62)');
+  grad.addColorStop(0.50, 'rgba(255,255,255,0.26)');
+  grad.addColorStop(0.78, 'rgba(255,255,255,0.07)');
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
@@ -32,9 +35,11 @@ function ghostBurst(group, pos, color = 0xffd27a) {
   const tick = () => {
     const k = (performance.now() - t0) / 350;
     if (k >= 1) { group.remove(s); s.material.dispose(); return; }
-    const ease = 1 - (1 - k) * (1 - k);                 // ease-out expansion
-    s.scale.setScalar(0.5 + ease * 2.6); s.material.opacity = (1 - k) * (1 - k);
-    s.material.rotation += 0.12;
+    const ease = 1 - Math.pow(1 - k, 3);                // ease-out-cubic expansion
+    s.scale.setScalar(0.45 + ease * 2.8);
+    // A hot snap-in flash that fades fast, leaving a brief lingering glow.
+    s.material.opacity = (1 - k) * (1 - k) * (k < 0.12 ? 1 + (0.12 - k) * 6 : 1);
+    s.material.rotation += 0.14;
     requestAnimationFrame(tick);
   };
   tick();
@@ -61,28 +66,33 @@ export class Tracers {
     g.quaternion.copy(q);
     g.renderOrder = 998;
     this.group.add(g);
-    // A travelling spark at the leading edge sells the "bullet".
+    // A travelling spark at the leading edge sells the "bullet": a white-hot pinpoint
+    // wrapped in a coloured flare, so the impact end reads brightest.
     const spark = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    spark.scale.setScalar(0.55); spark.position.copy(end);
-    this.group.add(spark);
-    this.list.push({ g, core, glow, spark, start: start.clone(), end: end.clone(), life: 0.16, max: 0.16 });
+    spark.scale.setScalar(0.6); spark.position.copy(end);
+    const hot = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    hot.scale.setScalar(0.3); hot.position.copy(end);
+    this.group.add(spark, hot);
+    this.list.push({ g, core, glow, spark, hot, start: start.clone(), end: end.clone(), life: 0.17, max: 0.17 });
   }
   update(dt) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const t = this.list[i]; t.life -= dt;
       if (t.life <= 0) {
-        this.group.remove(t.g); this.group.remove(t.spark);
+        this.group.remove(t.g); this.group.remove(t.spark); this.group.remove(t.hot);
         t.g.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
-        t.spark.material.dispose();
+        t.spark.material.dispose(); t.hot.material.dispose();
         this.list.splice(i, 1);
       } else {
         const k = t.life / t.max;
         const k2 = k * k;                         // sharper fall-off so streaks snap out
-        t.core.material.opacity = k;
-        t.glow.material.opacity = 0.5 * k2;
-        const s = 0.35 + 0.65 * k; t.g.scale.set(s, 1, s);   // thin out as it fades
-        t.spark.material.opacity = k;
-        t.spark.scale.setScalar(0.55 * k + 0.08);
+        t.core.material.opacity = k * Math.sqrt(k);              // core lingers a hair brighter
+        t.glow.material.opacity = 0.55 * k2;
+        const s = 0.28 + 0.72 * k; t.g.scale.set(s, 1, s);      // thin out as it fades
+        t.spark.material.opacity = k2;
+        t.spark.scale.setScalar(0.6 * k + 0.06);
+        t.hot.material.opacity = k * k2;                         // pinpoint snaps out fastest
+        t.hot.scale.setScalar(0.3 * k + 0.03);
       }
     }
   }
@@ -117,15 +127,19 @@ export class Plasmas {
       if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
       else {
         const k = tr.life / tr.max;
-        tr.s.material.opacity = 0.55 * k * k;            // fade fast so the trail stays a tight wake
-        tr.s.scale.setScalar(0.55 * k + 0.06);
-        tr.s.material.color.setRGB(0.27 * k, 0.91, 0.78 + 0.12 * (1 - k));  // cool toward white as it fades
+        tr.s.material.opacity = 0.6 * k * k;             // fade fast so the trail stays a tight wake
+        tr.s.scale.setScalar(0.5 * k + 0.04);            // shrink to a thin smoke-ghost
+        tr.s.material.color.setRGB(0.27 * k, 0.91, 0.78 + 0.18 * (1 - k));  // cool toward white as it fades
+        tr.s.material.rotation += dt * 1.5;
       }
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.t += dt;
-      p.halo.scale.setScalar(1.2 + Math.sin(p.t * 34) * 0.22);
+      // The halo throbs and shifts cyan->white as it pulses, so the bolt feels alive.
+      const tw = 0.5 + 0.5 * Math.sin(p.t * 34);
+      p.halo.scale.setScalar(1.18 + tw * 0.34);
+      p.halo.material.color.setRGB(0.32 + 0.55 * tw, 1, 0.85 + 0.13 * tw);
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
       if (portals) portals.redirect(p, dt);      // fly through portals
@@ -202,7 +216,11 @@ export class Rockets {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.t = (p.t || 0) + dt;
-      if (p.flame) p.flame.scale.setScalar(0.42 + Math.abs(Math.sin(p.t * 60)) * 0.22);
+      if (p.flame) {
+        const fl = Math.abs(Math.sin(p.t * 60));
+        p.flame.scale.setScalar(0.4 + fl * 0.26);
+        p.flame.material.color.setRGB(1, 0.62 + 0.3 * fl, 0.28 + 0.25 * fl);   // orange->yellow throb
+      }
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
       if (portals) portals.redirect(p, dt);      // fly through portals
@@ -304,10 +322,12 @@ function accretionTexture() {
     const t = Math.min(1, Math.max(0, (r - 0.28) / 0.72));   // hot -> cool
     const t2 = t * t;
     const idx = (y * S + x) * 4;
-    d[idx] = 255 * (1 - 0.18 * t);
-    d[idx + 1] = 230 * (1 - t2) + 60 * t2;
-    d[idx + 2] = 90 * (1 - t) + 255 * t;
-    d[idx + 3] = Math.min(255, a * 360);
+    // Hot white core -> molten gold -> magenta -> deep violet rim: a richer, more
+    // cinematic blackbody ramp than a flat warm->blue fade.
+    d[idx] = 255 * (1 - 0.10 * t);
+    d[idx + 1] = 235 * (1 - t) + 40 * (1 - t2) * t;
+    d[idx + 2] = 70 * (1 - t) + 90 * t * (1 - t) * 4 + 255 * t2;
+    d[idx + 3] = Math.min(255, a * 380);
   }
   g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
@@ -319,14 +339,19 @@ function einsteinRingTexture() {
   const cx = S / 2;
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const r = Math.hypot(x - cx, y - cx) / cx;
-    const a = Math.exp(-((r - 0.84) * (r - 0.84)) / 0.004);   // sharp ring at r~0.84
+    // A keen lensed photon ring with a soft outward bloom skirt — bright and thin
+    // on the inside, feathering out so it glows rather than reading as a hard line.
+    const a = Math.exp(-((r - 0.84) * (r - 0.84)) / 0.0026)
+            + 0.4 * Math.exp(-((r - 0.86) * (r - 0.86)) / 0.02);
     const idx = (y * S + x) * 4;
-    d[idx] = 255; d[idx + 1] = 226; d[idx + 2] = 180; d[idx + 3] = Math.min(255, a * 255);
+    d[idx] = 255; d[idx + 1] = 230; d[idx + 2] = 188; d[idx + 3] = Math.min(255, a * 255);
   }
   g.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
 }
 function easeOutBack(x) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); }
+function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+const _ARC_COOL = new THREE.Color(0.74, 0.55, 1);   // cool violet the lightning arcs decay toward
 
 // Lobs a singularity that flies until it hits a block / enemy / its range, then
 // anchors and runs an open -> hold -> collapse lifecycle. Damage + the gravity
@@ -431,8 +456,14 @@ export class BlackHoles {
       else if (h.phase === 'hold') { feed = Math.min(1, h.t / Math.max(0.5, gun.duration - 0.5)); s = 1 + 0.04 * Math.sin(h.t * 8); if (h.t >= gun.duration - 0.5) { h.phase = 'collapse'; h.c = 0; } }
       else { feed = 1; h.c += dt; const k = Math.min(1, h.c / 0.5); s = (1 - k) * (1 - k) * (1 + 0.6 * Math.sin(k * 30));
         // Supernova flash: a brilliant burst that blooms as the orb implodes to a point.
-        h.flash.visible = true; h.flash.scale.setScalar(3 + k * 30); h.flash.material.opacity = Math.sin(k * Math.PI) * 0.95;
-        h.flash.material.rotation += dt * 4;
+        // A sharp white detonation snap (front-loaded) over a longer blooming shell,
+        // shifting white -> hot violet as it expands, for a meatier collapse.
+        h.flash.visible = true;
+        h.flash.scale.setScalar(2 + easeOutCubic(k) * 34);
+        const snap = Math.max(0, 1 - k * 5);                              // hard initial spike
+        h.flash.material.opacity = Math.min(1, Math.sin(k * Math.PI) * 0.9 + snap * 0.9);
+        h.flash.material.color.setRGB(1, 0.82 + 0.18 * (1 - k), 0.7 + 0.3 * (1 - k));
+        h.flash.material.rotation += dt * 5;
         if (h.c >= 0.5) { if (!h.ghost && hooks.onCollapse) hooks.onCollapse(h.pos.clone(), gun); this._dispose(h); this.list.splice(i, 1); continue; } }
       h.g.scale.setScalar(Math.max(0.001, s));
       h.core.scale.setScalar(1 + 0.45 * feed);                        // event horizon grows as it feeds
@@ -452,6 +483,10 @@ export class BlackHoles {
       const jflk = 0.5 + 0.5 * feed + 0.12 * Math.sin(h.t * 22);
       h.jetT.children[0].material.opacity = h.jetB.children[0].material.opacity = 0.4 * jflk;
       h.jetT.children[1].material.opacity = h.jetB.children[1].material.opacity = 0.7 * jflk;
+      // Pulsing knots blasting up the jet tips — relativistic shock fronts.
+      const tipS = 2.2 + 0.9 * feed + 0.5 * Math.abs(Math.sin(h.t * 9));
+      h.jetT.children[2].scale.setScalar(tipS); h.jetB.children[2].scale.setScalar(tipS);
+      h.jetT.children[2].material.opacity = h.jetB.children[2].material.opacity = 0.5 + 0.5 * feed;
       // Lightning arcs: re-strike on a flicker timer, fading fast between strikes.
       for (const a of h.arcs) {
         a.t -= dt;
@@ -468,7 +503,10 @@ export class BlackHoles {
           }
           a.ln.geometry.attributes.position.needsUpdate = true;
           a.ln.material.opacity = (0.5 + 0.5 * feed) * (0.6 + Math.random() * 0.4);
-        } else a.ln.material.opacity *= Math.pow(0.015, dt);   // fast decay between strikes
+          // Fresh strikes flash white-hot, decaying toward cool violet as they fade.
+          a.ln.material.color.setRGB(0.95, 0.85 + 0.1 * Math.random(), 1);
+        } else { a.ln.material.opacity *= Math.pow(0.015, dt);   // fast decay between strikes
+          a.ln.material.color.lerp(_ARC_COOL, Math.min(1, dt * 14)); }
       }
       if (h.t < 0.6 && h.phase !== 'collapse') { const k = Math.min(1, h.t / 0.55); h.shock.scale.setScalar(2 + k * 13); h.shock.material.opacity = (1 - k) * 0.7; }
       else h.shock.material.opacity = 0;
@@ -478,9 +516,10 @@ export class BlackHoles {
         if (p.rad < 0.25) { p.rad = 2.4 + Math.random() * 2.4; p.y = (Math.random() - 0.5) * 1.6; }
         p.s.position.set(Math.cos(p.ang) * p.rad, p.y * Math.min(1, p.rad / 1.6), Math.sin(p.ang) * p.rad);
         const cl = Math.min(1, p.rad / 4);                                // hot (white) near core -> cool (violet) at rim
-        p.s.material.color.setRGB(1, 0.4 + 0.5 * cl, 0.28 + 0.62 * cl);
-        p.s.scale.setScalar(0.18 + (1 - cl) * 0.5);                       // brighter + larger as they fall in
-        p.s.material.opacity = 0.55 + 0.35 * (1 - cl);
+        const hot = (1 - cl) * (1 - cl);                                  // bias the heat toward the very core
+        p.s.material.color.setRGB(1, 0.35 + 0.55 * cl, 0.2 + 0.7 * cl);
+        p.s.scale.setScalar(0.16 + hot * 0.6);                            // brighter + larger as they fall in
+        p.s.material.opacity = 0.5 + 0.45 * hot;
       }
       if (!h.ghost && hooks.onField) hooks.onField(h.pos, dt, gun, h.phase);
     }
@@ -495,10 +534,13 @@ function shurikenTexture() {
   for (let i = 0; i < 4; i++) {
     g.rotate(Math.PI / 2);
     const grad = g.createLinearGradient(0, 0, S * 0.5, 0);
-    grad.addColorStop(0, 'rgba(255,255,255,0.98)'); grad.addColorStop(0.5, 'rgba(170,225,255,0.9)'); grad.addColorStop(0.85, 'rgba(120,205,255,0.35)'); grad.addColorStop(1, 'rgba(110,200,255,0)');
+    grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(0.35, 'rgba(210,242,255,0.95)'); grad.addColorStop(0.65, 'rgba(150,220,255,0.7)'); grad.addColorStop(0.88, 'rgba(120,205,255,0.28)'); grad.addColorStop(1, 'rgba(110,200,255,0)');
     g.fillStyle = grad;
     // Swept, hooked blade with a keen trailing edge — reads as a fan blade in spin.
     g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(S * 0.28, -S * 0.2, S * 0.5, -S * 0.02); g.quadraticCurveTo(S * 0.32, S * 0.07, 0, 0); g.fill();
+    // A hot white leading edge running the blade's length keeps it razor-sharp in spin.
+    g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, 0); g.quadraticCurveTo(S * 0.28, -S * 0.2, S * 0.5, -S * 0.02); g.stroke();
   }
   const cg = g.createRadialGradient(0, 0, 0, 0, 0, S * 0.2); cg.addColorStop(0, '#fff'); cg.addColorStop(0.55, 'rgba(200,235,255,0.85)'); cg.addColorStop(1, 'rgba(140,210,255,0)');
   g.fillStyle = cg; g.beginPath(); g.arc(0, 0, S * 0.2, 0, Math.PI * 2); g.fill();
@@ -539,7 +581,7 @@ export class ChakraFx {
     g.add(core, glow);
     this.group.add(g);
     const speed = gun.speed;
-    this.proj.push({ g, pivot, spinner, pos: pos.clone(), vel: d.multiplyScalar(speed), gun, ownerId, onImpact, travelled: 0,
+    this.proj.push({ g, pivot, spinner, core, glow, pos: pos.clone(), vel: d.multiplyScalar(speed), gun, ownerId, onImpact, travelled: 0, t: 0,
       guided, turn: 3.6, gravity: 4, cruise: speed, maxSpeed: speed * 1.25 });
   }
 
@@ -577,7 +619,9 @@ export class ChakraFx {
     a.g.position.set(pos.x, pos.y, pos.z);
     const I = Math.min(1, intensity);
     a.ground.scale.setScalar((1.0 + 0.15 * Math.sin(a.t * 10)) * (0.7 + 0.5 * I));
-    a.ground.material.opacity = 0.3 + 0.5 * I; a.ground.rotation.z += dt * 2;
+    a.ground.material.opacity = (0.3 + 0.5 * I) * (0.92 + 0.08 * Math.sin(a.t * 16));
+    a.ground.material.color.setRGB(0.43 - 0.18 * I, 0.78, 1);   // cyan deepening toward white-blue at full charge
+    a.ground.rotation.z += dt * 2;
     for (const r of a.rings) {
       r.p += dt * (0.5 + 0.9 * I); if (r.p >= 1) r.p -= 1;
       r.mesh.position.y = r.p * 2.7;
@@ -697,14 +741,21 @@ export class ChakraFx {
         p.pivot.quaternion.setFromUnitVectors(this._UP, this._axle);
       }
       p.spinner.rotation.y -= dt * 34;                  // clockwise buzzsaw about the vertical axle
+      // The chakra core throbs and the wind-halo flickers, so the screaming saw feels charged.
+      p.t += dt;
+      const ch = 1 + 0.12 * Math.sin(p.t * 48);
+      p.core.scale.setScalar(ch);
+      p.glow.scale.setScalar(2.8 * (0.94 + 0.1 * Math.sin(p.t * 30)));
+      p.glow.material.opacity = 0.8 + 0.2 * Math.abs(Math.sin(p.t * 22));
     }
     for (let i = this.fx.length - 1; i >= 0; i--) {
       const f = this.fx[i]; f.t += dt; const k = Math.min(1, f.t / f.max);
       const ex = 1 - Math.pow(1 - Math.min(1, k * 1.7), 3);      // expand fast, ease out
       f.g.scale.setScalar(Math.max(0.01, f.radius * ex));
-      f.dome.material.opacity = 0.5 * (1 - k);
+      f.dome.material.opacity = 0.5 * (1 - k) * (1 - k);    // dome thins faster than it grows
       f.flash.material.opacity = Math.max(0, 1 - k * 3);
-      if (f.lines) f.lines.material.opacity = 0.9 * (1 - k * k);
+      f.flash.scale.setScalar(f.radius * (0.7 + ex * 0.5)); // the core flash blooms with the shell
+      if (f.lines) f.lines.material.opacity = 0.95 * (1 - k * k);
       f.g.rotation.y += dt * 2.2; f.g.rotation.x += dt * 1.4;
       if (f.t >= f.max) { this._dispose(this.group, f.g); this.fx.splice(i, 1); }
     }
@@ -714,12 +765,15 @@ export class ChakraFx {
       const pulse = 1 + 0.14 * Math.sin(gr.t * 55);
       gr.core.scale.setScalar(pulse);
       gr.shell.scale.setScalar(pulse * (1 + 0.18 * Math.sin(gr.t * 37)));
+      gr.glow.scale.setScalar(2.4 * gr.sc * (0.96 + 0.08 * Math.sin(gr.t * 28)));
       gr.glow.material.opacity = 0.55 + 0.35 * Math.abs(Math.sin(gr.t * 44));
       gr.g.position.addScaledVector(gr.dir, dt * 1.4);                  // bore forward into them
       for (const sp of gr.sparks) {                                    // sparks spiralling off the drill
         sp.ang += sp.spd * dt;
-        sp.s.position.set(Math.cos(sp.ang) * sp.rad, Math.sin(sp.ang) * sp.rad, -gr.t * 2.2);
-        sp.s.material.opacity = 0.85 * (1 - k);
+        const fly = sp.rad * (1 + gr.t * 1.6);                         // flung outward as they shear off
+        sp.s.position.set(Math.cos(sp.ang) * fly, Math.sin(sp.ang) * fly, -gr.t * 2.2);
+        sp.s.scale.setScalar(0.32 * gr.sc * (1 - 0.5 * k));            // shrink as they cool
+        sp.s.material.opacity = 0.9 * (1 - k) * (1 - k);
       }
       if (gr.t >= gr.dur) {                                            // final blast
         this.burst(gr.g.getWorldPosition(this._gw || (this._gw = new THREE.Vector3())).clone(), 1.5 * gr.sc, gr.color, false);
@@ -766,15 +820,19 @@ export class LaserBeam {
   update(dt) {
     if (!this.group.visible) return;
     this.t += dt;
-    const p = 1 + Math.sin(this.t * 55) * 0.22;
+    // Layered fast/slow ripples on the core so the beam crawls and crackles with energy.
+    const p = 1 + Math.sin(this.t * 55) * 0.18 + Math.sin(this.t * 113) * 0.07;
     this.core.scale.set(p, 1, p);
-    const gp = 1 + Math.sin(this.t * 33) * 0.3; this.glow.scale.set(gp, 1, gp);
-    this.outer.material.opacity = 0.14 + Math.abs(Math.sin(this.t * 20)) * 0.14;
-    this.outer.scale.set(1 + 0.08 * Math.sin(this.t * 12), 1, 1 + 0.08 * Math.sin(this.t * 12));
-    this.impact.scale.setScalar(1.4 + Math.sin(this.t * 46) * 0.4);
-    this.impact.material.rotation += dt * 4;          // shimmer at the burn point
-    this.flare.scale.setScalar(0.9 + Math.sin(this.t * 70) * 0.25);
-    this.flare.material.rotation -= dt * 6;
+    const gp = 1 + Math.sin(this.t * 33) * 0.28; this.glow.scale.set(gp, 1, gp);
+    this.glow.material.opacity = 0.62 + Math.abs(Math.sin(this.t * 41)) * 0.2;
+    const os = 1 + 0.1 * Math.sin(this.t * 12);
+    this.outer.material.opacity = 0.13 + Math.abs(Math.sin(this.t * 20)) * 0.16;
+    this.outer.scale.set(os, 1, os);
+    // The burn point roils — a wide flicker plus a fast shimmer ring.
+    this.impact.scale.setScalar(1.35 + Math.sin(this.t * 46) * 0.4 + Math.abs(Math.sin(this.t * 90)) * 0.2);
+    this.impact.material.rotation += dt * 5;           // shimmer at the burn point
+    this.flare.scale.setScalar(0.85 + Math.sin(this.t * 70) * 0.28);
+    this.flare.material.rotation -= dt * 7;
   }
 }
 
@@ -807,17 +865,19 @@ export class HollowPurple {
   update(dt) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const f = this.list[i]; f.t += dt; const k = Math.min(1, f.t / f.max), fade = 1 - k;
-      const punch = Math.min(1, f.t / 0.12);                    // snap to full width almost instantly
-      const grow = 0.3 + 0.7 * (1 - Math.pow(1 - punch, 3));
+      const fade2 = fade * fade;                                // beam holds bright then snaps out
+      const punch = Math.min(1, f.t / 0.1);                     // snap to full width almost instantly
+      const grow = 0.28 + 0.72 * easeOutBack(punch);           // slight overshoot on the clap
       f.beam.scale.set(grow, 1, grow);
-      f.core.material.opacity = fade; f.mid.material.opacity = 0.9 * fade; f.outer.material.opacity = 0.42 * fade;
+      f.core.material.opacity = Math.sqrt(fade); f.mid.material.opacity = 0.9 * fade; f.outer.material.opacity = 0.45 * fade2;
       // The red/blue fringes flicker against each other as the corridor erases.
-      f.red.material.opacity = (0.28 + 0.06 * Math.sin(f.t * 40)) * fade;
-      f.blue.material.opacity = (0.24 + 0.06 * Math.sin(f.t * 40 + 2)) * fade;
-      f.beam.rotation.y += dt * 4.5;
-      f.flash.material.opacity = Math.max(0, 1 - k * 2.2); f.flash.scale.setScalar(f.radius * (2.6 + k * 2.4));
-      f.shock.material.opacity = Math.max(0, (1 - k * 1.5) * 0.9); f.shock.scale.setScalar(f.radius * (1.2 + k * 8));
-      f.shock.material.rotation += dt * 2;
+      f.red.material.opacity = (0.3 + 0.08 * Math.sin(f.t * 44)) * fade;
+      f.blue.material.opacity = (0.26 + 0.08 * Math.sin(f.t * 44 + 2.1)) * fade;
+      f.beam.rotation.y += dt * 5;
+      // A hard white detonation flash that snaps out, leaving the purple shock to ripple.
+      f.flash.material.opacity = Math.max(0, 1 - k * 2.4); f.flash.scale.setScalar(f.radius * (2.4 + easeOutCubic(k) * 3.2));
+      f.shock.material.opacity = Math.max(0, (1 - k * 1.4) * 0.9); f.shock.scale.setScalar(f.radius * (1.0 + easeOutCubic(k) * 9));
+      f.shock.material.rotation += dt * 2.4;
       if (f.t >= f.max) { this._dispose(f.g); this.list.splice(i, 1); }
     }
   }
@@ -829,6 +889,10 @@ export class HollowPurple {
 function tomoeRingTexture() {
   const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d'); g.translate(S / 2, S / 2); g.lineCap = 'round';
+  // A soft blood-red iris wash under the rim so the eye reads as a glowing disc.
+  const iris = g.createRadialGradient(0, 0, S * 0.1, 0, 0, S * 0.4);
+  iris.addColorStop(0, 'rgba(180,12,20,0)'); iris.addColorStop(0.7, 'rgba(210,16,26,0.35)'); iris.addColorStop(1, 'rgba(120,4,10,0)');
+  g.fillStyle = iris; g.beginPath(); g.arc(0, 0, S * 0.4, 0, Math.PI * 2); g.fill();
   // Bright outer rim + a thin inner pupil ring for the Sharingan iris.
   g.strokeStyle = 'rgba(245,30,42,0.98)'; g.lineWidth = 8; g.beginPath(); g.arc(0, 0, S * 0.36, 0, Math.PI * 2); g.stroke();
   g.strokeStyle = 'rgba(18,2,4,0.98)'; g.lineWidth = 3; g.beginPath(); g.arc(0, 0, S * 0.13, 0, Math.PI * 2); g.stroke();
@@ -854,7 +918,7 @@ export class SharinganFx {
     this.ring.renderOrder = 1000;
     this.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff3040, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     this.group.add(this.beam, this.ring, this.flash);
-    this.group.visible = false; this.t = 0;
+    this.group.visible = false; this.t = 0; this._flashBase = 0.7;
     this._up = new THREE.Vector3(0, 1, 0); this._q = new THREE.Quaternion();
   }
   set(active, start, end, lock) {
@@ -865,13 +929,16 @@ export class SharinganFx {
     this.ring.position.copy(end); this.flash.position.copy(end);
     this.ring.material.color.setHex(lock ? 0xff0018 : 0xff2838);
     this.ring.scale.setScalar(lock ? 1.8 : 1.1);
-    this.flash.scale.setScalar(lock ? 1.2 : 0.7);
+    this._flashBase = lock ? 1.2 : 0.7;
+    this.flash.scale.setScalar(this._flashBase);
   }
   update(dt) {
     if (!this.group.visible) return; this.t += dt;
     this.ring.material.rotation += dt * 3.2;
-    this.beam.material.opacity = 0.35 + Math.abs(Math.sin(this.t * 24)) * 0.4;
+    // The tether crawls with a fast/slow ripple so the gaze line feels taut and alive.
+    this.beam.material.opacity = 0.32 + Math.abs(Math.sin(this.t * 24)) * 0.4 + 0.08 * Math.sin(this.t * 60);
     this.flash.material.opacity = 0.5 + 0.35 * Math.abs(Math.sin(this.t * 9));   // pulsing gaze glow
+    this.flash.scale.setScalar((this._flashBase || 0.7) * (0.85 + 0.15 * Math.sin(this.t * 9)));
   }
 }
 
@@ -906,7 +973,13 @@ export class Portals {
   }
   // Teleport any body (player / mob / bot) whose midsection enters a portal.
   update(dt, bodies) {
-    for (const m of this.meshes) if (m) m.rotation.z += dt * 1.5;
+    this._t = (this._t || 0) + dt;
+    for (const m of this.meshes) if (m) {
+      m.rotation.z += dt * 1.5;
+      // The inner swirl counter-rotates and breathes so the portal surface churns.
+      const sw = m.children[3];
+      if (sw) { sw.material.rotation -= dt * 2.4; sw.scale.setScalar(0.95 + 0.12 * Math.sin(this._t * 5)); sw.material.opacity = 0.45 + 0.18 * Math.sin(this._t * 5); }
+    }
     if (!this.slots[0] || !this.slots[1]) return;
     for (const body of bodies) {
       if (!body) continue;
@@ -968,21 +1041,28 @@ export class Portals {
 function flashTexture() {
   const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d'); const cx = S / 2;
-  // Radiating spikes give the flash a sharp, photographic star-burst...
+  // Radiating spikes give the flash a sharp, photographic star-burst — eight rays
+  // (four long, four short) so it reads as a fuller, punchier burst.
   g.translate(cx, cx);
-  g.strokeStyle = 'rgba(255,235,170,0.85)'; g.lineCap = 'round';
-  for (let i = 0; i < 6; i++) {
-    g.rotate(Math.PI / 3);
-    const len = i % 2 === 0 ? cx * 0.92 : cx * 0.6;
-    g.lineWidth = i % 2 === 0 ? 5 : 3;
+  g.lineCap = 'round';
+  for (let i = 0; i < 8; i++) {
+    g.rotate(Math.PI / 4);
+    const long = i % 2 === 0;
+    const len = long ? cx * 0.96 : cx * 0.55;
+    g.lineWidth = long ? 5 : 2.5;
+    const ray = g.createLinearGradient(0, 0, 0, -len);
+    ray.addColorStop(0, 'rgba(255,245,205,0.95)');
+    ray.addColorStop(1, 'rgba(255,210,120,0)');
+    g.strokeStyle = ray;
     g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -len); g.stroke();
   }
   g.setTransform(1, 0, 0, 1, 0, 0);
   // ...over a hot radial core.
   const grad = g.createRadialGradient(cx, cx, 0, cx, cx, cx);
-  grad.addColorStop(0, 'rgba(255,252,225,1)');
-  grad.addColorStop(0.28, 'rgba(255,210,110,0.85)');
-  grad.addColorStop(0.6, 'rgba(255,160,50,0.3)');
+  grad.addColorStop(0, 'rgba(255,255,240,1)');
+  grad.addColorStop(0.16, 'rgba(255,238,180,0.95)');
+  grad.addColorStop(0.34, 'rgba(255,200,95,0.7)');
+  grad.addColorStop(0.62, 'rgba(255,155,45,0.26)');
   grad.addColorStop(1, 'rgba(255,150,40,0)');
   g.fillStyle = grad; g.fillRect(0, 0, S, S);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
@@ -1009,8 +1089,9 @@ export class MuzzleFlash {
     if (this.life > 0) {
       this.life -= dt;
       const k = Math.max(0, this.life / this.max);
-      this.spr.material.opacity = k;
-      this.spr.scale.setScalar((this._base || 1) * (0.7 + 0.5 * k));
+      this.spr.material.opacity = k * k;                          // snap out hard for a crisp pop
+      this.spr.scale.setScalar((this._base || 1) * (0.62 + 0.55 * k));  // flares out as it fades
+      this.spr.material.rotation += dt * 6;                       // a touch of spin sells the burst
     }
   }
 }
@@ -1146,8 +1227,10 @@ function buildChakraOrb(g, P, opts = {}) {
       wi.spr.material.opacity = (0.12 + 0.8 * c) * Math.sin(p * Math.PI);
     }
 
-    halo.scale.setScalar((0.5 + 0.5 * c) * grow * 1.55);
-    halo.material.opacity = 0.13 + 0.3 * c;
+    // The halo breathes and brightens as the orb gathers, with a subtle flicker so
+    // the charging chakra never sits perfectly still.
+    halo.scale.setScalar((0.5 + 0.5 * c) * grow * 1.55 * (1 + 0.06 * Math.sin(t * 13)));
+    halo.material.opacity = (0.13 + 0.3 * c) * (0.9 + 0.1 * Math.sin(t * 17));
   };
 }
 
@@ -1269,9 +1352,14 @@ export function makeViewModel(id) {
     haze.scale.setScalar(0.5); haze.position.set(0, 0.0, -0.42); g.add(haze);
     g.userData.chakraAnim = (charge, dt, t) => {
       const c = Math.max(0, Math.min(1, charge)), conv = 0.1 * (1 - c);   // red+blue converge as it charges
-      red.position.x = conv; blue.position.x = -conv;
-      const s = 0.7 + 0.7 * c; red.scale.setScalar(s); blue.scale.setScalar(s);
-      haze.material.opacity = 0.2 + 0.6 * c; haze.scale.setScalar(0.4 + 0.8 * c);
+      // The two spheres orbit a touch and counter-throb as the clash builds tension.
+      const wob = 0.012 * (1 - c) * Math.sin(t * 9);
+      red.position.x = conv; red.position.y = wob; blue.position.x = -conv; blue.position.y = -wob;
+      const s = 0.7 + 0.7 * c, beat = 1 + 0.08 * c * Math.sin(t * 16);
+      red.scale.setScalar(s * beat); blue.scale.setScalar(s / beat);
+      // The cursed-energy haze flares brighter and shifts hotter toward the clap.
+      haze.material.opacity = (0.2 + 0.6 * c) * (0.9 + 0.1 * Math.sin(t * 12));
+      haze.scale.setScalar((0.4 + 0.8 * c) * (1 + 0.06 * Math.sin(t * 12)));
     };
   } else if (id === SHARINGAN) {
     // An open hand held up in a seal, a glowing red tomoe eye hovering in the palm.
@@ -1284,9 +1372,12 @@ export function makeViewModel(id) {
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff2838, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     halo.scale.setScalar(0.5); halo.position.set(0, 0.02, -0.43); g.add(halo);
     g.userData.chakraAnim = (charge, dt, t) => {
+      const c = Math.max(0, Math.min(1, charge));
       const p = 1 + Math.sin(t * 6) * 0.12; eye.scale.setScalar(p);
-      tomoe.material.rotation += dt * 2.4;
-      halo.material.opacity = 0.5 + 0.3 * Math.abs(Math.sin(t * 4));
+      tomoe.material.rotation += dt * (2.4 + 3 * c);                 // spins up as the gaze charges
+      tomoe.scale.setScalar(0.3 * (1 + 0.08 * Math.sin(t * 5)));
+      halo.material.opacity = (0.5 + 0.3 * Math.abs(Math.sin(t * 4))) * (0.8 + 0.6 * c);
+      halo.scale.setScalar(0.5 * (1 + 0.4 * c));                     // the gaze aura swells with charge
     };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xe2e2e6, 0, 0, -0.2);            // white chassis

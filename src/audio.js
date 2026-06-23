@@ -134,17 +134,21 @@ export class SFX {
 
   break() {
     if (!this.ctx) return;
-    this._noise(0.18, 1400, 1.0, 0.46, 'bandpass');   // crunch
-    this._noise(0.09, 3200, 0.6, 0.22, 'highpass');   // splintery top
-    this._tone(190, 80, 0.13, 0.18, 'square');         // body crack
-    this._thump(110, 55, 0.10, 0.14);                  // dull weight
+    this._noise(0.20, 1300, 1.1, 0.44, 'bandpass');   // crunch (slightly longer, fuller)
+    this._noise(0.11, 3400, 0.6, 0.20, 'highpass');   // splintery top
+    this._noise(0.05, 2200, 2.0, 0.16, 'bandpass');   // initial sharp crack
+    this._tone(200, 78, 0.13, 0.18, 'square');         // body crack
+    this._tone(140, 60, 0.09, 0.08, 'triangle');       // woody undertone
+    this._thump(110, 50, 0.12, 0.15);                  // dull weight
   }
 
   place() {
     if (!this.ctx) return;
-    this._noise(0.09, 700, 0.9, 0.30, 'lowpass');
-    this._tone(150, 210, 0.07, 0.15, 'triangle');      // satisfying upward set
-    this._thump(120, 70, 0.07, 0.12);
+    this._noise(0.09, 680, 0.9, 0.28, 'lowpass');      // settling tap
+    this._noise(0.03, 1800, 1.4, 0.12, 'bandpass');    // crisp contact tick
+    this._tone(150, 215, 0.08, 0.15, 'triangle');      // satisfying upward set
+    this._tone(300, 430, 0.05, 0.06, 'sine');          // bright confirm overtone
+    this._thump(120, 66, 0.08, 0.13);                  // soft seated weight
   }
 
   // Per-weapon gunshot. Each layers a noise transient + tonal body + short tail
@@ -153,59 +157,69 @@ export class SFX {
     if (!this.ctx) return;
     if (kind === 'sniper') {
       // Sharp supersonic crack, then a wide booming tail.
-      this._click(7000, 0.5, out);
-      this._noise(0.05, 6000, 0.5, 0.6, 'highpass', out);
+      this._click(7200, 0.5, out);
+      this._noise(0.05, 6200, 0.5, 0.58, 'highpass', out);
       this._noise(0.06, 2600, 0.6, 0.5, 'bandpass', out);    // mid body of the report
-      this._noise(0.34, 620, 0.9, 0.5, 'lowpass', out);       // boom tail
+      this._noise(0.34, 600, 0.9, 0.5, 'lowpass', out);       // boom tail
+      this._noise(0.20, 260, 0.5, 0.24, 'lowpass', out, 0.03);// distant slap-back rumble
       this._tone(300, 50, 0.26, 0.28, 'square', out);
-      this._thump(75, 38, 0.26, 0.26, out);                   // deep recoil thump
+      this._tone(180, 44, 0.22, 0.12, 'sawtooth', out);       // gritty mid harmonic
+      this._thump(75, 36, 0.28, 0.26, out);                   // deep recoil thump
     } else if (kind === 'shotgun') {
       // Boomy, wide, low — a big spread blast with a long decaying roar.
-      this._noise(0.06, 2600, 0.4, 0.6, 'lowpass', out);
-      this._noise(0.30, 820, 0.6, 0.55, 'lowpass', out);
-      this._noise(0.14, 420, 0.5, 0.4, 'lowpass', out);
-      this._tone(160, 46, 0.22, 0.26, 'square', out);
-      this._thump(62, 34, 0.30, 0.30, out);
+      this._noise(0.06, 2800, 0.4, 0.58, 'lowpass', out);
+      this._noise(0.32, 800, 0.6, 0.55, 'lowpass', out);
+      this._noise(0.16, 420, 0.5, 0.4, 'lowpass', out);
+      this._noise(0.04, 4200, 0.5, 0.22, 'highpass', out);    // shell spray top-end
+      this._tone(160, 44, 0.24, 0.26, 'square', out);
+      this._tone(220, 70, 0.10, 0.12, 'sawtooth', out);       // mid bark
+      this._thump(60, 32, 0.32, 0.30, out);
     } else if (kind === 'rail') {
       // Electric railgun zap — a charged sweep with a metallic resonant body.
-      this._tone(1700, 180, 0.24, 0.22, 'sawtooth', out);     // descending zap
+      this._tone(1700, 175, 0.26, 0.22, 'sawtooth', out);     // descending zap
       this._tone(2600, 900, 0.10, 0.12, 'square', out);       // bright spark
-      this._noise(0.10, 3200, 6.0, 0.18, 'bandpass', out);    // crackle
-      this._tone(95, 60, 0.18, 0.16, 'sine', out);            // power thump
+      this._tone(3400, 1500, 0.06, 0.07, 'sawtooth', out);    // hot leading edge
+      this._noise(0.12, 3200, 6.0, 0.18, 'bandpass', out);    // crackle
+      this._noise(0.18, 1400, 8.0, 0.08, 'bandpass', out);    // resonant metallic ring
+      this._tone(95, 58, 0.20, 0.16, 'sine', out);            // power thump
     } else if (kind === 'mg42') {
       // Heavy machine-gun chug — fat, percussive, mechanical.
       this._click(3000, 0.28, out);
-      this._noise(0.05, 1800, 0.7, 0.4, 'lowpass', out);
-      this._noise(0.12, 700, 0.7, 0.3, 'lowpass', out);
-      this._tone(280, 70, 0.08, 0.22, 'square', out);
-      this._thump(85, 44, 0.12, 0.22, out);                   // weighty bolt slam
+      this._noise(0.05, 1900, 0.7, 0.4, 'lowpass', out);
+      this._noise(0.13, 680, 0.7, 0.3, 'lowpass', out);
+      this._tone(280, 68, 0.09, 0.22, 'square', out);
+      this._tone(170, 50, 0.06, 0.10, 'sawtooth', out);       // mechanical grit
+      this._thump(82, 42, 0.13, 0.22, out);                   // weighty bolt slam
     } else if (kind === 'smg') {
       // Fast, light, snappy — bright crack with a small body.
-      this._click(4200, 0.26, out);
-      this._noise(0.035, 3600, 0.7, 0.36, 'highpass', out);
+      this._click(4400, 0.26, out);
+      this._noise(0.035, 3700, 0.7, 0.36, 'highpass', out);
       this._noise(0.07, 1500, 0.8, 0.24, 'lowpass', out);
-      this._tone(400, 130, 0.05, 0.17, 'square', out);
-      this._thump(95, 55, 0.06, 0.12, out);
+      this._tone(400, 128, 0.05, 0.17, 'square', out);
+      this._thump(95, 52, 0.07, 0.12, out);
     } else if (kind === 'assault' || kind === 'rifle') {
       // Assault rifle — punchy mid-weight crack with a tight tail.
-      this._click(4600, 0.3, out);
-      this._noise(0.045, 3400, 0.7, 0.42, 'highpass', out);
-      this._noise(0.11, 1300, 0.8, 0.3, 'lowpass', out);
-      this._tone(340, 100, 0.07, 0.2, 'square', out);
-      this._thump(88, 48, 0.09, 0.16, out);
+      this._click(4700, 0.3, out);
+      this._noise(0.045, 3500, 0.7, 0.42, 'highpass', out);
+      this._noise(0.12, 1250, 0.8, 0.3, 'lowpass', out);
+      this._tone(340, 98, 0.08, 0.2, 'square', out);
+      this._tone(560, 180, 0.04, 0.08, 'sawtooth', out);      // crisp leading snap
+      this._thump(86, 46, 0.10, 0.16, out);
     } else if (kind === 'plasma') {
       // Sci-fi plasma bolt (also see plasma()) — bright energetic pew.
-      this._tone(900, 200, 0.16, 0.18, 'sawtooth', out);
+      this._tone(900, 195, 0.17, 0.18, 'sawtooth', out);
       this._tone(1500, 520, 0.09, 0.1, 'square', out);
+      this._tone(2400, 1100, 0.05, 0.05, 'sine', out);        // ionised sparkle
       this._noise(0.10, 2600, 5.0, 0.12, 'bandpass', out);
-      this._thump(90, 60, 0.1, 0.1, out);
+      this._thump(90, 58, 0.11, 0.1, out);
     } else {
       // Default handgun — a clean, meaty pistol crack.
       this._click(4000, 0.3, out);
-      this._noise(0.04, 3400, 0.7, 0.42, 'highpass', out);    // snap
-      this._noise(0.10, 1200, 0.8, 0.3, 'lowpass', out);      // body
-      this._tone(380, 110, 0.06, 0.2, 'square', out);
-      this._thump(92, 50, 0.08, 0.16, out);                   // sub thump
+      this._noise(0.04, 3500, 0.7, 0.42, 'highpass', out);    // snap
+      this._noise(0.11, 1200, 0.8, 0.3, 'lowpass', out);      // body
+      this._tone(380, 108, 0.06, 0.2, 'square', out);
+      this._tone(620, 200, 0.035, 0.08, 'sawtooth', out);     // crisp report edge
+      this._thump(90, 48, 0.09, 0.16, out);                   // sub thump
     }
   }
   // Spatial gunshot at a world position (remote players / bots).
@@ -214,32 +228,37 @@ export class SFX {
   // Rocket / grenade explosion: a deep filtered boom with a long rumbling tail.
   explosion(out = null) {
     if (!this.ctx) return;
-    this._noise(0.07, 3000, 0.4, 0.55, 'lowpass', out);       // initial crack/debris
-    this._noise(0.55, 480, 0.6, 0.7, 'lowpass', out);         // main body roar
-    this._noise(0.40, 1600, 0.5, 0.32, 'bandpass', out);      // grit / shrapnel
-    this._tone(130, 34, 0.5, 0.3, 'square', out);             // mid punch
-    this._thump(70, 26, 0.6, 0.34, out);                      // deep sub boom
-    this._thump(45, 22, 0.7, 0.2, out, 0.02);                 // sustained rumble
+    this._noise(0.07, 3200, 0.4, 0.55, 'lowpass', out);       // initial crack/debris
+    this._noise(0.55, 470, 0.6, 0.7, 'lowpass', out);         // main body roar
+    this._noise(0.42, 1600, 0.5, 0.32, 'bandpass', out);      // grit / shrapnel
+    this._noise(0.30, 240, 0.5, 0.30, 'lowpass', out, 0.05);  // delayed billowing tail
+    this._tone(130, 32, 0.5, 0.3, 'square', out);             // mid punch
+    this._tone(200, 60, 0.18, 0.14, 'sawtooth', out);         // gritty fireball bark
+    this._thump(68, 24, 0.62, 0.34, out);                     // deep sub boom
+    this._thump(44, 20, 0.72, 0.2, out, 0.02);                // sustained rumble
   }
   explosionAt(x, y, z) { if (!this.ctx) return; const o = this._spatial(x, y, z); if (o) this.explosion(o); }
 
   // Player took damage — a short pained grunt.
   hurt() {
     if (!this.ctx) return;
-    this._tone(220, 85, 0.2, 0.22, 'sawtooth');
-    this._tone(150, 70, 0.16, 0.12, 'square');
-    this._noise(0.09, 800, 0.8, 0.16, 'lowpass');             // breath/impact
+    this._tone(230, 82, 0.22, 0.22, 'sawtooth');              // pained vocal drop
+    this._tone(150, 68, 0.16, 0.12, 'square');
+    this._tone(95, 60, 0.10, 0.08, 'sine');                   // gut-impact weight
+    this._noise(0.10, 760, 0.8, 0.16, 'lowpass');             // breath/impact
   }
   // Hit confirmation tick (brighter, sharper ding on a headshot).
   hitmark(head) {
     if (!this.ctx) return;
     if (head) {
       // Distinct crisp two-note headshot zing.
-      this._tone(1700, 2100, 0.05, 0.17, 'square');
-      this._tone(2300, 2600, 0.06, 0.1, 'triangle');
-      this._click(6000, 0.12);
+      this._tone(1700, 2150, 0.05, 0.17, 'square');
+      this._tone(2300, 2700, 0.06, 0.1, 'triangle');
+      this._tone(3100, 3500, 0.04, 0.05, 'sine');             // bright sparkle top
+      this._click(6200, 0.12);
     } else {
-      this._tone(1150, 1350, 0.045, 0.16, 'square');
+      this._tone(1150, 1380, 0.045, 0.16, 'square');
+      this._tone(1600, 1850, 0.035, 0.06, 'triangle');        // subtle confirm shimmer
       this._click(5000, 0.08);
     }
   }
@@ -247,77 +266,87 @@ export class SFX {
   announce(kind) {
     if (!this.ctx) return;
     if (kind === 'win') {
-      // Triumphant ascending fanfare.
-      this._tone(523, 523, 0.5, 0.18, 'triangle');
-      this._tone(659, 659, 0.5, 0.14, 'triangle');
-      this._tone(784, 988, 0.55, 0.14, 'sine');
-      this._tone(262, 262, 0.6, 0.1, 'sine');
+      // Triumphant ascending fanfare (major triad + octave for a fuller chord).
+      this._tone(523, 523, 0.5, 0.17, 'triangle');
+      this._tone(659, 659, 0.5, 0.13, 'triangle');
+      this._tone(784, 988, 0.55, 0.13, 'sine');
+      this._tone(1047, 1047, 0.5, 0.07, 'sine');              // shining octave on top
+      this._tone(262, 262, 0.6, 0.1, 'sine');                 // grounding root
     } else if (kind === 'multi') {
       // Aggressive bright stinger.
       this._tone(740, 1480, 0.16, 0.2, 'square');
       this._tone(560, 1120, 0.2, 0.14, 'sawtooth');
       this._tone(370, 740, 0.24, 0.1, 'triangle');
+      this._tone(185, 370, 0.22, 0.07, 'sine');               // sub reinforcement
       this._noise(0.08, 3000, 1.6, 0.08, 'bandpass');
     } else {
       // First blood / generic callout — a sharp descending zap.
-      this._tone(950, 480, 0.22, 0.2, 'sawtooth');
+      this._tone(950, 470, 0.22, 0.2, 'sawtooth');
       this._tone(1400, 700, 0.14, 0.1, 'square');
+      this._tone(475, 235, 0.18, 0.08, 'triangle');           // octave-below body
       this._noise(0.1, 2200, 1.4, 0.1, 'bandpass');
     }
   }
   plasma() {
     if (!this.ctx) return;
     // Bright sci-fi pew with a shimmering tail.
-    this._tone(820, 180, 0.18, 0.17, 'sawtooth');
+    this._tone(820, 175, 0.19, 0.17, 'sawtooth');
     this._tone(1400, 460, 0.1, 0.1, 'square');
-    this._noise(0.1, 2400, 4.0, 0.1, 'bandpass');
-    this._thump(95, 60, 0.1, 0.1);
+    this._tone(2300, 1000, 0.06, 0.05, 'sine');        // ionised sparkle edge
+    this._noise(0.11, 2400, 4.0, 0.1, 'bandpass');
+    this._thump(92, 56, 0.11, 0.1);
   }
   portal() {
     if (!this.ctx) return;
     // Warbling rising shimmer — also used as a pleasant pickup/teleport cue.
     this._tone(360, 960, 0.2, 0.16, 'sine');
     this._tone(540, 1320, 0.18, 0.1, 'triangle');
+    this._tone(720, 1760, 0.14, 0.05, 'sine');         // upper harmonic glint
     this._noise(0.16, 3200, 2.4, 0.06, 'highpass');
   }
   blackhole() {
     if (!this.ctx) return;
     // Ominous collapsing swell sucking inward.
-    this._tone(240, 34, 0.85, 0.22, 'sawtooth');     // deep descending swell
-    this._tone(170, 30, 0.7, 0.14, 'square');         // gritty harmonic
-    this._thump(120, 24, 1.0, 0.2);                   // sub rumble
-    this._noise(0.7, 360, 0.6, 0.13, 'lowpass');      // airy suck
-    this._noise(0.5, 1800, 3.0, 0.06, 'bandpass');    // swirling whine
+    this._tone(240, 32, 0.9, 0.22, 'sawtooth');      // deep descending swell
+    this._tone(170, 28, 0.7, 0.14, 'square');         // gritty harmonic
+    this._tone(360, 40, 0.55, 0.08, 'sawtooth');      // upper layer dragged down
+    this._thump(120, 22, 1.05, 0.2);                  // sub rumble
+    this._noise(0.75, 340, 0.6, 0.13, 'lowpass');     // airy suck
+    this._noise(0.55, 1800, 3.0, 0.06, 'bandpass');   // swirling whine
   }
   // Flash step — a sharp whoosh of displaced air as you blink across the field.
   flashStep() {
     if (!this.ctx) return;
-    this._tone(880, 240, 0.16, 0.12, 'sine');          // fast descending zip
-    this._noise(0.16, 2600, 1.4, 0.12, 'highpass');    // airy swish
-    this._noise(0.1, 700, 0.8, 0.07, 'bandpass');      // low whump body
+    this._tone(940, 220, 0.16, 0.12, 'sine');          // fast descending zip
+    this._noise(0.18, 2600, 1.4, 0.12, 'highpass');    // airy swish
+    this._noise(0.06, 4200, 1.0, 0.06, 'highpass');    // crisp leading sssh
+    this._noise(0.1, 680, 0.8, 0.07, 'bandpass');      // low whump body
   }
   rasengan() {
     if (!this.ctx) return;
     // Dense swirling grind of compressed chakra.
-    this._tone(460, 180, 0.26, 0.15, 'sine');         // swirling whoosh
-    this._tone(330, 150, 0.24, 0.1, 'triangle');      // counter-swirl
-    this._noise(0.24, 1600, 2.2, 0.13, 'bandpass');   // grinding hiss
-    this._noise(0.18, 600, 0.7, 0.08, 'lowpass');     // low body
+    this._tone(470, 180, 0.27, 0.15, 'sine');         // swirling whoosh
+    this._tone(330, 148, 0.24, 0.1, 'triangle');      // counter-swirl
+    this._tone(660, 300, 0.16, 0.05, 'sine');         // shimmering upper swirl
+    this._noise(0.25, 1600, 2.4, 0.13, 'bandpass');   // grinding hiss
+    this._noise(0.18, 580, 0.7, 0.08, 'lowpass');     // low body
   }
   rasenshuriken() {
     if (!this.ctx) return;
     // Screaming high-pitched whirr of countless chakra blades on the throw.
-    this._tone(760, 1900, 0.18, 0.14, 'sawtooth');
-    this._tone(1200, 2600, 0.12, 0.08, 'square');     // shrieking overtone
-    this._noise(0.16, 3600, 3.0, 0.09, 'highpass');   // bladed hiss
+    this._tone(760, 2000, 0.19, 0.14, 'sawtooth');
+    this._tone(1200, 2700, 0.12, 0.08, 'square');     // shrieking overtone
+    this._tone(500, 1500, 0.16, 0.06, 'sawtooth');    // dense lower whirr layer
+    this._noise(0.17, 3600, 3.2, 0.09, 'highpass');   // bladed hiss
     this._noise(0.1, 1800, 2.0, 0.06, 'bandpass');
   }
   // Chakra gathering — a rising swirling hum that ramps up while the orb forms.
   chakraCharge() {
     if (!this.ctx) return;
-    this._tone(180, 560, 0.55, 0.12, 'sine');          // rising swell as chakra gathers
-    this._tone(120, 280, 0.55, 0.08, 'triangle');      // sub support, rising
-    this._noise(0.5, 1000, 2.0, 0.07, 'bandpass');     // grinding spin building
+    this._tone(180, 580, 0.58, 0.12, 'sine');          // rising swell as chakra gathers
+    this._tone(120, 290, 0.58, 0.08, 'triangle');      // sub support, rising
+    this._tone(270, 860, 0.5, 0.05, 'sine');           // shimmering upper sweep
+    this._noise(0.52, 1000, 2.2, 0.07, 'bandpass');    // grinding spin building
   }
   // Chakra fully formed — a bright shimmering ping at peak charge.
   chakraReady() {
@@ -325,6 +354,7 @@ export class SFX {
     this._tone(880, 1320, 0.2, 0.14, 'triangle');
     this._tone(1320, 1760, 0.18, 0.08, 'sine');
     this._tone(1760, 2640, 0.14, 0.05, 'sine');        // sparkle top
+    this._tone(2640, 3520, 0.1, 0.03, 'sine');         // airy crystalline glint
     this._noise(0.14, 4400, 3.0, 0.06, 'highpass');    // crystalline shimmer
   }
 
@@ -381,10 +411,11 @@ export class SFX {
   // Power-up shockwave when the chakra peaks.
   chakraBurst() {
     if (!this.ctx) return;
-    this._tone(720, 200, 0.32, 0.18, 'sawtooth');
-    this._tone(140, 44, 0.4, 0.24, 'square');
-    this._noise(0.42, 1300, 0.8, 0.26, 'lowpass');
-    this._thump(80, 36, 0.5, 0.3);                     // deep concussive boom
+    this._tone(720, 195, 0.34, 0.18, 'sawtooth');
+    this._tone(140, 42, 0.4, 0.24, 'square');
+    this._tone(1080, 320, 0.16, 0.07, 'sine');         // bright shockfront flash
+    this._noise(0.44, 1300, 0.8, 0.26, 'lowpass');
+    this._thump(78, 34, 0.52, 0.3);                    // deep concussive boom
   }
 
   // Surface-dependent footstep. `mat` is a material category.
@@ -409,8 +440,9 @@ export class SFX {
     this.stepFlip ^= 1;
     const pitch = (0.85 + Math.random() * 0.3) * (this.stepFlip ? 1.04 : 0.96);
     this._noise(m.dur, m.freq * pitch, m.q, m.gain, m.type);
-    if (mat === 'wood')   this._tone(165, 95, 0.06, 0.06, 'sine');  // hollow thud
+    if (mat === 'wood')   this._tone(165 * pitch, 92, 0.06, 0.06, 'sine');  // hollow thud
     if (mat === 'stone' || mat === 'glass') this._click(m.freq * 1.4, m.gain * 0.4); // hard scuff
-    if (mat === 'grass' || mat === 'dirt' || mat === 'wool') this._thump(90, 60, 0.05, m.gain * 0.5); // soft pad
+    if (mat === 'gravel' || mat === 'sand') this._noise(0.03, m.freq * 1.8, m.q, m.gain * 0.35, m.type); // loose grit
+    if (mat === 'grass' || mat === 'dirt' || mat === 'wool') this._thump(88, 58, 0.05, m.gain * 0.5); // soft pad
   }
 }

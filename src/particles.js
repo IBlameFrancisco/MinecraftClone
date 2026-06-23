@@ -76,6 +76,8 @@ export class Particles {
     this.baseColor = new Float32Array(MAX * 3);
     this.baseSize = new Float32Array(MAX); // per-particle base size for fade scaling
     this.drag = new Float32Array(MAX);     // per-particle air-drag coefficient
+    this.gravity = new Float32Array(MAX);  // per-particle gravity (lighter bits fall slower)
+    this.spin = new Float32Array(MAX);     // per-particle ember-cool / twinkle phase
     this.count = 0; // high-water mark of active slots
     this.cursor = 0;
   }
@@ -83,6 +85,13 @@ export class Particles {
   burst(x, y, z, rgb, n = 16) {
     // Normalise incoming colour once (callers pass [r,g,b] in 0..255).
     const cr = rgb[0] / 255, cg = rgb[1] / 255, cb = rgb[2] / 255;
+
+    // Warm, bright colours (sparks, fire, explosion embers) read as glowing bits
+    // that should cool toward orange/red as they die. Detect that once per burst
+    // from the source tint: a warm hue with real luminance. Cool/blood/smoke
+    // colours skip the cool-down and just fade, so this stays a per-call flag
+    // rather than a per-particle branch.
+    const isEmber = cr > 0.55 && cr >= cg && cg >= cb * 0.85 && (cr + cg + cb) > 1.1;
 
     for (let i = 0; i < n; i++) {
       const idx = this.cursor;
@@ -97,15 +106,35 @@ export class Particles {
       this.positions[p3 + 2] = z + (Math.random() - 0.5) * 0.6;
 
       // Velocity: outward scatter on the horizontal plane with a strong upward
-      // pop, biased so most debris arcs up-and-out for a satisfying spray.
+      // pop, biased so most debris arcs up-and-out for a satisfying spray. A
+      // squared radial term concentrates most bits near the core while letting a
+      // few fly far — that long tail is what reads as "juicy" rather than a tidy
+      // ring. Vertical pop is similarly skewed so a handful really launch.
       const ang = Math.random() * Math.PI * 2;
-      const spread = 1.4 + Math.random() * 2.4;
+      const rr = Math.random();
+      const spread = 1.1 + rr * rr * 4.0;
+      const up = Math.random();
       this.vel[p3] = Math.cos(ang) * spread;
-      this.vel[p3 + 1] = Math.random() * 3.6 + 1.0;
+      this.vel[p3 + 1] = up * up * 4.6 + 0.8;
       this.vel[p3 + 2] = Math.sin(ang) * spread;
 
-      // Per-particle air drag: lighter bits (smaller) float and slow more.
-      this.drag[idx] = 1.0 + Math.random() * 1.6;
+      // Per-particle size variety; stored as a base so we can fade it over life.
+      // Skewed small so most bits are fine grit with the occasional fat chunk.
+      const sr = Math.random();
+      const bs = 0.07 + sr * sr * 0.16;
+      this.baseSize[idx] = bs;
+      this.sizes[idx] = bs;
+
+      // Per-particle air drag and gravity tied to mass (size): small light grit
+      // floats and slows fast; heavy chunks punch through and fall harder. This
+      // mass-linked split is what makes debris separate into a spray over time.
+      const light = 1.0 - sr; // 1 for the smallest bits, 0 for the fattest
+      this.drag[idx] = 1.0 + light * 2.4;
+      this.gravity[idx] = 8.5 + sr * 7.0;
+
+      // Embers carry a small random phase used to twinkle their cool-down so a
+      // shower of sparks doesn't fade in lockstep. Unused (0) for non-embers.
+      this.spin[idx] = isEmber ? Math.random() * 6.2832 : 0;
 
       // Colour: per-particle shade plus a touch of hue jitter so the burst
       // reads as organic instead of a flat block of one colour.
@@ -116,15 +145,15 @@ export class Particles {
       const r = clamp01((cr + jr) * shade);
       const g = clamp01((cg + jg) * shade);
       const b = clamp01((cb + jb) * shade);
+      // Pack the ember flag into the sign of maxLife so the hot update loop can
+      // branch without touching another array. maxLife magnitude is the real
+      // lifetime; embers live a touch shorter and snappier.
+      const life = isEmber ? 0.4 + Math.random() * 0.35 : 0.5 + Math.random() * 0.45;
       this.baseColor[p3] = r; this.baseColor[p3 + 1] = g; this.baseColor[p3 + 2] = b;
       this.colors[p3] = r; this.colors[p3 + 1] = g; this.colors[p3 + 2] = b;
 
-      // Per-particle size variety; stored as a base so we can fade it over life.
-      const bs = 0.10 + Math.random() * 0.10;
-      this.baseSize[idx] = bs;
-      this.sizes[idx] = bs;
-
-      this.maxLife[idx] = this.life[idx] = 0.5 + Math.random() * 0.4;
+      this.maxLife[idx] = isEmber ? -life : life;
+      this.life[idx] = life;
     }
   }
 
@@ -147,8 +176,8 @@ export class Particles {
         continue;
       }
 
-      // Gravity.
-      this.vel[p3 + 1] -= 11 * dt;
+      // Per-particle gravity (mass-linked: heavy chunks fall harder).
+      this.vel[p3 + 1] -= this.gravity[i] * dt;
 
       // Air drag (exponential-ish velocity decay). Frame-rate aware via dt.
       const k = 1 - this.drag[i] * dt;
@@ -172,20 +201,40 @@ export class Particles {
         this.vel[p3 + 2] *= 0.7;
       }
 
+      // maxLife stores lifetime as magnitude; a negative sign flags an ember.
+      const ml = this.maxLife[i];
+      const isEmber = ml < 0;
       // Life ratio 1 -> 0.
-      const t = this.life[i] / this.maxLife[i];
+      const t = this.life[i] / (isEmber ? -ml : ml);
 
-      // Alpha-ish fade via colour: ease-out so particles hold their colour and
-      // then fall off quickly near the end (t*t reads as a gentle fade-out).
+      // Alpha-ish fade via colour: hold colour through most of the life then
+      // fall off fast at the end (t*t reads as a gentle ease-out fade).
       const fade = t * t;
-      this.colors[p3] = this.baseColor[p3] * fade;
-      this.colors[p3 + 1] = this.baseColor[p3 + 1] * fade;
-      this.colors[p3 + 2] = this.baseColor[p3 + 2] * fade;
+      let r = this.baseColor[p3];
+      let g = this.baseColor[p3 + 1];
+      let b = this.baseColor[p3 + 2];
+      if (isEmber) {
+        // Embers cool as they die: shift hue from the bright source toward deep
+        // orange/red and let the blue channel drop out first, like a cooling
+        // spark. `heat` 1->0 over life; a twinkle term (from spin phase) adds a
+        // little flicker so a shower of sparks doesn't dim in lockstep.
+        const heat = t;
+        const twinkle = 0.85 + 0.15 * Math.sin(this.life[i] * 22.0 + this.spin[i]);
+        // Warm target the ember relaxes toward as it cools.
+        r *= twinkle;
+        g *= (0.35 + 0.65 * heat) * twinkle;     // green falls off -> redder
+        b *= heat * heat * twinkle;              // blue dies fastest -> orange core
+      }
+      this.colors[p3] = r * fade;
+      this.colors[p3 + 1] = g * fade;
+      this.colors[p3 + 2] = b * fade;
 
       // Size fade: a quick pop-in at birth then a smooth shrink, so particles
-      // grow into view and taper out rather than blinking off.
+      // grow into view and taper out rather than blinking off. Embers shrink to
+      // a fine glowing point; debris keeps more body until it lands.
       const grow = t > 0.85 ? (1.0 - t) / 0.15 : 1.0; // first ~15% of life pops in
-      const shrink = 0.35 + 0.65 * t;                  // never fully zero until death
+      const floor = isEmber ? 0.12 : 0.32;
+      const shrink = floor + (1.0 - floor) * t;        // never fully zero until death
       this.sizes[i] = this.baseSize[i] * grow * shrink;
     }
 
