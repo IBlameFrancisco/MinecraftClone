@@ -361,6 +361,7 @@ let loaded = false;
 let everPlayed = false;
 let atMenu = true;    // on the home/start screen (before play or after Main Menu)
 let paused = false;   // the in-game pause menu (Esc) is showing
+const lobby = { active: false, host: false, players: new Map() };   // co-op pre-match team lobby (declared early so refreshOverlays can read it)
 let menuAngle = Math.random() * Math.PI * 2;
 
 // Cinematic orbit used as the live menu / loading background.
@@ -439,10 +440,10 @@ document.getElementById('ui').appendChild(deathEl);
 
 function refreshOverlays() {
   const locked = document.pointerLockElement === renderer.domElement;
-  const blocked = dead || inventory.open || hud.isChatOpen();
+  const blocked = dead || inventory.open || hud.isChatOpen() || lobby.active;   // the team lobby covers everything
   const inWorld = loaded && !atMenu;                 // has entered a game
   // Home/start menu: only before entering a world (or after Main Menu).
-  overlay.classList.toggle('hidden', !loaded || locked || blocked || inWorld);
+  overlay.classList.toggle('hidden', !loaded || locked || blocked || inWorld || lobby.active);
   // Pause menu: after entering, whenever the pointer is released (Esc / focus loss).
   paused = inWorld && !locked && !blocked;
   pauseEl.classList.toggle('hidden', !paused);
@@ -495,6 +496,11 @@ let liveSig = '';
 
 document.getElementById('playBtn').addEventListener('click', () => {
   if (dead) return;
+  // Hosting a battle online → gather everyone in the team lobby first (pick teams + ready up).
+  if (menuMode === BATTLE && mp.online && mp.isHost && !lobby.active) {
+    currentSeedStr = seedInput.value.trim() || currentSeedStr;
+    openLobby(); sfx.ensure(); return;
+  }
   // Honour a changed mode/options/seed on the home menu instead of silently
   // resuming the old world; otherwise just lock back in and resume.
   const seedChanged = !!seedInput.value.trim() && seedInput.value.trim() !== currentSeedStr;
@@ -659,13 +665,140 @@ const randomRoom = () => Math.random().toString(36).slice(2, 7).toUpperCase();
 // gun-game progression, killstreaks and the scoreboard all compare names.
 const _nameFallback = 'Player' + Math.floor(Math.random() * 1000);
 const playerName = () => (document.getElementById('nameInput').value.trim() || _nameFallback);
-const mpHandlers = {
-  getInit: () => ({
-    seed: hashSeed(currentSeedStr),
+// ---------- Co-op pre-match team lobby ----------
+// After Host/Join, players gather in a lobby, pick a team (any mode can have teams),
+// and ready up; the host starts when ready. Host-authoritative: the host owns the
+// roster/team state and broadcasts it; guests send their pick as a request.
+// (the `lobby` object itself is declared earlier so refreshOverlays can read it)
+const LOBBY_TEAM_META = {
+  red:    { label: 'Red',          color: '#ff6a6a' },
+  blue:   { label: 'Blue',         color: '#7ab8ff' },
+  ffa:    { label: 'Free-for-all', color: '#cfd6e2' },
+  allied: { label: '🪖 Allied',    color: '#cdd08a' },
+  axis:   { label: '🛡 Axis',      color: '#a9b0b8' },
+};
+const LOBBY_MODE_LABELS = { dm: 'Deathmatch', gungame: 'Gun Game', koth: 'King of the Hill', br: 'Battle Royale', wave: 'Wave Survival', war: 'D-Day Assault' };
+const lobbyEl = document.getElementById('lobby');
+function lobbyTeamOptions() { return battleCfg.mode === 'war' ? ['allied', 'axis'] : ['red', 'blue', 'ffa']; }
+function defaultLobbyTeam() { return battleCfg.mode === 'war' ? 'allied' : 'ffa'; }
+function lobbyTeamCode(t) {   // resolved lazily so the TEAM_* consts (defined later) aren't read at module-eval
+  if (t === 'red' || t === 'allied') return TEAM_RED;
+  if (t === 'blue' || t === 'axis') return TEAM_BLUE;
+  return TEAM_NONE;
+}
+const _escL = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
+function lobbyStatePayload() {
+  return { phase: 'lobby', mode: battleCfg.mode, map: battleCfg.map, code: mp.roomCode, hostId: mp.myId,
+    players: [...lobby.players.entries()].map(([id, p]) => ({ id, name: p.name, team: p.team, ready: p.ready })) };
+}
+function hostBroadcastLobby() { if (mp.isHost) mp.sendLobby(lobbyStatePayload()); }
+function openLobby() {
+  lobby.active = true; lobby.host = mp.isHost; atMenu = false;
+  if (!lobby.players.has(selfId())) lobby.players.set(selfId(), { name: myName(), team: defaultLobbyTeam(), ready: false });
+  if (mp.isHost) for (const [id, name] of mp.roster) if (!lobby.players.has(id)) lobby.players.set(id, { name, team: defaultLobbyTeam(), ready: false });
+  // Fresh ready states each time, and snap any team that isn't valid for this mode back to default.
+  const valid = lobbyTeamOptions();
+  for (const [id, p] of lobby.players) { p.ready = id === selfId() && mp.isHost; if (!valid.includes(p.team)) p.team = defaultLobbyTeam(); }
+  document.exitPointerLock(); lobbyEl.classList.remove('hidden');
+  if (mp.isHost) hostBroadcastLobby();
+  renderLobby();
+}
+function closeLobby() { lobby.active = false; lobbyEl.classList.add('hidden'); }
+function onLobbyState(d) {                 // guest: receive the host's lobby
+  lobby.active = true; lobby.host = false;
+  battleCfg.mode = d.mode || battleCfg.mode; battleCfg.map = d.map || battleCfg.map; mp.roomCode = d.code || mp.roomCode;
+  lobby.players.clear();
+  for (const p of d.players || []) lobby.players.set(p.id, { name: p.name, team: p.team, ready: p.ready });
+  if (!lobby.players.has(selfId())) lobby.players.set(selfId(), { name: myName(), team: defaultLobbyTeam(), ready: false });
+  atMenu = false; document.exitPointerLock(); lobbyEl.classList.remove('hidden');
+  renderLobby();
+}
+function onLobbyReq(id, name, team, ready) {  // host: a guest picked a team / readied
+  if (!mp.isHost || !lobby.active) return;
+  lobby.players.set(id, { name: name || 'Player', team: lobbyTeamOptions().includes(team) ? team : defaultLobbyTeam(), ready: !!ready });
+  hostBroadcastLobby(); renderLobby();
+}
+function lobbyPickTeam(t) {
+  const p = lobby.players.get(selfId()); if (!p) return;
+  p.team = t;
+  if (mp.isHost) hostBroadcastLobby(); else mp.sendLobbyReq(t, p.ready);
+  renderLobby();
+}
+function lobbyToggleReady() {
+  const p = lobby.players.get(selfId()); if (!p) return;
+  p.ready = !p.ready;
+  if (mp.isHost) hostBroadcastLobby(); else mp.sendLobbyReq(p.team, p.ready);
+  renderLobby();
+}
+function renderLobby() {
+  if (!lobby.active) return;
+  const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+  document.getElementById('lobbyMode').textContent = LOBBY_MODE_LABELS[battleCfg.mode] || battleCfg.mode;
+  document.getElementById('lobbyMap').textContent = battleCfg.mode === 'war' ? 'D-Day Beach' : (battleCfg.map === 'random' ? '🎲 Random' : cap(battleCfg.map));
+  document.getElementById('lobbyCode').textContent = mp.roomCode ? ('Room ' + mp.roomCode) : '';
+  const wrap = document.getElementById('lobbyPlayers'); wrap.innerHTML = '';
+  for (const [id, p] of lobby.players) {
+    const meta = LOBBY_TEAM_META[p.team] || LOBBY_TEAM_META.ffa;
+    const row = document.createElement('div'); row.className = 'lprow';
+    row.innerHTML = `<span class="lname">${_escL(p.name)}${id === selfId() ? '<span class="lyou">(you)</span>' : ''}</span>`
+      + `<span class="lteamchip" style="background:${_hexA(meta.color, 0.18)};color:${meta.color}">${meta.label}</span>`
+      + `<span class="lready">${p.ready ? '✅' : '⬜'}</span>`;
+    wrap.appendChild(row);
+  }
+  const tb = document.getElementById('lobbyTeams'); tb.innerHTML = '';
+  const mine = lobby.players.get(selfId());
+  for (const t of lobbyTeamOptions()) {
+    const meta = LOBBY_TEAM_META[t];
+    const b = document.createElement('button'); b.className = 'lteambtn' + (mine && mine.team === t ? ' active' : '');
+    b.textContent = meta.label; b.style.color = meta.color;
+    b.onclick = () => lobbyPickTeam(t);
+    tb.appendChild(b);
+  }
+  const rb = document.getElementById('lobbyReadyBtn');
+  rb.classList.toggle('ready', !!(mine && mine.ready));
+  rb.textContent = (mine && mine.ready) ? '✓ Ready' : 'Ready up';
+  const sb = document.getElementById('lobbyStartBtn');
+  sb.style.display = mp.isHost ? '' : 'none';
+  const allReady = [...lobby.players.values()].every((p) => p.ready) && lobby.players.size > 0;
+  sb.disabled = !allReady;
+  document.getElementById('lobbyHint').textContent = mp.isHost
+    ? (allReady ? 'Everyone is ready — start the match!' : 'Waiting for all players to ready up…')
+    : 'Waiting for the host to start…';
+}
+function lobbyStart() {
+  if (!mp.isHost || !lobby.active) return;
+  closeLobby();
+  setGameMode(BATTLE);
+  inventory.setLoadout(battleCfg.mode === 'war' ? WAR_LOADOUT : BATTLE_LOADOUT);
+  health = 20; hud.setHealth(20);
+  const theme = battleCfg.mode === 'war' || battleCfg.map === 'random' ? undefined : battleCfg.map;
+  loadWorld(currentSeedStr, battleCfg.mode === 'war' ? 'beach' : 'arena', theme);
+  setupMatch();
+  liveSig = menuSig();
+  mp.startBattle(matchInitPayload());     // push the match to lobby guests
+  renderer.domElement.requestPointerLock(); sfx.ensure();
+}
+function matchInitPayload() {
+  return { phase: 'match', seed: hashSeed(currentSeedStr),
     arena, battleMap, arenaTheme, battle: mode === BATTLE, team: teamMode, scoreLimit, gameMode,
-    edits: [...edits.entries()].map(([k, v]) => { const [x, y, z] = k.split(',').map(Number); return [x, y, z, v]; }),
-  }),
+    edits: [...edits.entries()].map(([k, v]) => { const [x, y, z] = k.split(',').map(Number); return [x, y, z, v]; }) };
+}
+if (lobbyEl) {
+  document.getElementById('lobbyReadyBtn').addEventListener('click', lobbyToggleReady);
+  document.getElementById('lobbyStartBtn').addEventListener('click', lobbyStart);
+  document.getElementById('lobbyLeaveBtn').addEventListener('click', () => { closeLobby(); lobby.players.clear(); atMenu = true; refreshOverlays(); });
+}
+
+const mpHandlers = {
+  // While the host is in the lobby, a joining guest gets the lobby state; otherwise
+  // (a live match) they get the world init and drop straight in.
+  getInit: () => (lobby.active && mp.isHost ? lobbyStatePayload() : matchInitPayload()),
+  onLobby: (d) => onLobbyState(d),                           // guest: host's lobby roster/teams
+  onLobbyReq: (id, name, team, ready) => onLobbyReq(id, name, team, ready),   // host: a guest's pick
   onInit: (d) => {
+    if (d.phase === 'lobby') { onLobbyState(d); return; }    // joined while the host is still in the lobby
+    closeLobby();                                            // host pressed Start — leave the lobby into the match
     currentSeedStr = String(d.seed);
     seedInput.value = currentSeedStr;
     arena = !!d.arena;
@@ -694,6 +827,12 @@ const mpHandlers = {
     // counting toward the team win). Keep our own entry (selfId is never in the roster).
     for (const id of [...humanScore.keys()]) if (!mp.roster.has(id)) humanScore.delete(id);
     for (const id of [...teamAssign.keys()]) if (id !== selfId() && !mp.roster.has(id)) teamAssign.delete(id);
+    // Keep the lobby roster in sync as people join/leave, then re-broadcast it.
+    if (lobby.active && mp.isHost) {
+      for (const [id, name] of mp.roster) if (!lobby.players.has(id)) lobby.players.set(id, { name, team: defaultLobbyTeam(), ready: false });
+      for (const id of [...lobby.players.keys()]) if (id !== selfId() && !mp.roster.has(id)) lobby.players.delete(id);
+      hostBroadcastLobby(); renderLobby();
+    }
     hud.setPlayers(mp.playerList()); if (mode === BATTLE && isAuthority()) { rebuildBoard(); broadcastBoard(); }
   },
   // PvP: someone hit me — apply the damage locally and remember who, for the kill feed.
@@ -950,11 +1089,25 @@ function setupMatch() {
   const humans = [selfId()];
   if (mp.online) for (const id of mp.roster.keys()) humans.push(id);
 
+  const useLobby = mp.online && lobby.players.size > 0;   // a co-op match started from the team lobby
   let botTeams = [];
   if (gameMode === 'war') {
-    setupWar(humans);                                       // spawns its own faction bots
+    setupWar(humans, useLobby);                             // spawns its own faction bots
   } else if (gameMode === 'wave') {
     myTeam = TEAM_RED; for (const id of humans) teamAssign.set(id, TEAM_RED);   // bots arrive in waves
+  } else if (useLobby) {
+    // Honour each player's lobby team pick (Red / Blue / Free-for-all).
+    let anyTeam = false, redH = 0, blueH = 0;
+    for (const id of humans) {
+      const lp = lobby.players.get(id), t = lp ? lobbyTeamCode(lp.team) : TEAM_NONE;
+      teamAssign.set(id, t);
+      if (t === TEAM_RED) { redH++; anyTeam = true; } else if (t === TEAM_BLUE) { blueH++; anyTeam = true; }
+    }
+    myTeam = teamAssign.get(selfId()) ?? TEAM_NONE; teamMode = anyTeam;
+    if (anyTeam) {
+      for (let i = 0; i < Math.max(0, battleCfg.size - redH); i++) botTeams.push(TEAM_RED);
+      for (let i = 0; i < Math.max(0, battleCfg.size - blueH); i++) botTeams.push(TEAM_BLUE);
+    } else botTeams = new Array(Math.max(0, battleCfg.size - humans.length)).fill(TEAM_NONE);
   } else if (teamMode) {
     myTeam = TEAM_RED; teamAssign.set(selfId(), TEAM_RED);
     let r = 1, b = 0;
@@ -988,20 +1141,26 @@ const _pick = (a) => a[(Math.random() * a.length) | 0];
 
 // War setup: Allied storm in from the sea, Axis hold the bunker line. Humans fight
 // on the chosen side together; bots fill both. Axis defenders man the MG nests.
-function setupWar(humans) {
-  warSide = battleCfg.side === 'axis' ? 'axis' : 'allied';
-  myTeam = warSide === 'axis' ? WAR_AXIS : WAR_ALLIED;
-  for (const id of humans) teamAssign.set(id, myTeam);
+function setupWar(humans, useLobby) {
+  // Each player picks Allied or Axis in the lobby (default = the host's chosen side).
+  const hostSide = battleCfg.side === 'axis' ? WAR_AXIS : WAR_ALLIED;
+  let alliedH = 0, axisH = 0;
+  for (const id of humans) {
+    let t = hostSide;
+    if (useLobby) { const lp = lobby.players.get(id); if (lp) t = lp.team === 'axis' ? WAR_AXIS : WAR_ALLIED; }
+    teamAssign.set(id, t); (t === WAR_AXIS ? axisH++ : alliedH++);
+  }
+  myTeam = teamAssign.get(selfId()) ?? hostSide;
+  warSide = myTeam === WAR_AXIS ? 'axis' : 'allied';     // my own side drives spawns / UI / objective text
   warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
   inventory.setLoadout(WAR_LOADOUT);
   if (warSide === 'allied') hud.announce('Storm the beach — take the bunker!', '#9ad36b');
   else hud.announce('Hold the line — repel the assault!', '#ff9a6b');
   if (!isAuthority()) return;
 
-  const hN = humans.length;
-  // A whole division storms the beach: far more Allied than Axis (~3:1).
-  const axisN = Math.max(4, battleCfg.size - (warSide === 'axis' ? hN : 0));
-  const alliedN = Math.min(26, Math.max(12, battleCfg.size * 3 - (warSide === 'allied' ? hN : 0)));
+  // A whole division storms the beach: far more Allied than Axis (~3:1), minus the humans on each side.
+  const axisN = Math.max(4, battleCfg.size - axisH);
+  const alliedN = Math.min(26, Math.max(12, battleCfg.size * 3 - alliedH));
   const teams = [];
   for (let i = 0; i < alliedN; i++) teams.push(WAR_ALLIED);
   for (let i = 0; i < axisN; i++) teams.push(WAR_AXIS);
@@ -3067,6 +3226,9 @@ window.__game = {
   __spawnBlackHole: () => { player.eyePosition(_eye); _dir.set(0.15, -0.12, -1).normalize(); const gun = gunOf(BLACK_HOLE_BOMB); blackholes.spawn(_eye.clone(), _dir.clone(), gun, mp.myId || 'me'); return { radius: gun.radius, duration: gun.duration, pull: gun.pull, damage: gun.damage, splash: gun.splash }; },
   get lensState() { return { on: lensPass.enabled, count: lensPass.uniforms.uCount.value, r: +lensPass.uniforms.uParams.value[0].x.toFixed(3), s: +lensPass.uniforms.uParams.value[0].y.toFixed(2) }; },
   __forceTheme: (t) => { _forceTheme = t; },
+  get lobbyInfo() { return { active: lobby.active, host: lobby.host, code: mp.roomCode, players: [...lobby.players.entries()].map(([id, p]) => ({ id, name: p.name, team: p.team, ready: p.ready })), myTeam, teamMode, teams: [...teamAssign.entries()] }; },
+  __lobbyReq: (id, name, team, ready) => onLobbyReq(id, name, team, ready),
+  __lobbyState: (d) => onLobbyState(d),
   __flashStep: (code) => { const before = player.pos.clone(); flashStep(code || 'KeyW'); return { moved: +player.pos.distanceTo(before).toFixed(2), charges: flashCharges, afterImages: afterImages.length }; },
   get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
   __warDebug: () => {
