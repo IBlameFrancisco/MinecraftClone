@@ -11,6 +11,7 @@ import { getSkin, randomBotSkin } from './skins.js';
 import {
   HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, gunOf,
 } from './items.js';
+import { isSlippery } from './blocks.js';
 
 const GRAVITY = 28;
 const TWO_PI = Math.PI * 2;
@@ -356,20 +357,23 @@ export class BotManager {
     b.moveX += (desiredX - b.moveX) * steerK;
     b.moveZ += (desiredZ - b.moveZ) * steerK;
     let mlen = Math.hypot(b.moveX, b.moveZ);
+    // Reduced traction on ice (frozen lake): slower to build/change momentum, glides on stop.
+    const onIce = b.onGround && isSlippery(ctx.world.getBlock(Math.floor(b.pos.x), Math.floor(b.pos.y - 0.06), Math.floor(b.pos.z)));
+    const grip = onIce ? 3.5 : 9;
     if (dl > 0.001 && mlen > 0.001) {
       const mx = b.moveX / mlen, mz = b.moveZ / mlen;
       // Scale speed by how committed the heading is — a freshly-reversed intent ramps up
       // instead of jerking to full speed in a new direction.
       const commit = Math.min(1, mlen * 1.15 + 0.2);
-      b.vel.x += (mx * speed * commit - b.vel.x) * Math.min(1, 9 * dt);
-      b.vel.z += (mz * speed * commit - b.vel.z) * Math.min(1, 9 * dt);
+      b.vel.x += (mx * speed * commit - b.vel.x) * Math.min(1, grip * dt);
+      b.vel.z += (mz * speed * commit - b.vel.z) * Math.min(1, grip * dt);
       if (b.onGround && b.jumpCD <= 0) {
         const fx = b.pos.x + mx * (HALF + 0.3), fz = b.pos.z + mz * (HALF + 0.3);
         const footY = Math.floor(b.pos.y + 0.1);
         if (ctx.world.getBlock(Math.floor(fx), footY, Math.floor(fz)) !== 0 &&
             ctx.world.getBlock(Math.floor(fx), footY + 1, Math.floor(fz)) === 0) { b.vel.y = 7.4; b.jumpCD = 0.6; }
       }
-    } else { b.vel.x *= 0.8; b.vel.z *= 0.8; b.moveX *= 0.8; b.moveZ *= 0.8; }
+    } else { const f = onIce ? 0.95 : 0.8; b.vel.x *= f; b.vel.z *= f; b.moveX *= 0.8; b.moveZ *= 0.8; }
 
     b.vel.y -= GRAVITY * dt;
     if (b.vel.y < -34) b.vel.y = -34;

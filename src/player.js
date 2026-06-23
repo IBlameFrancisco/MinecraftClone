@@ -2,7 +2,7 @@
 // view, jump/sprint/sneak, AABB-vs-voxel collision, head bob and sprint FOV.
 
 import * as THREE from 'three';
-import { isSolid, WATER } from './blocks.js';
+import { isSolid, isSlippery, WATER } from './blocks.js';
 
 const HALF = 0.3;          // player half-width
 const HEIGHT = 1.8;        // player height
@@ -156,14 +156,17 @@ export class Player {
     // --- Horizontal velocity with acceleration/friction ---
     // Decelerate a touch faster than we accelerate so direction changes feel
     // crisp without the controller feeling twitchy. Air control stays low.
+    // On ice, traction drops sharply — you accelerate slowly and glide a long way.
+    const onIce = this.onGround && isSlippery(this.world.getBlock(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.06), Math.floor(this.pos.z)));
     const decel = wlen > 0; // accelerating toward a wish dir vs. coasting
     let accel = this.onGround ? ACCEL : AIR_ACCEL;
     if (this.onGround && !decel) accel = ACCEL * 1.3;
+    if (onIce) accel *= 0.2;
     const targetX = wx * speed, targetZ = wz * speed;
     this.vel.x += (targetX - this.vel.x) * Math.min(1, accel * dt);
     this.vel.z += (targetZ - this.vel.z) * Math.min(1, accel * dt);
     if (this.onGround && wlen === 0) {
-      const fr = Math.min(1, 13 * dt);
+      const fr = Math.min(1, (onIce ? 1.8 : 13) * dt);
       this.vel.x -= this.vel.x * fr;
       this.vel.z -= this.vel.z * fr;
     }

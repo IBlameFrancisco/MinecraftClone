@@ -235,6 +235,26 @@ const generators = {
     if (diag >= 8 && diag < 9) return [214, 232, 242, 60];
     return [210, 230, 240, 30];
   },
+  ice(x, y) {
+    // Pale frozen lake: cool blue with faint cracks and an occasional glint.
+    const n = fbm2(x, y, 4, 8, 53);
+    let v = 214 + n * 14 + vary(0, 4);
+    let r = v - 20, g = v - 4, b = v + 12;
+    const crack = tileNoise(x, y, 6, 23);
+    if (crack > 0.74) { r -= 34; g -= 24; b -= 8; }    // crack vein
+    if (rand() < 0.03) { r += 16; g += 16; b += 12; }  // sparkle
+    return [clamp255(r), clamp255(g), clamp255(b), 255];
+  },
+  lava(x, y) {
+    // Molten rock: glowing orange channels between dark cooled crust.
+    const flow = fbm2(x, y * 0.6, 4, 8, 77);
+    const crust = tileNoise(x, y, 5, 13);
+    let r, g, b;
+    if (crust > 0.6) { const c = 36 + flow * 34; r = c + 26; g = c * 0.5; b = c * 0.3; }   // crust
+    else { r = 232 + flow * 23; g = 86 + flow * 86; b = 18 + flow * 22; }                   // molten
+    if (rand() < 0.04) { r = 255; g = 212; b = 96; }   // bright spark
+    return [clamp255(r), clamp255(g), clamp255(b), 255];
+  },
   bedrock(x, y) {
     // Chaotic dark rock: blocky value patches from low-res noise, no tiling seam.
     const patch = tileNoise(x, y, 8, 91);

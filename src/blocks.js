@@ -23,6 +23,8 @@ export const WOOL = 18;
 export const CRAFTING_TABLE = 19;
 export const TORCH = 20;
 export const CHEST = 21;
+export const ICE = 22;
+export const LAVA = 23;
 
 // A block is described by:
 //  - solid:   participates in collision
@@ -53,7 +55,14 @@ export const BLOCKS = {
   [CRAFTING_TABLE]: { name: 'Crafting Table', solid: true, opaque: true, transparent: false, light: 0, tiles: { top: 'craft_top', side: 'craft_side', bottom: 'plank' } },
   [TORCH]:    { name: 'Torch',      solid: true,  opaque: true,  transparent: false, light: 13, tiles: { top: 'torch', side: 'torch', bottom: 'torch' } },
   [CHEST]:    { name: 'Chest',      solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'chest_top', side: 'chest_side', bottom: 'chest_top' } },
+  [ICE]:      { name: 'Ice',        solid: true,  opaque: true,  transparent: false, light: 0, tiles: { top: 'ice', side: 'ice', bottom: 'ice' } },
+  [LAVA]:     { name: 'Lava',       solid: false, opaque: false, transparent: true,  light: 13, tiles: { top: 'lava', side: 'lava', bottom: 'lava' } },
 };
+
+// Slippery floors (low traction) and hot blocks (burn on contact) — drive the
+// frozen-lake skating and the ruins lava-pit hazard.
+export function isSlippery(id) { return id === ICE; }
+export function isHot(id) { return id === LAVA; }
 
 // Which tool type mines a block fastest, and which blocks require the right tool
 // (and minimum tier) to drop anything at all.
@@ -73,6 +82,7 @@ export const HARDNESS = {
   [STONE]: 1.5, [COBBLE]: 1.8, [COAL_ORE]: 2.2, [IRON_ORE]: 2.6, [BEDROCK]: Infinity,
   [LOG]: 1.4, [LEAVES]: 0.3, [PLANK]: 1.4, [GLASS]: 0.4, [GLOWSTONE]: 0.4,
   [CACTUS]: 0.5, [WOOL]: 0.7, [CRAFTING_TABLE]: 1.4, [TORCH]: 0.2, [CHEST]: 1.6, [WATER]: Infinity,
+  [ICE]: 0.5, [LAVA]: Infinity,
 };
 export function hardness(id) {
   return HARDNESS[id] !== undefined ? HARDNESS[id] : 1.0;
