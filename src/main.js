@@ -17,7 +17,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES, isHot,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
@@ -33,7 +33,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, Portals, makeViewModel, makeHeldWeapon, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, CleaveFx, Portals, makeViewModel, makeHeldWeapon, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -42,7 +42,7 @@ const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
 // Deathmatch arsenal (one per hotbar key, slot 10 = key 0), one of each weapon class.
-const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN];
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, SHARINGAN];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -236,6 +236,7 @@ const blackholes = new BlackHoles(scene);
 const chakra = new ChakraFx(scene);
 const laser = new LaserBeam(scene);
 const hollowPurple = new HollowPurple(scene);
+const cleaveFx = new CleaveFx(scene);
 const sharinganFx = new SharinganFx(scene);
 const portals = new Portals(scene);
 const botMgr = new BotManager(scene);
@@ -1019,7 +1020,7 @@ const WAR_TIME = 180, WAR_TICKETS = 18;
 // Rasengan (the "knife round": you must close to chakra range for the win).
 const GUNGAME_LADDER = [
   HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, HEAVY_MG, PLASMA_GUN, SNIPER, RAILGUN, LASER_CANNON,
-  ROCKET_LAUNCHER, BLACK_HOLE_BOMB, RASENSHURIKEN, SHARINGAN, HOLLOW_PURPLE, RASENGAN,
+  ROCKET_LAUNCHER, BLACK_HOLE_BOMB, RASENSHURIKEN, SHARINGAN, HOLLOW_PURPLE, CLEAVE, RASENGAN,
 ];
 const HILL_R = 6.5;              // king-of-the-hill radius around arena centre
 const WAVE_TARGET = 10;          // wave survival: survive this many waves to win
@@ -2273,6 +2274,7 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); snd('rail'); }
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
+  else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), (d.r || 15) * 0.5, d.arc || 1.1); if (withSound) sfx.slash(); }
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
   else if (k === 'flash') { const end = new THREE.Vector3(d.ex ?? d.x, d.ey ?? d.y, d.ez ?? d.z); spawnAfterImages(muzzle, end, '', getSkin(d.skin), 3); if (withSound) sfx.flashStep(); }
 }
@@ -2287,7 +2289,47 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'blackhole') { blackholes.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.blackhole(); broadcastFire('blackhole', muzzle, _dir, { sp: gun.speed, r: gun.range, du: gun.duration, rad: gun.radius }); }
   else if (gun.kind === 'rasengan') fireRasengan(gun);
   else if (gun.kind === 'rasenshuriken') { chakra.throw(muzzle, _dir.clone(), gun, mp.myId || 'me', rasenshurikenImpact); sfx.rasenshuriken(); addShake(0.18); }
+  else if (gun.kind === 'cleave') fireCleave(gun, muzzle);
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
+}
+
+// Cleave & Dismantle (Sukuna): sweep a fan of cursed slashes that carve every enemy
+// in a forward arc. Dismantle hits the whole cone; Cleave bites far harder the closer
+// the target (the cut "adjusts" as it nears point-blank).
+function fireCleave(gun, muzzle) {
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const aim = _dir.clone().normalize();
+  const range = gun.range, cosHalf = Math.cos(gun.arc || 1.1);
+  let struck = false;
+  // Resolve one candidate: inside the cone + range + line-of-sight, then apply scaled damage.
+  const tryHit = (tx, ty, tz, apply) => {
+    const dx = tx - _eye.x, dy = ty - _eye.y, dz = tz - _eye.z, dist = Math.hypot(dx, dy, dz);
+    if (dist > range || dist < 0.001) return;
+    if ((dx * aim.x + dy * aim.y + dz * aim.z) / dist < cosHalf) return;     // outside the slash cone
+    if (!losClear(_eye.x, _eye.y, _eye.z, tx, ty, tz)) return;
+    const near = 1 - Math.min(1, dist / range);                              // 1 at point-blank -> 0 at the rim
+    const dmg = Math.round(gun.damage + (gun.cleave || 0) * near * near);    // Cleave bites harder up close
+    apply(dmg, dx / dist, dz / dist);
+    struck = true;
+    particles.burst(tx, ty, tz, [255, 30, 64], 14); particles.burst(tx, ty, tz, [255, 220, 228], 5);
+  };
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    tryHit(b.pos.x, b.pos.y + 1, b.pos.z, (dmg, kx, kz) => {
+      botHurt(b.id, dmg, myName(), false);
+      b.vel.x += kx * gun.knockback; b.vel.z += kz * gun.knockback; b.vel.y += gun.knockback * 0.25;
+      damageNumbers.spawn(new THREE.Vector3(b.pos.x, b.pos.y + 1.7, b.pos.z), dmg, false);
+    });
+  }
+  if (mp.online) for (const [id, r] of mp.remotes) {
+    if (friendly(id)) continue;
+    tryHit(r.group.position.x, r.group.position.y + 1, r.group.position.z, (dmg) => mp.sendHit(id, dmg));
+  }
+  for (const m of mobs.list) tryHit(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, (dmg) => m.hurt(dmg, player.pos.x, player.pos.z));
+  if (struck) hud.hitMarker(false);
+  cleaveFx.spawn(_eye.clone(), aim, range * 0.5, gun.arc || 1.1);
+  sfx.slash(); addShake(0.13);
+  broadcastFire('cleave', muzzle, _dir, { r: range, arc: gun.arc || 1.1 });
 }
 
 // Nearest damageable enemy (remote humans + local bots) along a ray.
@@ -3171,7 +3213,7 @@ function frame() {
   // Curve the player's in-flight Rasenshuriken toward where they're aiming (sweep your view to bend it).
   chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
   chakra.update(sdt, world, chakraHooks);
-  laser.update(dt); hollowPurple.update(sdt); sharinganFx.update(dt);
+  laser.update(dt); hollowPurple.update(sdt); cleaveFx.update(sdt); sharinganFx.update(dt);
   grenades.update(sdt, world);
   grenadeCD -= sdt;
   portals.update(dt, portalBodies());

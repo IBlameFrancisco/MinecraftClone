@@ -38,8 +38,9 @@ export const RASENSHURIKEN = 285;
 export const LASER_CANNON = 286;
 export const HOLLOW_PURPLE = 287;
 export const SHARINGAN = 288;
+export const CLEAVE = 289;
 
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -102,6 +103,11 @@ export const ITEMS = {
   // Precognition — bullet-time where enemies slow + glow through walls and you take
   // less damage. Draws the chakra reserve. Bots fire it as a weak hitscan bolt.
   [SHARINGAN]: { name: 'Sharingan', gun: { kind: 'sharingan', range: 80, drain: 9, dot: 7, ignite: 3.5, ensnare: 1.0, stun: 2.4, precogDur: 4.0, precogCost: 45, precogCD: 9, rate: 0.6, damage: 14, recoil: 0.008, color: 0xe01020 } },
+  // Sukuna's cursed technique — Cleave & Dismantle. Sweep a fan of imaginary-edge
+  // slashes that carve every enemy in a forward arc (Dismantle), biting far harder
+  // the closer the target as the cut "adjusts" to point-blank range (Cleave). A fast
+  // close/mid slasher: `arc` is the cone half-angle, `cleave` the point-blank bonus.
+  [CLEAVE]: { name: 'Cleave & Dismantle', gun: { kind: 'cleave', rate: 0.42, damage: 15, range: 15, arc: 1.12, cleave: 17, knockback: 15, recoil: 0.03, color: 0xe0143c } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
@@ -386,6 +392,18 @@ function drawGun(ctx, id) {
       ctx.beginPath(); ctx.arc(cx, cy, 1.15, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = 1.2; ctx.strokeStyle = '#1a0306'; ctx.beginPath(); ctx.arc(cx, cy, 2.1, a + 0.5, a + 2.2); ctx.stroke();
     }
+  } else if (id === CLEAVE) {
+    // Two crossed crimson slash arcs — Sukuna's cleaving cut.
+    const slash = (x0, y0, x1, y1, cx, cy, w, col) => {
+      ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(cx, cy, x1, y1); ctx.stroke();
+    };
+    slash(2.5, 3, 13.5, 12.5, 9.5, 5, 3.4, 'rgba(140,4,18,0.85)');     // dark under-stroke
+    slash(2.5, 3, 13.5, 12.5, 9.5, 5, 2.0, '#e0143c');                 // crimson slash
+    slash(2.5, 3, 13.5, 12.5, 9.5, 5, 0.7, '#fff2f4');                 // hot white edge
+    slash(13.5, 3, 2.5, 12.5, 6.5, 5, 3.0, 'rgba(140,4,18,0.7)');      // crossing slash (under)
+    slash(13.5, 3, 2.5, 12.5, 6.5, 5, 1.6, '#ff3a5e');
+    slash(13.5, 3, 2.5, 12.5, 6.5, 5, 0.6, '#fff2f4');
   } else { // PORTAL_GUN
     gunBody(ctx, 2, 6, 9, 3.6, '#d6d6d6');
     gunBody(ctx, 3, 9.4, 3, 3.6, '#c4c4c4');     // grip
