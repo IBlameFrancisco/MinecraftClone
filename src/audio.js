@@ -373,6 +373,14 @@ export class SFX {
     this._tone(2300, 3000, 0.06, 0.05, 'sine', o);
     this._noise(0.05, 3800, 2.4, 0.08, 'highpass', o);
   }
+  // Hunger Games cannon — a deep, distant boom announcing a fallen tribute.
+  cannon() {
+    if (!this.ctx) return;
+    this._tone(150, 42, 0.7, 0.34, 'sine');           // deep boom body
+    this._tone(95, 30, 0.8, 0.22, 'triangle');        // sub rumble
+    this._noise(0.5, 220, 0.7, 0.18, 'lowpass');      // muffled blast
+    this._noise(0.06, 1400, 1.2, 0.12, 'bandpass');   // crack of the report
+  }
   // Stand summon — a short rising whoosh as the spirit manifests.
   standSummon() {
     if (!this.ctx) return;

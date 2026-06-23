@@ -1019,6 +1019,7 @@ let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
 // Hunger Games: ring spawn around a central cornucopia, scavenge loot, last one
 // standing. The arena only starts closing in after a scavenge grace period.
 let hungerTime = 0, hungerClosing = false, hungerSpawnIdx = 0, hungerArsenal = [];
+let hungerCountdown = 0, hungerCountShown = 0, hungerLastCount = 0;   // bloodbath countdown + cannon tracking
 let cornucopiaMesh = null;
 const HUNGER_GRACE = 26;        // seconds to loot before the ring begins to close
 let waveNum = 0, waveBreak = 0;  // wave survival
@@ -1255,14 +1256,27 @@ function setupCornucopia(on) {
   const lam = (col, emi, ei = 0.5) => new THREE.MeshLambertMaterial({ color: col, emissive: emi, emissiveIntensity: ei });
   const base = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 4.2, 0.6, 28), lam(0x6b5320, 0x2a2008)); base.position.y = 0.3; g.add(base);
   const top = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 3.2, 0.5, 28), lam(0xb8902f, 0x3a2c0a, 0.7)); top.position.y = 0.78; g.add(top);
-  for (let i = 0; i < 7; i++) {   // a pile of gold loot crates on the altar
-    const a = (i / 7) * 6.2832, r = 1.5 + (i % 2) * 0.5;
+  // The cornucopia horn — a great tapered golden horn curving up off the altar.
+  const horn = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 0.12, 5.4, 22, 1, true), lam(0xd8ad3c, 0x5a4410, 0.55));
+  horn.material.side = THREE.DoubleSide; horn.position.set(-0.4, 2.7, 0); horn.rotation.z = 0.62; horn.rotation.x = 0.12; g.add(horn);
+  for (let i = 0; i < 7; i++) {   // a pile of gold loot crates spilling from the horn's mouth
+    const a = (i / 7) * 6.2832, r = 1.3 + (i % 2) * 0.5;
     const c = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), lam(0xe0b84a, 0x6a5012, 0.6));
     c.position.set(Math.cos(a) * r, 1.4 + (i % 3) * 0.3, Math.sin(a) * r); c.rotation.y = a; g.add(c);
   }
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 16, 12, 1, true),
     new THREE.MeshBasicMaterial({ color: 0xffe27a, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
   beam.position.y = 8; g.add(beam);
+  // Tribute podiums ringing the cornucopia (one per spawn slot), each with a glowing rim.
+  const N = Math.max(2, battleCfg.size);
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * 6.2832, px = Math.cos(a) * 14, pz = Math.sin(a) * 14;
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.05, 0.25, 18), lam(0x3a3d44, 0x111316, 0.4));
+    plate.position.set(px, -0.05, pz); g.add(plate);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.92, 0.055, 8, 22),
+      new THREE.MeshBasicMaterial({ color: 0xffcf4a, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    rim.rotation.x = Math.PI / 2; rim.position.set(px, 0.1, pz); g.add(rim);
+  }
   scene.add(g); cornucopiaMesh = g;
 }
 // Loot crates: power weapons clustered at the cornucopia (one-time), common weapons
@@ -1296,13 +1310,32 @@ function armHungerBots() {
     b.gunId = gid; b.gun = gunOf(gid); b.ammo = b.gun.mag || Infinity; b.reloadTimer = 0;
   });
 }
-// Reset the round's hunger state: ring-spawn order, fresh loot, pistol-only loadout.
+// Reset the round's hunger state: ring-spawn order, fresh loot, pistol-only loadout,
+// and the bloodbath countdown (tributes are pinned until "GO").
 function hungerReset() {
   hungerSpawnIdx = 0; hungerTime = 0; hungerClosing = false;
+  hungerCountdown = 3.0; hungerCountShown = 99; hungerLastCount = Math.max(1, battleCfg.size);
   zoneRadius = ARENA.HALF - 2; if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
   hungerArsenal = [HANDGUN]; inventory.setLoadout(hungerArsenal);
   setupHungerLoot();
-  hud.announce('🏹 Let the Games begin — loot the Cornucopia!', '#ffd24a'); sfx.announce('multi');
+  hud.announce('🏹 Tributes — take your marks!', '#ffd24a');
+}
+// Drive the 3-2-1-GO countdown (local, so each client pins its own player). On "GO"
+// the field is released and the player gets a brief grace.
+function tickHungerCountdown(sdt) {
+  const before = hungerCountdown;
+  hungerCountdown = Math.max(0, hungerCountdown - sdt);
+  const shown = Math.ceil(hungerCountdown);
+  if (hungerCountdown > 0 && shown !== hungerCountShown) { hungerCountShown = shown; hud.announce(String(shown), '#ffd24a'); sfx.announce('multi'); }
+  if (hungerCountdown === 0 && before > 0) {            // the gong: release the bloodbath
+    hud.announce('GO! 🏹 Loot the Cornucopia!', '#57d977'); sfx.announce('win');
+    invuln = 2.0; protect = 2.0;                        // a moment's grace as the scramble starts
+  }
+}
+// The cannon: one boom per fallen tribute, with the dwindling count called out.
+function hungerCannon(remaining) {
+  sfx.cannon();
+  if (remaining > 1) hud.announce(`${remaining} tributes remain`, '#ffd24a');
 }
 // Last-one-standing check shared by Battle Royale + Hunger Games.
 function checkLastStanding() {
@@ -1319,6 +1352,14 @@ function checkLastStanding() {
   }
 }
 function hungerTick(dt) {
+  if (hungerCountdown > 0) return;        // frozen at the podiums until "GO"
+  // A cannon booms for each tribute who falls (the count is authoritative here).
+  const alive = botMgr.bots.filter((b) => b.alive).length + ((!eliminated && health > 0) ? 1 : 0)
+    + (mp.online ? [...mp.remotes].filter(([, r]) => !r.bot && r.group.visible).length : 0);
+  if (alive < hungerLastCount) {
+    hungerLastCount = alive; hungerCannon(alive);
+    if (mp.online) mp.broadcast({ t: 'pfire', k: 'cannon', n: alive, x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0 });
+  }
   hungerTime += dt;
   if (hungerTime > HUNGER_GRACE) {       // scavenge grace, then the ring closes in
     if (!hungerClosing) { hungerClosing = true; hud.announce('⚠ The arena is closing in!', '#ff5b5b'); sfx.announce('multi'); }
@@ -2403,6 +2444,7 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
   else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), (d.r || 15) * 0.5, d.arc || 1.1); if (withSound) sfx.slash(); }
   else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) sfx.standBarrage({ x: d.x, y: d.y, z: d.z }); }
+  else if (k === 'cannon') { hungerCannon(d.n || 2); }   // a tribute fell (Hunger Games, relayed to guests)
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
   else if (k === 'flash') { const end = new THREE.Vector3(d.ex ?? d.x, d.ey ?? d.y, d.ez ?? d.z); spawnAfterImages(muzzle, end, '', getSkin(d.skin), 3); if (withSound) sfx.flashStep(); }
 }
@@ -3206,12 +3248,16 @@ function frame() {
   world.processQueues(loaded ? 6 : 40);
   if (!loaded) updateLoading();
 
-  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated && !killCam.active && !deathCam.active;
   // Pausing (Esc) freezes the single-player world; co-op keeps running (can't pause others).
   const frozen = paused && !mp.online;
   const sdt = frozen ? 0 : dt;
+  // Hunger Games: tributes are pinned on their podiums through the 3-2-1-GO countdown.
+  const hungerFrozen = gameMode === 'hunger' && hungerCountdown > 0;
+  if (hungerFrozen && loaded && !dead) tickHungerCountdown(sdt);
+  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated && !killCam.active && !deathCam.active && !hungerFrozen;
 
   if (loaded && player.locked && !dead) {
+    if (hungerFrozen) { player.keys.clear(); player.vel.x = 0; player.vel.z = 0; }   // pinned at the podium until "GO"
     player.update(deathCam.active ? 0 : dt);   // frozen while the death cam plays
     // Fell off the arena into the void → eliminate + respawn.
     if (mode === BATTLE && !deathCam.active && player.pos.y < ARENA.FLOOR - 25) battleDeath();
@@ -3266,7 +3312,7 @@ function frame() {
     if (!frozen) tickAmaterasu(dt);
     if (precogCD > 0) precogCD -= dt;
     if (precogT > 0) { precogT -= dt; setEnemyXray(true); if (precogT <= 0) { setEnemyXray(false); hud.setPrecog(false); } }
-    const botDt = (matchWinner || frozen) ? 0 : (precogT > 0 ? dt * 0.4 : dt);   // enemies move in slow-mo during Precognition
+    const botDt = (matchWinner || frozen || hungerFrozen) ? 0 : (precogT > 0 ? dt * 0.4 : dt);   // frozen at the podiums during the countdown; slow-mo during Precognition
     if (isAuthority()) {
       botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
       botMgr.update(botDt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
@@ -3301,7 +3347,7 @@ function frame() {
     else if (gameMode === 'br') { const a = botMgr.bots.filter((b) => b.alive).length + (!eliminated && health > 0 ? 1 : 0); info = eliminated ? `Spectating · ${a} alive` : `Battle Royale · ${a} alive · zone ${Math.round(zoneRadius)}m`; }
     else if (gameMode === 'hunger') {
       const a = botMgr.bots.filter((b) => b.alive).length + (!eliminated && health > 0 ? 1 : 0);
-      const phase = hungerClosing ? `closing · ${Math.round(zoneRadius)}m` : `cornucopia open · ${Math.max(0, Math.ceil(HUNGER_GRACE - hungerTime))}s`;
+      const phase = hungerCountdown > 0 ? 'take your marks…' : hungerClosing ? `closing · ${Math.round(zoneRadius)}m` : `cornucopia open · ${Math.max(0, Math.ceil(HUNGER_GRACE - hungerTime))}s`;
       info = eliminated ? `Spectating · ${a} tributes left` : `🏹 Hunger Games · ${a} left · ${phase}`;
     }
     else if (gameMode === 'wave') info = `Wave ${waveNum}/${WAVE_TARGET} · ${botMgr.bots.filter((b) => b.alive).length} left`;
@@ -3516,9 +3562,10 @@ window.__game = {
   get flashState() { return { charges: flashCharges, max: FLASH_MAX, cd: +flashCD.toFixed(2), afterImages: afterImages.length }; },
   get standInfo() { return { worn: wornStand, equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
   __standDeflect: (dmg) => standDeflect(dmg),
+  __setCountdown: (v) => { hungerCountdown = v; hungerCountShown = 99; },
   get hungerInfo() {
     const weapons = pickups.list.filter((p) => p.kind === 'weapon').map((p) => ({ x: +p.mesh.position.x.toFixed(2), z: +p.mesh.position.z.toFixed(2), y: +p.base.toFixed(2), gun: p.gun, gone: !!p.gone }));
-    return { mode: gameMode, eliminated, closing: hungerClosing, time: +hungerTime.toFixed(1), zone: +zoneRadius.toFixed(1), arsenal: hungerArsenal.slice(), weapons, aliveBots: botMgr.bots.filter((b) => b.alive).length, hasCornucopia: !!cornucopiaMesh, winner: matchWinner };
+    return { mode: gameMode, eliminated, closing: hungerClosing, time: +hungerTime.toFixed(1), zone: +zoneRadius.toFixed(1), countdown: +hungerCountdown.toFixed(2), arsenal: hungerArsenal.slice(), weapons, aliveBots: botMgr.bots.filter((b) => b.alive).length, hasCornucopia: !!cornucopiaMesh, winner: matchWinner };
   },
   __wearStand: (id) => { wornStand = id || 0; if (!wornStand) despawnStand(); },
   __cycleStand: () => cycleStand(),
