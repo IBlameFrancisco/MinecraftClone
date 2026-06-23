@@ -328,6 +328,9 @@ export class WorldGen {
   // perimeter wall, a raised central beacon, pillars and cover. Outside the
   // bounds is void, so the wall keeps everyone in the fight.
   generateArena(chunk) {
+    // Each theme can supply its own unique topology builder; others fall back to the
+    // classic re-skinnable arena. (Jungle = a moated temple ziggurat in dense forest.)
+    if (this.arenaThemeName === 'jungle') return this._buildJungleArena(chunk);
     const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
     const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
     const T = this.T || ARENA_THEMES.ruins;       // active theme palette
@@ -409,6 +412,79 @@ export class WorldGen {
         if (Math.max(Math.abs(ax - cx), Math.abs(az - cz)) <= 2) chunk.setLocal(lx, F, lz, WATER);
       }
     }
+  }
+
+  // ---- JUNGLE arena (unique topology) ----
+  // A climbable stepped temple ziggurat crowned with a glowing idol, ringed by a
+  // wade-through moat crossed by four cardinal bridges, all sunk in dense jungle:
+  // short sightlines, vertical fights up the temple, water that slows you, leaf
+  // cover that blocks fire. Four-fold symmetric (fair for FFA), fully deterministic.
+  _buildJungleArena(chunk) {
+    const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
+    const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const wx = ox + lx, wz = oz + lz;
+        const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az), inr = Math.min(ax, az);
+        if (m > HALF) continue;                          // void beyond the arena
+        chunk.setLocal(lx, F - 2, lz, BEDROCK);
+        chunk.setLocal(lx, F - 1, lz, BEDROCK);
+
+        // Overgrown stone rampart with draping vines + a leafy parapet (keeps you in).
+        if (m >= HALF - 1) {
+          for (let y = 1; y <= WH; y++) {
+            const vine = m === HALF - 1 && y >= WH - 3 && (inr + y) % 3 === 0;
+            chunk.setLocal(lx, F + y, lz, vine ? LEAVES : COBBLE);
+          }
+          chunk.setLocal(lx, F + WH + 1, lz, ((ax + az) & 1) === 0 ? LEAVES : LOG);
+          continue;
+        }
+
+        // Jungle floor (grass with scattered dirt) — structures below overwrite it.
+        chunk.setLocal(lx, F, lz, hash2(wx, wz) < 0.16 ? DIRT : GRASS);
+
+        // Central stepped ziggurat: 1-high steps two wide (walkable), mossy stone with
+        // a grassy tread, crowned by a glowing idol shrine.
+        if (m <= 12) {
+          const h = Math.max(0, 6 - (m >> 1));
+          for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, y === h ? GRASS : COBBLE);
+          if (m === 0) { for (let y = 7; y <= 9; y++) chunk.setLocal(lx, F + y, lz, GLOWSTONE); }   // idol
+          else if (m === 1 && (ax === 0 || az === 0)) { chunk.setLocal(lx, F + 7, lz, LOG); chunk.setLocal(lx, F + 8, lz, LEAVES); }  // shrine posts
+          continue;
+        }
+
+        // Temple moat: a 1-deep wade-through ring (slows you), crossed by four 3-wide
+        // plank bridges on the cardinal axes (run across dry, or drop in for cover).
+        if (m >= 13 && m <= 16) {
+          if (inr <= 1) chunk.setLocal(lx, F, lz, PLANK);   // bridge deck (level with the banks)
+          else chunk.setLocal(lx, F, lz, WATER);
+          continue;
+        }
+
+        // Outer jungle: big trees + low root/bush cover.
+        this._jungleForest(chunk, lx, lz, F, ax, az);
+      }
+    }
+    chunk.recomputeHeightMap();
+    chunk.generated = true;
+  }
+
+  // Stamp the outer-ring jungle: tall trees at mirrored anchors (kept clear of the
+  // eight spawn pads) plus a little deterministic low cover.
+  _jungleForest(chunk, lx, lz, F, ax, az) {
+    const TREES = [[20, 20], [30, 30], [28, 13], [13, 28], [22, 34], [34, 22], [18, 33], [33, 18]];
+    for (const [cx, cz] of TREES) {
+      const d = Math.max(Math.abs(ax - cx), Math.abs(az - cz));
+      if (d > 2) continue;
+      if (d === 0) for (let y = 1; y <= 6; y++) chunk.setLocal(lx, F + y, lz, LOG);   // trunk
+      if (d <= 2) { chunk.setLocal(lx, F + 5, lz, LEAVES); chunk.setLocal(lx, F + 6, lz, LEAVES); }
+      if (d <= 1) chunk.setLocal(lx, F + 7, lz, LEAVES);                              // crown
+    }
+    // Keep a 3×3 clear pad at each (mirrored) spawn anchor so nobody spawns in cover.
+    for (const [sx, sz] of [[34, 0], [0, 34], [24, 24]]) if (Math.max(Math.abs(ax - sx), Math.abs(az - sz)) <= 1) return;
+    const h = hash2(ax * 7 + 3, az * 7 + 3);
+    if (h > 0.94) chunk.setLocal(lx, F + 1, lz, LEAVES);        // shrub
+    else if (h < 0.035) for (let y = 1; y <= 2; y++) chunk.setLocal(lx, F + y, lz, LOG);  // fallen-log cover
   }
 
   // Select the arena re-skin (materials + decoration) used by generateArena.
