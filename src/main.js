@@ -258,6 +258,9 @@ let difficulty = NORMAL;
 let menuMode = SURVIVAL, menuDiff = NORMAL;   // chosen on the start screen
 let health = 20, hunger = 20, dead = false;
 let invuln = 0, regenTimer = 0, hungerTimer = 0, starveTimer = 0;
+// True i-frames: blocks ALL damage including PvP (spawn protection, death-cam, blink).
+// Distinct from `invuln`, which PvP deliberately ignores so firefights aren't throttled.
+let protect = 0;
 let arena = false;                 // is the current world a battle map (arena/beach)?
 let battleMap = 'arena';           // which battle map: 'arena' or 'beach' (D-Day)
 let arenaTheme = 'ruins';          // arena re-skin (ruins/jungle/frozen/desert), random per match
@@ -849,7 +852,7 @@ const mpHandlers = {
     hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo()); mp.recolorBots(colorForBot);
   },
   onRoundOver: (winner) => { matchWinner = winner; if (!(gameMode === 'gungame' && startKillCam(winner))) { hud.showRoundOver(winner); hud.showScoreboard(); } },
-  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; },
+  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; },
   botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
@@ -905,7 +908,7 @@ function setGameMode(m) {
 // Tear down any leftover battle state so it can't leak into survival/creative (or a
 // resumed/quit match): spectate flags, god-mode i-frames, and battle-only HUD cards.
 function leaveBattleCleanup() {
-  eliminated = false; player.flying = false; invuln = 0;
+  eliminated = false; player.flying = false; invuln = 0; protect = 0;
   matchWinner = null; matchOverTimer = 0;
   abortDeathCam(); clearAfterImages();
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
@@ -924,6 +927,11 @@ function toggleMode() {
 // and doesn't grant them either — otherwise a shotgun's pellets all collapse to one.
 function damagePlayer(dmg, srcX, srcZ, pvp) {
   if ((mode !== SURVIVAL && mode !== BATTLE) || dead || !player.locked) return;
+  // True i-frames block everything (incl. PvP) so a persistent enemy AoE — a black hole
+  // field or Hollow Purple beam relayed every frame — can't re-kill you during the
+  // death-cam / respawn window and rack up phantom kills off a single death.
+  if (protect > 0) return;
+  if (health <= 0) return;        // already down and awaiting respawn — don't re-credit a death
   if (!pvp && invuln > 0) return;
   // Channelling chakra raises a protective shield: it soaks most of the hit, draining
   // chakra to do so (no chakra → no shield).
@@ -968,7 +976,7 @@ function battleDeath() {
     eliminated = true;
     player.flying = true;                 // free-fly spectator
     player.pos.set(0.5, ARENA.FLOOR + 24, 0.5); player.vel.set(0, 0, 0);
-    health = 20; hud.setHealth(20); invuln = 999;
+    health = 20; hud.setHealth(20); invuln = 999; protect = 999;
     hud.announce('Eliminated — spectating', '#ff5b5b'); hud.flashHurt();
     return;
   }
@@ -984,7 +992,7 @@ function respawnPlayer() {
   const sp = teamSpawnPoint(myTeam);
   player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
   if (sp.yaw !== undefined) player.yaw = sp.yaw;
-  health = 20; hud.setHealth(20); invuln = 1.6;
+  health = 20; hud.setHealth(20); invuln = 1.6; protect = 1.6;   // spawn protection vs PvP too
   grenadeCount = 2; hud.setGrenades(2);
   flashCharges = FLASH_MAX; flashRegen = 0; flashCD = 0;   // fresh flash steps on respawn
   if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
@@ -1076,7 +1084,7 @@ function setupMatch() {
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
-  health = 20; hud.setHealth(20); invuln = 1.5; dead = false;   // clean slate (also clears 999 invuln left by a BR elimination)
+  health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; dead = false;   // clean slate (also clears 999 invuln left by a BR elimination)
   hud.hideScoreboard();
   zoneRadius = gameMode === 'br' ? ARENA.HALF - 2 : 999;
   botMgr.clear();
@@ -1618,7 +1626,7 @@ function startDeathCam(killer, sec) {
   deathCam.focus.copy(player.pos); deathCam.focus.y += 1.0;
   deathCam.base = Math.random() * Math.PI * 2; deathCam.sweep = (Math.random() < 0.5 ? 1 : -1) * 1.1;
   deathCam.t = 0; deathCam.dur = sec; deathCam.active = true; deathCam.killer = killer || '';
-  invuln = 999;                         // can't be killed again mid-cam
+  invuln = 999; protect = 999;          // can't be killed again mid-cam (PvP included)
   hud.showDeathCam(killer);
 }
 function skipDeathCam() { if (deathCam.active) endDeathCam(); }
@@ -1658,7 +1666,7 @@ function resetMatch() {
   if (gameMode === 'wave') { if (isAuthority()) startWave(1); }
   else { for (const b of botMgr.bots) { b.kills = 0; b.deaths = 0; respawnBot(b); } }
   const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0);
-  health = 20; hud.setHealth(20); invuln = 1.5; lastHitBy = null;
+  health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; lastHitBy = null;
   streak = 0; grenadeCount = 2; hud.setGrenades(2);
   flashCharges = FLASH_MAX; flashRegen = 0; flashCD = 0;
   if (gameMode === 'gungame') applyGunGameLevel(true);
@@ -1756,7 +1764,7 @@ function flashStep(code) {
   const moved = player.flashTeleport(dx, dz, FLASH_DIST);
   if (moved < 0.3) return;                                     // blocked at the wall — don't burn a charge
   const end = player.pos.clone();
-  flashCharges--; flashCD = 0.18; flashRegen = 0; invuln = Math.max(invuln, 0.4);   // brief i-frames through the blink
+  flashCharges--; flashCD = 0.18; flashRegen = 0; invuln = Math.max(invuln, 0.4); protect = Math.max(protect, 0.4);   // brief i-frames through the blink (PvP too)
   spawnAfterImages(start, end, myName(), getSkin(mp.skin), 4);
   addShake(0.12); sfx.flashStep();
   broadcastFire('flash', start, _fdir.set(dx, 0, dz), { ex: end.x, ey: end.y, ez: end.z, skin: mp.skin });
@@ -3043,7 +3051,7 @@ function frame() {
   } else hud.setModeInfo(null);
 
   // Interaction
-  invuln -= sdt; breakCD -= sdt; placeCD -= sdt; attackCD -= sdt; fireCD -= sdt; fire2CD -= sdt;  // sdt freezes these on a single-player pause
+  invuln -= sdt; protect -= sdt; breakCD -= sdt; placeCD -= sdt; attackCD -= sdt; fireCD -= sdt; fire2CD -= sdt;  // sdt freezes these on a single-player pause
   const gun = gunOf(inventory.selectedId());
   const lmb = mouseLeft || keyBreak, rmb = mouseRight || keyPlace;   // Q/F are keyboard stand-ins for the mouse buttons
   // Chakra jutsu: hold to gather chakra (charge), release to unleash. Cancel the charge
@@ -3212,7 +3220,7 @@ window.__game = {
   get loaded() { return loaded; },
   get arena() { return arena; },
   get state() { return { mode, difficulty, diffName: DIFF_NAMES[difficulty], health, hunger, dead, arena }; },
-  get battleState() { return { gameMode, matchWinner, myTeam, warSide, warTickets, warTimer, warCapture, matchOverTimer, eliminated, invuln, flying: player.flying, mode }; },
+  get battleState() { return { gameMode, matchWinner, myTeam, warSide, warTickets, warTimer, warCapture, matchOverTimer, eliminated, invuln, protect: +protect.toFixed(2), myKills, myDeaths, health, flying: player.flying, mode }; },
   __testFire: (id) => fireGun(gunOf(id)),
   __setWar: (o) => { if (o.timer !== undefined) warTimer = o.timer; if (o.tickets !== undefined) warTickets = o.tickets; if (o.capture !== undefined) warCapture = o.capture; },
   __trigger: (down) => { mouseLeft = !!down; triggerConsumed = false; },   // drive the charge-up loop in tests
