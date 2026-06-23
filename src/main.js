@@ -471,7 +471,9 @@ function startSelectedMode(seedStr, forceNew) {
     setGameMode(BATTLE);
     inventory.setLoadout(BATTLE_LOADOUT);
     health = 20; hud.setHealth(20);
-    loadWorld(seedStr, battleCfg.mode === 'war' ? 'beach' : 'arena');
+    // A chosen map pins the theme (no more random switching); 'random'/War leave it unset.
+    const theme = battleCfg.mode === 'war' || battleCfg.map === 'random' ? undefined : battleCfg.map;
+    loadWorld(seedStr, battleCfg.mode === 'war' ? 'beach' : 'arena', theme);
     setupMatch();
   } else {
     setGameMode(menuMode);
@@ -486,7 +488,7 @@ function startSelectedMode(seedStr, forceNew) {
 function menuSig() {
   const b = battleCfg;
   return menuMode === BATTLE
-    ? `B:${b.mode}:${b.team}:${b.side}:${b.size}:${b.botDiff}:${b.scoreLimit}`
+    ? `B:${b.mode}:${b.team}:${b.side}:${b.size}:${b.botDiff}:${b.scoreLimit}:${b.map}`
     : `${menuMode}:${menuDiff}`;
 }
 let liveSig = '';
@@ -530,7 +532,7 @@ modeBattleBtn.addEventListener('click', () => { menuMode = BATTLE; refreshModePi
 document.getElementById('diffSelect').addEventListener('change', (e) => { menuDiff = parseInt(e.target.value, 10); });
 
 // ---------- Battle setup (game mode, FFA/Teams, size, bot difficulty, score) ----------
-const battleCfg = { mode: 'dm', team: false, side: 'allied', size: 6, botDiff: 'normal', scoreLimit: 20 };
+const battleCfg = { mode: 'dm', team: false, side: 'allied', size: 6, botDiff: 'normal', scoreLimit: 20, map: 'random' };
 const bsGameMode = document.getElementById('bsGameMode');
 const bsTeamRow = document.getElementById('bsTeamRow');
 const bsFFA = document.getElementById('bsModeFFA');
@@ -540,6 +542,8 @@ const bsSizeLabel = document.getElementById('bsSizeLabel');
 const bsBotDiff = document.getElementById('bsBotDiff');
 const bsScore = document.getElementById('bsScore');
 const bsScoreRow = bsScore.closest('.bsrow');
+const bsMap = document.getElementById('bsMap');
+const bsMapRow = document.getElementById('bsMapRow');
 // Modes that force free-for-all / co-op rather than letting you pick teams.
 const FORCES_FFA = { gungame: true, br: true };
 const FORCES_COOP = { wave: true };
@@ -563,6 +567,7 @@ function refreshBattleSetup() {
   bsTeam.textContent = war ? '🛡 Hold (Axis)' : 'Teams';
   bsFFA.classList.toggle('active', war ? battleCfg.side === 'allied' : !battleCfg.team);
   bsTeam.classList.toggle('active', war ? battleCfg.side === 'axis' : battleCfg.team);
+  if (bsMapRow) bsMapRow.style.display = war ? 'none' : 'flex';   // War always plays the D-Day beach
   updateSkinVisibility();
 }
 bsGameMode.addEventListener('change', (e) => { battleCfg.mode = e.target.value; fillSizeOptions(); refreshBattleSetup(); });
@@ -571,6 +576,7 @@ bsTeam.addEventListener('click', () => { if (battleCfg.mode === 'war') battleCfg
 bsSize.addEventListener('change', (e) => { battleCfg.size = parseInt(e.target.value, 10); });
 bsBotDiff.addEventListener('change', (e) => { battleCfg.botDiff = e.target.value; });
 bsScore.addEventListener('change', (e) => { battleCfg.scoreLimit = parseInt(e.target.value, 10); });
+if (bsMap) bsMap.addEventListener('change', (e) => { battleCfg.map = e.target.value; });
 fillSizeOptions(); refreshBattleSetup();
 refreshModePicker();
 
