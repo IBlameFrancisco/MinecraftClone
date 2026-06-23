@@ -155,6 +155,8 @@ export class Multiplayer {
   _onData(conn, d) {
     switch (d.t) {
       case 'init': this._roster(conn.peer, d.hostName || 'Host'); this.handlers.onInit(d); break;
+      case 'lobby': this._roster(d.hostId, d.hostName); this.handlers.onLobby?.(d); break;             // host → guests: lobby roster/teams
+      case 'lreq': if (this.isHost) this.handlers.onLobbyReq?.(conn.peer, d.name, d.team, d.ready); break;  // guest → host: pick team / ready
       case 'hello': this._roster(d.id, d.name); if (this.isHost) this._relay(conn.peer, d); break;
       case 'pos': this._roster(d.id, d.name); this._updateRemote(d.id, d); if (this.isHost) this._relay(conn.peer, d); break;
       case 'edit': this.handlers.onEdit(d.x, d.y, d.z, d.id); if (this.isHost) this._relay(conn.peer, d); break;
@@ -184,6 +186,11 @@ export class Multiplayer {
     this.handlers.onChat?.(this.name, text);      // local echo
     this.broadcast({ t: 'chat', name: this.name, text });
   }
+
+  // ---- Pre-match lobby ----
+  sendLobby(state) { if (this.online && this.isHost) this.broadcast({ t: 'lobby', hostId: this.myId, hostName: this.name, ...state }); }
+  sendLobbyReq(team, ready) { if (this.online && !this.isHost) this.broadcast({ t: 'lreq', id: this.myId, name: this.name, team, ready }); }
+  startBattle(initPayload) { if (this.online && this.isHost) this.broadcast({ t: 'init', hostName: this.name, ...initPayload }); }
 
   playerList() {
     const list = [{ name: this.name, you: true }];
