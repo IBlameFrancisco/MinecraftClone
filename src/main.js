@@ -1204,7 +1204,10 @@ function setupZone(on) {
 function applyGunGameLevel(force, killsOverride) {
   const kills = killsOverride != null ? killsOverride : myKills;
   const lvl = Math.min(kills, GUNGAME_LADDER.length - 1);
-  if (force || lvl !== gunLevelShown) { gunLevelShown = lvl; inventory.setLoadout([GUNGAME_LADDER[lvl]]); }
+  const want = GUNGAME_LADDER[lvl];
+  // Re-snap if the level changed OR the held gun drifted from the ladder weapon, so the
+  // gun stays locked to your kill count (you can't keep a gun you didn't earn).
+  if (force || lvl !== gunLevelShown || inventory.selectedId() !== want) { gunLevelShown = lvl; inventory.setLoadout([want]); }
 }
 function myBoardKills() { const e = board.find((x) => x.id === selfId()); return e ? e.kills : 0; }
 // KOTH/objective: give one point to a combatant (frags double as the score).
@@ -1944,7 +1947,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyE') {
     if (dead) return;
-    if (inventory.open) closeInventory(); else if (player.locked) openInventory(2);  // not from pause/menu
+    // No creative inventory mid-battle: it would let you grab any gun from the palette
+    // (e.g. an end-game weapon) and bypass your fixed loadout / Gun Game ladder level.
+    if (inventory.open) closeInventory(); else if (player.locked && mode !== BATTLE) openInventory(2);  // not from pause/menu
   } else if (e.code === 'Escape' && inventory.open) {
     inventory.close(); refreshOverlays();
   } else if (e.code === 'KeyG') {
