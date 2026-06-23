@@ -393,6 +393,22 @@ export class BlackHoles {
     this.group.remove(h.g); h.g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
     if (h.flash) { this.group.remove(h.flash); h.flash.material.dispose(); }
   }
+  // Active singularities as gravitational-lens sources (world pos + screen radius
+  // + strength), so the post-process can warp space around them. Strongest while
+  // it holds; spikes as it crunches to a point on collapse.
+  lensFields(out) {
+    out.length = 0;
+    for (const h of this.list) {
+      if (h.phase === 'fly') continue;
+      let s = 0, rad = 7.5;
+      if (h.phase === 'open') s = Math.min(1, h.t / 0.45);
+      else if (h.phase === 'hold') s = 1;
+      else { const k = Math.min(1, h.c / 0.5); s = 1 + k * 1.1; rad = 7.5 * (1 - 0.45 * k); }   // implosion crunch
+      if (s <= 0.02) continue;
+      out.push({ x: h.pos.x, y: h.pos.y, z: h.pos.z, rad, str: 0.5 * s });
+    }
+    return out;
+  }
   update(dt, world, hooks) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const h = this.list[i], gun = h.gun;
