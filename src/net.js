@@ -29,6 +29,7 @@ function nameSprite(name) {
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   spr.scale.set(2.2, 0.55, 1);
   spr.position.y = 2.3;
+  spr.userData.ownTex = true;   // this map is per-avatar — safe to dispose (unlike shared glow textures)
   return spr;
 }
 
@@ -208,7 +209,7 @@ export class Multiplayer {
     const now = performance.now();
     if (now - this._lastPos < 50) return;          // ~20 Hz
     this._lastPos = now;
-    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive !== false, wep: p.wep | 0, ch: p.ch || 0 });
+    this.broadcast({ t: 'pos', id: this.myId, name: this.name, skin: this.skin, x: p.x, y: p.y, z: p.z, yaw: p.yaw, alive: p.alive !== false, wep: p.wep | 0, ch: p.ch || 0, st: p.st | 0 });
   }
   sendEdit(x, y, z, id) { if (this.online) this.broadcast({ t: 'edit', x, y, z, id }); }
   sendEdits(list) { if (this.online && list.length) this.broadcast({ t: 'edits', list }); }
@@ -330,7 +331,7 @@ export class Multiplayer {
       this.group.remove(r.group);
       r.group.traverse((o) => {
         if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); }
-        else if (o.isSprite && o.material) { o.material.map?.dispose(); o.material.dispose(); }   // name-tag texture
+        else if (o.isSprite && o.material) { if (o.userData.ownTex) o.material.map?.dispose(); o.material.dispose(); }   // only the per-avatar name tag owns its map; spirits/weapons share glow textures
       });
       this.remotes.delete(id);
     }

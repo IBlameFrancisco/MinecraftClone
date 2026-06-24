@@ -866,7 +866,7 @@ const mpHandlers = {
     hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo()); mp.recolorBots(colorForBot);
   },
   onRoundOver: (winner) => { matchWinner = winner; if (!(gameMode === 'gungame' && startKillCam(winner))) { hud.showRoundOver(winner); hud.showScoreboard(); } },
-  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; timeStop.used = false; endTimeStop(false); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; },
+  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; timeStop.used = false; endTimeStop(false); if (gameMode === 'hunger') hungerReset(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; },
   botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
@@ -925,7 +925,7 @@ function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0; protect = 0;
   wornStand = 0; despawnStand();                 // dismiss any Stand on the way out
   timeStop.used = false; endTimeStop(false);     // clear any stopped time
-  setupCornucopia(false);                        // tear down the Hunger Games loot altar
+  setupCornucopia(false); setupHill(false); setupZone(false);   // tear down all mode props so they don't linger on the menu
   matchWinner = null; matchOverTimer = 0;
   abortDeathCam(); clearAfterImages();
   hud.hideRoundOver(); hud.hideScoreboard(); hud.setModeInfo(null);
@@ -972,6 +972,7 @@ function damagePlayer(dmg, srcX, srcZ, pvp) {
 }
 function die() {
   if (mode === BATTLE) { battleDeath(); return; }
+  endTimeStop(false);                  // don't leave the world frozen on the death screen
   dead = true; document.exitPointerLock(); resetBreak();
   const hardcore = difficulty === HARDCORE;
   deathEl.querySelector('h1').textContent = hardcore ? 'GAME OVER' : 'YOU DIED';
@@ -1133,6 +1134,7 @@ function setupMatch() {
   computeCoverPoints();
   setupHill(gameMode === 'koth');
   setupZone(gameMode === 'br' || gameMode === 'hunger');
+  if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);   // size the ring immediately (else BR renders it collapsed for a frame)
   setupCornucopia(gameMode === 'hunger');
   sky.setArena(gameMode !== 'war'); sky.setWar(gameMode === 'war');
   if (gameMode === 'war') pickups.clear();
@@ -1879,7 +1881,7 @@ function clearDeathAnim(mesh) {            // a respawning bot reclaims its mesh
   for (let i = dyingAvatars.length - 1; i >= 0; i--) if (dyingAvatars[i].mesh === mesh) dyingAvatars.splice(i, 1);
 }
 function disposeAvatar(m) {
-  m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } else if (o.isSprite && o.material) { o.material.map?.dispose(); o.material.dispose(); } });
+  m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } else if (o.isSprite && o.material) { if (o.userData.ownTex) o.material.map?.dispose(); o.material.dispose(); } });   // never dispose shared glow textures
 }
 function resetAvatarLook(mesh) {
   mesh.rotation.x = 0; mesh.rotation.z = 0;
@@ -2126,6 +2128,7 @@ function respawn() {
   if (difficulty === HARDCORE) return;
   dead = false; health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20);
   player.pos.copy(SPAWN); player.vel.set(0, 0, 0);
+  timeStop.used = false; endTimeStop(false);   // a fresh life re-arms the Stand time stop (sandbox)
   refreshOverlays(); renderer.domElement.requestPointerLock();
 }
 
@@ -2523,7 +2526,7 @@ function fireCleave(gun, muzzle) {
     });
   }
   if (mp.online) for (const [id, r] of mp.remotes) {
-    if (friendly(id)) continue;
+    if (friendly(id) || !r.group.visible) continue;   // skip dead / spectating players
     tryHit(r.group.position.x, r.group.position.y + 1, r.group.position.z, (dmg) => mp.sendHit(id, dmg));
   }
   for (const m of mobs.list) tryHit(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, (dmg) => m.hurt(dmg, player.pos.x, player.pos.z));
@@ -2568,7 +2571,7 @@ function nearestStandTarget(m) {
     });
   }
   if (mp.online) for (const [id, r] of mp.remotes) {
-    if (friendly(id)) continue;
+    if (friendly(id) || !r.group.visible) continue;   // skip dead / spectating players
     const gp = r.group.position; pick(gp.x, gp.y + 1, gp.z, (dmg) => mp.sendHit(id, dmg));
   }
   for (const mb of mobs.list) pick(mb.pos.x, mb.pos.y + mb.height * 0.5, mb.pos.z, (dmg) => mb.hurt(dmg, player.pos.x, player.pos.z));
@@ -2598,14 +2601,18 @@ function activateTimeStop() {
   if (mp.online) mp.broadcast({ t: 'timestop', dur: m.timeStop, o: selfId() });
 }
 function onRemoteTimeStop(owner, dur) {
-  if (!owner || owner === selfId() || timeStop.active) return;
-  timeStop.active = true; timeStop.t = dur || 4; timeStop.owner = owner;
+  if (!owner || owner === selfId()) return;
+  if (!dur || dur <= 0) { if (timeStop.active && timeStop.owner === owner) endTimeStop(true); return; }   // owner cancelled early
+  if (timeStop.active) return;
+  timeStop.active = true; timeStop.t = dur; timeStop.owner = owner;
   hud.announce('🕛 Time has stopped!', '#e6ecff'); sfx.timeStop();
 }
 function endTimeStop(announce) {
   if (!timeStop.active) return;
+  const wasMine = timeStop.owner === selfId();
   timeStop.active = false; timeStop.owner = null; timeStop.t = 0;
   if (announce) { hud.announce('…time resumes', '#cfe0ff'); sfx.timeResume(); }
+  if (wasMine && mp.online) mp.broadcast({ t: 'timestop', o: selfId(), dur: 0 });   // tell peers to resume in sync with me
 }
 function updateStand(active, dt) {
   const m = active ? currentStand() : null;
@@ -3399,15 +3406,15 @@ function frame() {
     if (isAuthority()) {
       botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
       botMgr.update(botDt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
-      if (!frozen) manageBots(dt);
-      if (!frozen && arenaTheme === 'ruins' && gameMode !== 'war') lavaBurnEntities(dt);   // ruins pit ring-out
+      if (!frozen && !tsActive) manageBots(dt);                  // no bot respawns / death finalisation in stopped time
+      if (!frozen && !tsActive && arenaTheme === 'ruins' && gameMode !== 'war') lavaBurnEntities(dt);   // ruins pit ring-out
       if (!matchWinner && !frozen && !tsActive) modeTick(dt);   // zone/objective logic also pauses in stopped time
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
     }
     // Gun Game weapon follows your level on every client (host kills are local,
     // guests read their kill count off the synced scoreboard).
     if (gameMode === 'gungame') applyGunGameLevel(false, isAuthority() ? myKills : myBoardKills());
-    if (matchOverTimer > 0 && !frozen) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
+    if (matchOverTimer > 0 && !frozen && !tsActive) { matchOverTimer -= dt; if (matchOverTimer <= 0 && isAuthority()) resetMatch(); }
     pickups.update(dt, player.pos, active ? applyPickup : () => false);
 
     // Radar: teammates green, enemies red, rotated so you face up.
