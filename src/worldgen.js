@@ -19,7 +19,7 @@ export const BIOME_FOREST = 3;
 // A dark ritual dungeon: a stepped central altar with a glowing obelisk, a tall
 // banded perimeter wall with torch sconces + crenellations, broken pillars,
 // braziers and raised stages. Generated deterministically (no edit sync needed).
-export const ARENA = { FLOOR: 50, HALF: 38, WALL_H: 10 };
+export const ARENA = { FLOOR: 50, HALF: 72, WALL_H: 12 };
 
 // ---- Hunger Games arena ----
 // A huge open wilderness (same floor level as the arena, so all spawn / zone / fall
@@ -513,6 +513,28 @@ export class WorldGen {
     }
   }
 
+  // ---- Big-arena helpers (shared by the four themes) ----
+  // True near one of the eight perimeter spawn pads (folded coords) — keep them clear so
+  // nobody spawns inside cover.
+  _nearPad(x, z, pad = 3) {
+    const ax = Math.abs(x), az = Math.abs(z);
+    return (Math.abs(ax - 62) <= pad && az <= pad) || (ax <= pad && Math.abs(az - 62) <= pad) || (Math.abs(ax - 44) <= pad && Math.abs(az - 44) <= pad);
+  }
+  // Scatter features on a jittered grid of cell size G: for column (wx,wz) it visits every
+  // feature anchor in the 3×3 neighbourhood and calls cb(cgx,cgz, fx,fz, dx,dz, r2) so the
+  // theme can stamp whatever part of that feature overlaps this column (chunk-seam safe).
+  _scatterCells(wx, wz, G, cb) {
+    const gx0 = Math.floor(wx / G), gz0 = Math.floor(wz / G);
+    for (let cgx = gx0 - 1; cgx <= gx0 + 1; cgx++) {
+      for (let cgz = gz0 - 1; cgz <= gz0 + 1; cgz++) {
+        const fx = cgx * G + ((hash2(cgx * 7 + 1, cgz * 7 + 1) * G) | 0);
+        const fz = cgz * G + ((hash2(cgx * 7 + 2, cgz * 7 + 2) * G) | 0);
+        const dx = wx - fx, dz = wz - fz;
+        cb(cgx, cgz, fx, fz, dx, dz, dx * dx + dz * dz);
+      }
+    }
+  }
+
   // ---- JUNGLE arena (unique topology) ----
   // A climbable stepped temple ziggurat crowned with a glowing idol, ringed by a
   // wade-through moat crossed by four cardinal bridges, all sunk in dense jungle:
@@ -542,48 +564,52 @@ export class WorldGen {
         // Jungle floor (grass with scattered dirt) — structures below overwrite it.
         chunk.setLocal(lx, F, lz, hash2(wx, wz) < 0.16 ? DIRT : GRASS);
 
-        // Central stepped ziggurat: 1-high steps two wide (walkable), mossy stone with
-        // a grassy tread, crowned by a glowing idol shrine.
-        if (m <= 12) {
-          const h = Math.max(0, 6 - (m >> 1));
+        // GRAND central ziggurat: 1-high steps two wide (walkable), mossy stone with a
+        // grassy tread, ~13 high, crowned by a glowing idol shrine.
+        if (m <= 26) {
+          const h = Math.max(0, 13 - (m >> 1));
           for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, y === h ? GRASS : COBBLE);
-          if (m === 0) { for (let y = 7; y <= 9; y++) chunk.setLocal(lx, F + y, lz, GLOWSTONE); }   // idol
-          else if (m === 1 && (ax === 0 || az === 0)) { chunk.setLocal(lx, F + 7, lz, LOG); chunk.setLocal(lx, F + 8, lz, LEAVES); }  // shrine posts
+          if (m === 0) { for (let y = 14; y <= 16; y++) chunk.setLocal(lx, F + y, lz, GLOWSTONE); }   // idol
+          else if (m <= 2 && (ax === 0 || az === 0)) { chunk.setLocal(lx, F + 14, lz, LOG); chunk.setLocal(lx, F + 15, lz, LEAVES); }  // shrine posts
           continue;
         }
 
-        // Temple moat: a 1-deep wade-through ring (slows you), crossed by four 3-wide
-        // plank bridges on the cardinal axes (run across dry, or drop in for cover).
-        if (m >= 13 && m <= 16) {
+        // Temple moat: a wide 1-deep wade-through ring (slows you), crossed by four
+        // 3-wide plank bridges on the cardinal axes (run across dry, or drop in for cover).
+        if (m >= 28 && m <= 32) {
           if (inr <= 1) chunk.setLocal(lx, F, lz, PLANK);   // bridge deck (level with the banks)
           else chunk.setLocal(lx, F, lz, WATER);
           continue;
         }
 
-        // Outer jungle: big trees + low root/bush cover.
-        this._jungleForest(chunk, lx, lz, F, ax, az);
+        // Outer jungle: a dense organic forest of big trees, ruins, shrubs and ponds.
+        if (m > 33) this._jungleScatter(chunk, lx, lz, wx, wz, F);
       }
     }
     chunk.recomputeHeightMap();
     chunk.generated = true;
   }
 
-  // Stamp the outer-ring jungle: tall trees at mirrored anchors (kept clear of the
-  // eight spawn pads) plus a little deterministic low cover.
-  _jungleForest(chunk, lx, lz, F, ax, az) {
-    const TREES = [[20, 20], [30, 30], [28, 13], [13, 28], [22, 34], [34, 22], [18, 33], [33, 18]];
-    for (const [cx, cz] of TREES) {
-      const d = Math.max(Math.abs(ax - cx), Math.abs(az - cz));
-      if (d > 2) continue;
-      if (d === 0) for (let y = 1; y <= 6; y++) chunk.setLocal(lx, F + y, lz, LOG);   // trunk
-      if (d <= 2) { chunk.setLocal(lx, F + 5, lz, LEAVES); chunk.setLocal(lx, F + 6, lz, LEAVES); }
-      if (d <= 1) chunk.setLocal(lx, F + 7, lz, LEAVES);                              // crown
-    }
-    // Keep a 3×3 clear pad at each (mirrored) spawn anchor so nobody spawns in cover.
-    for (const [sx, sz] of [[34, 0], [0, 34], [24, 24]]) if (Math.max(Math.abs(ax - sx), Math.abs(az - sz)) <= 1) return;
-    const h = hash2(ax * 7 + 3, az * 7 + 3);
-    if (h > 0.94) chunk.setLocal(lx, F + 1, lz, LEAVES);        // shrub
-    else if (h < 0.035) for (let y = 1; y <= 2; y++) chunk.setLocal(lx, F + y, lz, LOG);  // fallen-log cover
+  // The deep outer jungle: trees, mossy ruin stubs, shrubs and ponds scattered across
+  // the whole expanse (organic, chunk-seam safe), kept off the temple zone + spawn pads.
+  _jungleScatter(chunk, lx, lz, wx, wz, F) {
+    if (this._nearPad(wx, wz)) return;                       // never stamp on a spawn pad
+    this._scatterCells(wx, wz, 10, (cgx, cgz, fx, fz, dx, dz, r2) => {
+      if (r2 > 9 || Math.hypot(fx, fz) < 35) return;
+      const t = hash2(cgx * 13 + 3, cgz * 13 + 3), cheb = Math.max(Math.abs(dx), Math.abs(dz));
+      if (t < 0.5) {                                       // towering jungle tree
+        const h = 7 + ((hash2(cgx, cgz) * 5) | 0);
+        if (dx === 0 && dz === 0) for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, LOG);
+        if (cheb <= 2 && r2 <= 5) { chunk.setLocal(lx, F + h - 1, lz, LEAVES); chunk.setLocal(lx, F + h, lz, LEAVES); }
+        if (cheb <= 1) chunk.setLocal(lx, F + h + 1, lz, LEAVES);
+      } else if (t < 0.66) {                               // broken mossy wall (cover)
+        if (r2 <= 1) { chunk.setLocal(lx, F + 1, lz, COBBLE); chunk.setLocal(lx, F + 2, lz, COBBLE); }
+      } else if (t < 0.8) {                                // leafy shrub
+        if (r2 <= 2) { chunk.setLocal(lx, F + 1, lz, LEAVES); chunk.setLocal(lx, F + 2, lz, LEAVES); }
+      } else if (t < 0.9) {                                // jungle pond
+        if (r2 <= 4) chunk.setLocal(lx, F, lz, WATER);
+      }
+    });
   }
 
   // ---- FROZEN arena (unique topology) ----
@@ -593,7 +619,8 @@ export class WorldGen {
   _buildFrozenArena(chunk) {
     const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
     const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
-    const PERCHES = [[30, 30], [12, 30], [30, 12]];
+    // Stepped ice perches (the sniper high grounds) spread across the lake — mirrored.
+    const PERCHES = [[40, 40], [18, 46], [46, 18], [30, 60], [60, 30], [56, 56]];
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const wx = ox + lx, wz = oz + lz;
@@ -612,34 +639,47 @@ export class WorldGen {
         // Frozen lake floor (slippery ice everywhere; structures overwrite).
         chunk.setLocal(lx, F, lz, ICE);
 
-        // Central thin ice → a freezing pool you fall into in the open (1 deep, so you
-        // can still wade/scramble out — it slows you in the exposed middle).
-        if (m <= 6) {
-          if (m <= 5) chunk.setLocal(lx, F, lz, WATER);
+        // A wide central freezing pool you crash through in the open (1 deep — wade out).
+        if (m <= 12) {
+          if (m <= 11) chunk.setLocal(lx, F, lz, WATER);
           else if (((ax + az) & 1) === 0) chunk.setLocal(lx, F, lz, GLASS);   // cracked-ice lip ring
           continue;
         }
+        if (this._nearPad(wx, wz)) continue;                // keep spawn pads flat ice (clear of perches)
 
-        // Stepped ice perches (the sniper high ground) + a glowing cap.
+        // Tall stepped ice perches + a glowing cap (the high ground).
         let onPerch = false;
         for (const [cx, cz] of PERCHES) {
           const d = Math.max(Math.abs(ax - cx), Math.abs(az - cz));
-          if (d > 3) continue;
+          if (d > 4) continue;
           onPerch = true;
-          const h = 4 - d;                                  // stepped pyramid, 1-high treads
+          const h = 5 - d;                                  // stepped pyramid, 1-high treads
           for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, y === h ? GLASS : COBBLE);
           if (d === 0) chunk.setLocal(lx, F + h + 1, lz, GLOWSTONE);
         }
         if (onPerch) continue;
 
-        // Sparse low snow drifts for a sliver of cover (kept off the spawn pads).
-        if ([[34, 0], [0, 34], [24, 24]].some(([sx, sz]) => Math.max(Math.abs(ax - sx), Math.abs(az - sz)) <= 1)) continue;
-        const hs = hash2(ax * 5 + 9, az * 5 + 9);
-        if (hs > 0.965) chunk.setLocal(lx, F + 1, lz, SNOW);
+        // Glittering ice-spire field — tall, sparse glass shards that break sightlines but
+        // keep the wide sniping lanes open. Plus the odd snow drift.
+        if (m > 14) this._frozenScatter(chunk, lx, lz, wx, wz, F);
       }
     }
     chunk.recomputeHeightMap();
     chunk.generated = true;
+  }
+  _frozenScatter(chunk, lx, lz, wx, wz, F) {
+    if (this._nearPad(wx, wz)) return;
+    this._scatterCells(wx, wz, 13, (cgx, cgz, fx, fz, dx, dz, r2) => {
+      if (r2 > 4 || Math.hypot(fx, fz) < 16) return;
+      const t = hash2(cgx * 17 + 4, cgz * 17 + 4);
+      if (t < 0.5) {                                       // tall ice spire
+        const h = 4 + ((hash2(cgx, cgz) * 6) | 0);
+        if (dx === 0 && dz === 0) for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, GLASS);
+        else if (r2 <= 1) for (let y = 1; y <= Math.max(1, h - 3); y++) chunk.setLocal(lx, F + y, lz, GLASS);
+      } else if (t < 0.72) {                               // snow drift (low cover)
+        if (r2 <= 2) chunk.setLocal(lx, F + 1, lz, SNOW);
+      }
+    });
   }
 
   // ---- DESERT arena (unique topology) ----
@@ -649,7 +689,6 @@ export class WorldGen {
   _buildDesertArena(chunk) {
     const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
     const F = ARENA.FLOOR, HALF = ARENA.HALF, WH = ARENA.WALL_H;
-    const MESA = [[31, 31, 6, 4], [11, 30, 6, 3], [30, 11, 6, 3]];   // [cx, cz, radius, height] (clear of the corner spawn pads)
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const wx = ox + lx, wz = oz + lz;
@@ -666,36 +705,44 @@ export class WorldGen {
           continue;
         }
 
-        // Central butte: a tall stepped mesa with a glowing top (the prize / KOTH).
-        if (m <= 9) {
-          const h = m <= 1 ? 7 : m <= 3 ? 6 : m <= 5 ? 5 : m <= 7 ? 4 : 2;   // 2-wide treads, climbable
+        // GREAT central butte: a towering stepped mesa with a glowing top (the prize).
+        if (m <= 16) {
+          const h = Math.max(2, 14 - Math.floor(m * 0.78));   // ~1.3-wide treads, climbable
           for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, y === h ? COBBLE : SAND);
-          if (m === 0) for (let y = 8; y <= 9; y++) chunk.setLocal(lx, F + y, lz, GLOWSTONE);
-          else if (m <= 1) chunk.setLocal(lx, F + 8, lz, COBBLE);
+          if (m === 0) for (let y = 15; y <= 16; y++) chunk.setLocal(lx, F + y, lz, GLOWSTONE);
+          else if (m <= 1) chunk.setLocal(lx, F + 15, lz, COBBLE);
           continue;
         }
 
-        // Corner plateaus with a stepped ramp skirt so they're walkable up.
-        let built = false;
-        for (const [cx, cz, r, ph] of MESA) {
-          const d = Math.max(Math.abs(ax - cx), Math.abs(az - cz));
-          if (d > r) continue;
-          built = true;
-          const top = d <= r - ph ? ph : Math.max(1, ph - (d - (r - ph)));   // flat top, stepped rim
-          for (let y = 1; y <= top; y++) chunk.setLocal(lx, F + y, lz, y === top ? COBBLE : SAND);
-        }
-        if (built) continue;
+        // Long plank catwalks radiating from the butte along the cardinal axes —
+        // elevated sniping lanes over the sand.
+        if (inr <= 1 && m >= 17 && m <= 38) { chunk.setLocal(lx, F + 6, lz, PLANK); continue; }
 
-        // Plank catwalks along the axes linking the butte to the corner plateaus.
-        if (inr <= 1 && m >= 9 && m <= 21) { chunk.setLocal(lx, F + 3, lz, PLANK); continue; }
-
-        // A little low cover on the open sand (off the spawn pads).
-        if ([[34, 0], [0, 34], [24, 24]].some(([sx, sz]) => Math.max(Math.abs(ax - sx), Math.abs(az - sz)) <= 1)) continue;
-        if (hash2(ax * 5 + 2, az * 5 + 2) > 0.955) chunk.setLocal(lx, F + 1, lz, SAND);
+        // The open canyon: scattered mesas/plateaus, dunes and cacti rising from the sand.
+        if (m > 18) this._desertScatter(chunk, lx, lz, wx, wz, F);
       }
     }
     chunk.recomputeHeightMap();
     chunk.generated = true;
+  }
+  _desertScatter(chunk, lx, lz, wx, wz, F) {
+    if (this._nearPad(wx, wz, 4)) return;                    // mesas are wide — clear a little more
+    this._scatterCells(wx, wz, 16, (cgx, cgz, fx, fz, dx, dz, r2) => {
+      if (Math.hypot(fx, fz) < 22) return;
+      const t = hash2(cgx * 19 + 6, cgz * 19 + 6), cheb = Math.max(Math.abs(dx), Math.abs(dz));
+      if (t < 0.55) {                                      // stepped sand mesa (high ground + cover)
+        const ph = 3 + ((hash2(cgx, cgz) * 5) | 0), r = ph + 2;
+        if (cheb <= r) {
+          const top = cheb <= r - ph ? ph : Math.max(1, ph - (cheb - (r - ph)));
+          for (let y = 1; y <= top; y++) chunk.setLocal(lx, F + y, lz, y === top ? COBBLE : SAND);
+        }
+      } else if (t < 0.78) {                               // rolling sand dune (low cover)
+        if (cheb <= 2) chunk.setLocal(lx, F + 1, lz, SAND);
+        if (cheb === 0) chunk.setLocal(lx, F + 2, lz, SAND);
+      } else if (t < 0.86) {                               // a lone cactus
+        if (dx === 0 && dz === 0) for (let y = 1; y <= 3; y++) chunk.setLocal(lx, F + y, lz, CACTUS);
+      }
+    });
   }
 
   // ---- RUINS arena (unique topology) ----
@@ -737,28 +784,36 @@ export class WorldGen {
             chunk.setLocal(lx, F - 4, lz, BEDROCK);
             for (let y = F - 3; y <= F - 1; y++) chunk.setLocal(lx, y, lz, LAVA);   // 3-deep lava
           }
-          // Broken obelisk rising from the lava through the pit (glowing crown).
-          if (m === 0) { for (let y = F - 3; y <= F + 5; y++) chunk.setLocal(lx, y, lz, y >= F + 4 ? GLOWSTONE : COBBLE); }
-          else if (m <= 1) { for (let y = F - 3; y <= F + 2; y++) chunk.setLocal(lx, y, lz, COBBLE); }
+          // Towering broken obelisk rising from the lava through the pit (glowing crown).
+          if (m === 0) { for (let y = F - 3; y <= F + 9; y++) chunk.setLocal(lx, y, lz, y >= F + 8 ? GLOWSTONE : COBBLE); }
+          else if (m <= 1) { for (let y = F - 3; y <= F + 4; y++) chunk.setLocal(lx, y, lz, COBBLE); }
           continue;
         }
 
-        // Raised colonnade: broken stone pillars for cover, mirrored to all quadrants.
-        this._ruinsColonnade(chunk, lx, lz, F, ax, az);
+        // The fallen cathedral grounds: a vast broken colonnade + ruined walls.
+        if (m > 11) this._ruinsScatter(chunk, lx, lz, wx, wz, F);
       }
     }
     chunk.recomputeHeightMap();
     chunk.generated = true;
   }
-  _ruinsColonnade(chunk, lx, lz, F, ax, az) {
-    const PILL = [[14, 14, 5], [22, 14, 4], [14, 22, 4], [26, 26, 6], [32, 16, 3], [16, 32, 3], [33, 33, 5]];
-    for (const [cx, cz, ph] of PILL) {
-      if (ax === cx && az === cz) { for (let y = 1; y <= ph; y++) chunk.setLocal(lx, F + y, lz, y === ph ? GLOWSTONE : COBBLE); return; }
-      // A broken stub beside some pillars (rubble cover).
-      if (Math.abs(ax - cx) + Math.abs(az - cz) === 1 && ph >= 4) { chunk.setLocal(lx, F + 1, lz, COBBLE); return; }
-    }
-    // Low broken walls linking pillar pairs for waist-high cover.
-    if ((ax === 18 && az >= 14 && az <= 22) || (az === 18 && ax >= 14 && ax <= 22)) { chunk.setLocal(lx, F + 1, lz, COBBLE); }
+  // Broken pillars (glowstone-capped, varied height) and ruined low walls scattered across
+  // the whole cathedral floor — cover + mid-range landmarks, off the pads.
+  _ruinsScatter(chunk, lx, lz, wx, wz, F) {
+    if (this._nearPad(wx, wz)) return;
+    this._scatterCells(wx, wz, 9, (cgx, cgz, fx, fz, dx, dz, r2) => {
+      if (Math.hypot(fx, fz) < 16) return;
+      const t = hash2(cgx * 23 + 8, cgz * 23 + 8);
+      if (t < 0.5) {                                       // broken pillar
+        const ph = 3 + ((hash2(cgx, cgz) * 6) | 0);
+        if (dx === 0 && dz === 0) for (let y = 1; y <= ph; y++) chunk.setLocal(lx, F + y, lz, y === ph ? GLOWSTONE : COBBLE);
+        else if (r2 === 1 && ph >= 5) chunk.setLocal(lx, F + 1, lz, COBBLE);   // rubble at its base
+      } else if (t < 0.74) {                               // broken low wall (waist-high cover)
+        const horiz = hash2(cgx, cgz + 9) < 0.5;
+        const along = horiz ? (dz === 0 && Math.abs(dx) <= 3) : (dx === 0 && Math.abs(dz) <= 3);
+        if (along) { chunk.setLocal(lx, F + 1, lz, COBBLE); if (((dx + dz + 99) & 1) === 0) chunk.setLocal(lx, F + 2, lz, COBBLE); }
+      }
+    });
   }
 
   // Select the arena re-skin (materials + decoration) used by generateArena.
