@@ -238,6 +238,19 @@ export class SFX {
     this._thump(44, 20, 0.72, 0.2, out, 0.02);                // sustained rumble
   }
   explosionAt(x, y, z) { if (!this.ctx) return; const o = this._spatial(x, y, z); if (o) this.explosion(o); }
+  // Hollow Purple (Gojo) — imaginary-mass annihilation: a deep resonant whoomp with a
+  // metallic ring and a high shimmer collapsing into a sub-bass slam.
+  hollowPurple(pos = null) {
+    if (!this.ctx) return;
+    const o = pos ? this._spatial(pos.x, pos.y, pos.z) : null;
+    if (pos && !o) return;
+    this._tone(440, 70, 0.5, 0.26, 'sawtooth', o);      // the clap collapsing inward
+    this._tone(180, 38, 0.7, 0.22, 'triangle', o);      // deep body
+    this._noise(0.55, 680, 0.8, 0.26, 'lowpass', o);    // annihilation roar
+    this._noise(0.32, 2600, 6.0, 0.13, 'bandpass', o);  // resonant metallic ring
+    this._tone(1500, 320, 0.38, 0.10, 'sine', o);       // high imaginary-mass shimmer
+    this._thump(68, 30, 0.5, 0.32, o);                  // sub-bass slam
+  }
 
   // Player took damage — a short pained grunt.
   hurt() {

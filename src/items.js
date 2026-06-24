@@ -42,6 +42,7 @@ export const CLEAVE = 289;
 export const STAR_PLATINUM = 290;
 export const THE_WORLD = 291;
 export const FUGA = 292;
+export const HOMING_MISSILE = 293;
 
 // Stands (JoJo): equip one and a manifested spirit floats at your side — it auto-blocks
 // incoming attacks and barrages whatever enemy strays into its reach.
@@ -49,7 +50,7 @@ export const STANDS = [STAR_PLATINUM, THE_WORLD];
 
 // Stands aren't held weapons — they're worn (see STANDS), so they stay out of GUNS
 // (the selectable hotbar/creative-palette set).
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, HOMING_MISSILE, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -85,6 +86,9 @@ export const ITEMS = {
   [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.28, damage: 13, range: 92,  speed: 54, mag: 20, reload: 1.35, recoil: 0.03, color: 0x2bd6c0 } },
   [ROCKET_LAUNCHER]: { name: 'Rocket Launcher', gun: { kind: 'rocket', rate: 1.0, damage: 18, splash: 48, radius: 4.2, speed: 40, range: 96, mag: 3, reload: 2.0, recoil: 0.08, color: 0x556b2f } },
   [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, recoil: 0.01, color: 0xdadada } },
+  // A guided missile that locks onto the nearest foe and chases it down (capped turn
+  // rate), detonating in an AoE blast. `turn` = how hard it can steer (rad/s).
+  [HOMING_MISSILE]: { name: 'Homing Missile', gun: { kind: 'homing', rate: 1.3, damage: 16, splash: 44, radius: 4.2, speed: 26, turn: 4.6, range: 130, mag: 4, reload: 2.4, recoil: 0.06, color: 0x3aa0c0 } },
   // Lobs a singularity that anchors, drags every nearby combatant into its core
   // (shredding DOT), then collapses in a final implosion blast.
   [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 15, range: 82, speed: 24, radius: 16, pull: 38, duration: 4.4, splash: 100, mag: 2, reload: 3.4, recoil: 0.05, color: 0x7b3ff2 } },
@@ -119,10 +123,10 @@ export const ITEMS = {
   // Dismantle now reaches far down the field as a sweeping fan; Cleave still bites
   // hardest at point-blank (near² falloff), so distance trades raw power for reach.
   [CLEAVE]: { name: 'Cleave & Dismantle', gun: { kind: 'cleave', rate: 0.5, damage: 15, range: 58, arc: 0.95, cleave: 17, knockback: 14, recoil: 0.03, color: 0xe0143c } },
-  // Fūga (鵬撃) — rain blazing fire arrows down the field. Each arrow streaks through the
-  // air wreathed in flame and PIERCES every enemy it flies through, bursting into fire on
-  // a wall. Auto-fire, fast cadence — an epic storm of fire arrows.
-  [FUGA]: { name: 'Fūga', gun: { kind: 'fuga', rate: 0.14, damage: 12, range: 80, speed: 78, auto: true, pierce: true, spread: 0.018, mag: 16, reload: 1.5, recoil: 0.026, color: 0xff7a1e } },
+  // Fūga (鵬撃) — ONE devastating fire arrow. A giant blazing arrow streaks down the field
+  // wreathed in flame, PIERCES (one-shotting) everything in its line, and erupts in a huge
+  // fiery explosion (AoE) on impact. A single super-strong shot — fires once, then reloads.
+  [FUGA]: { name: 'Fūga', gun: { kind: 'fuga', rate: 0.9, damage: 65, range: 110, speed: 96, splash: 34, radius: 5.0, pierce: true, spread: 0.0, mag: 1, reload: 1.8, recoil: 0.07, color: 0xff7a1e } },
   // Stands manifest a spirit at your side. Passive while equipped: `block` is the
   // fraction of an attacker's damage it deflects, and it auto-barrages the nearest
   // enemy within `reach` for `attackDamage` every `attackRate`s. No gun in hand.
