@@ -21,6 +21,12 @@ export const BIOME_FOREST = 3;
 // braziers and raised stages. Generated deterministically (no edit sync needed).
 export const ARENA = { FLOOR: 50, HALF: 38, WALL_H: 10 };
 
+// ---- Hunger Games arena ----
+// A huge open wilderness (same floor level as the arena, so all spawn / zone / fall
+// logic carries over) ringed by a tall wall, with natural cover scattered across it
+// so tributes can flee the cornucopia bloodbath and hide among the terrain.
+export const HUNGER = { FLOOR: 50, HALF: 80, WALL_H: 14, PLAZA: 24 };
+
 // Structures in folded (|x|,|z|) quadrant coords — mirrored into all four
 // quadrants (fair for FFA). `cap` is a single block placed one above the top.
 const ARENA_STRUCT = [
@@ -146,6 +152,7 @@ export class WorldGen {
     this._hCache = new Map();
     this.arena = false;          // when true, generate() builds the PvP arena
     this.beach = false;          // when true, generate() builds the D-Day beach
+    this.hunger = false;         // when true, generate() builds the Hunger Games wilderness
     this.arenaThemeName = 'ruins';
     this.T = ARENA_THEMES.ruins; // active arena re-skin palette
   }
@@ -178,6 +185,12 @@ export class WorldGen {
       if (m > BEACH.HALF) return 0;
       if (m >= BEACH.HALF - 2) return BEACH.FLOOR + BEACH.WALL_H + 3;
       return Math.max(BEACH.FLOOR, beachGroundY(wz)) + 2;     // approx (structures add a little)
+    }
+    if (this.hunger) {
+      const m = Math.max(Math.abs(wx), Math.abs(wz));
+      if (m > HUNGER.HALF) return 0;
+      if (m >= HUNGER.HALF - 1) return HUNGER.FLOOR + HUNGER.WALL_H;
+      return HUNGER.FLOOR + 2;                                // flat base (cover sits on top)
     }
     const key = wx + ',' + wz;
     const cached = this._hCache.get(key);
@@ -215,6 +228,7 @@ export class WorldGen {
   generate(chunk) {
     if (this.arena) return this.generateArena(chunk);
     if (this.beach) return this.generateBeach(chunk);
+    if (this.hunger) return this.generateHunger(chunk);
     const ox = chunk.cx * CHUNK_SIZE;
     const oz = chunk.cz * CHUNK_SIZE;
 
@@ -389,6 +403,88 @@ export class WorldGen {
     }
     chunk.recomputeHeightMap();
     chunk.generated = true;
+  }
+
+  // ---- HUNGER GAMES wilderness (a huge open survival map) ----
+  // A vast flat battlefield walled at the rim, with a clear central cornucopia plaza
+  // and natural cover — copses of trees, boulders, shrubs, ruined pillars and shallow
+  // ponds — strewn across the field so tributes can scatter from the bloodbath and
+  // hide. Every feature is a deterministic hash of world coords, so the map tiles
+  // seamlessly across chunks and is identical on every client.
+  generateHunger(chunk) {
+    const ox = chunk.cx * CHUNK_SIZE, oz = chunk.cz * CHUNK_SIZE;
+    const F = HUNGER.FLOOR, HALF = HUNGER.HALF, WH = HUNGER.WALL_H;
+    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        const wx = ox + lx, wz = oz + lz;
+        const ax = Math.abs(wx), az = Math.abs(wz), m = Math.max(ax, az);
+        if (m > HALF) continue;                                 // void beyond the map
+
+        // Foundation + grassy floor, dappled with dirt/stone patches for a wild look.
+        chunk.setLocal(lx, F - 2, lz, BEDROCK);
+        chunk.setLocal(lx, F - 1, lz, DIRT);
+        const patch = this._hHash(wx >> 1, wz >> 1, 91);
+        chunk.setLocal(lx, F, lz, patch < 0.07 ? STONE : patch < 0.18 ? DIRT : GRASS);
+
+        // Perimeter rampart — a tall mossy wall with glowing bands + crenellations.
+        if (m >= HALF - 1) {
+          for (let y = 1; y <= WH; y++) chunk.setLocal(lx, F + y, lz, (m === HALF - 1 && (y === 5 || y === 10)) ? GLOWSTONE : COBBLE);
+          chunk.setLocal(lx, F + WH + 1, lz, ((ax + az) & 1) === 0 ? STONE : COBBLE);
+          continue;
+        }
+
+        const rad = Math.sqrt(wx * wx + wz * wz);
+        if (rad < HUNGER.PLAZA || m > HALF - 3) continue;       // clear the plaza + a lane along the wall
+        this._hungerCover(chunk, lx, lz, wx, wz, F);
+      }
+    }
+    chunk.recomputeHeightMap();
+    chunk.generated = true;
+  }
+
+  // Deterministic [0,1) hash of two ints (+ a salt), folded with the world seed so each
+  // match's wilderness differs while every client still agrees.
+  _hHash(a, b, salt) {
+    let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(salt | 0, 2246822519) + Math.imul(this.seed | 0, 3266489917)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h / 4294967296;
+  }
+
+  // Scatter natural cover. Features anchor to a coarse grid; each column checks its
+  // neighbouring cells and stamps the part of any feature that overlaps it, so a tree
+  // or boulder straddling a chunk seam still completes.
+  _hungerCover(chunk, lx, lz, wx, wz, F) {
+    const G = 8;
+    const gx0 = Math.floor(wx / G), gz0 = Math.floor(wz / G);
+    for (let cgx = gx0 - 1; cgx <= gx0 + 1; cgx++) {
+      for (let cgz = gz0 - 1; cgz <= gz0 + 1; cgz++) {
+        if (this._hHash(cgx, cgz, 1) > 0.6) continue;           // ~40% of cells empty (gaps to run through)
+        const fx = cgx * G + ((this._hHash(cgx, cgz, 2) * G) | 0);
+        const fz = cgz * G + ((this._hHash(cgx, cgz, 3) * G) | 0);
+        if ((fx * fx + fz * fz) < HUNGER.PLAZA * HUNGER.PLAZA) continue;   // keep the plaza clear even for jittered centres
+        const dx = wx - fx, dz = wz - fz, r2 = dx * dx + dz * dz;
+        if (r2 > 9) continue;                                   // outside this feature's footprint
+        const t = this._hHash(cgx, cgz, 4), cheb = Math.max(Math.abs(dx), Math.abs(dz));
+        if (t < 0.42) {                                         // tree — trunk + leaf canopy
+          const h = 4 + ((this._hHash(cgx, cgz, 5) * 3) | 0);   // 4..6 tall
+          if (dx === 0 && dz === 0) for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, LOG);
+          if (cheb <= 2 && r2 <= 5) { chunk.setLocal(lx, F + h - 1, lz, LEAVES); chunk.setLocal(lx, F + h, lz, LEAVES); }
+          if (cheb <= 1) chunk.setLocal(lx, F + h + 1, lz, LEAVES);
+        } else if (t < 0.62) {                                  // boulder — stone blob
+          const hb = 2 + ((this._hHash(cgx, cgz, 6) * 2) | 0);
+          if (r2 <= 4) for (let y = 1; y <= hb; y++) chunk.setLocal(lx, F + y, lz, STONE);
+          else if (r2 <= 8) chunk.setLocal(lx, F + 1, lz, COBBLE);
+        } else if (t < 0.78) {                                  // shrub — low leaf cover
+          if (r2 <= 2) { chunk.setLocal(lx, F + 1, lz, LEAVES); chunk.setLocal(lx, F + 2, lz, LEAVES); }
+        } else if (t < 0.9) {                                   // ruined pillar + rubble
+          if (dx === 0 && dz === 0) { const h = 3 + ((this._hHash(cgx, cgz, 7) * 3) | 0); for (let y = 1; y <= h; y++) chunk.setLocal(lx, F + y, lz, COBBLE); }
+          else if (Math.abs(dx) + Math.abs(dz) === 1) chunk.setLocal(lx, F + 1, lz, COBBLE);
+        } else {                                                // shallow pond
+          if (r2 <= 4) chunk.setLocal(lx, F, lz, WATER);
+        }
+      }
+    }
   }
 
   // Stamp mirrored, theme-specific decoration around the arena decor anchors. Folded

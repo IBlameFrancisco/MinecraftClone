@@ -38,6 +38,7 @@ export class World {
     this.gen = new WorldGen(seed);
     this.gen.arena = (map === 'arena' || map === true);
     this.gen.beach = (map === 'beach');
+    this.gen.hunger = (map === 'hunger');
     this.gen.setArenaTheme(arenaTheme);
   }
 

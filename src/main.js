@@ -14,7 +14,7 @@ import {
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf, itemName,
   HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { World } from './world.js';
-import { ARENA, BEACH, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
+import { ARENA, BEACH, HUNGER, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
 import { Sky } from './sky.js';
 import { Particles } from './particles.js';
@@ -317,12 +317,14 @@ function loadWorld(seedStr, mapKind, theme) {
   currentSeedStr = (seedStr && seedStr.trim()) ? seedStr.trim() : randomSeedStr();
   seedInput.value = currentSeedStr;
   arena = !!mapKind;
-  battleMap = mapKind === 'beach' ? 'beach' : 'arena';
+  battleMap = mapKind === 'beach' ? 'beach' : mapKind === 'hunger' ? 'hunger' : 'arena';
   // Pick a fresh random arena re-skin each time an arena map loads (the D-Day
-  // beach has its own dedicated look) unless one was explicitly handed in.
+  // beach + Hunger Games wilderness have their own dedicated looks) unless one
+  // was explicitly handed in.
   if (battleMap === 'arena' && arena) arenaTheme = theme || pickArenaTheme();
   world.regenerate(hashSeed(currentSeedStr), mapKind, arenaTheme);
   if (arena && battleMap === 'arena') sky.setArenaTheme(arenaTheme);
+  if (battleMap === 'hunger') sky.setArenaTheme('jungle');   // lush outdoor sky over the wilderness
   edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll(); botMgr.clear();
   setupHill(false); setupZone(false);
   if (!mapKind && mode === SURVIVAL) { health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20); }
@@ -375,7 +377,8 @@ function startSelectedMode(seedStr, forceNew) {
     health = 20; hud.setHealth(20);
     // A chosen map pins the theme (no more random switching); 'random'/War leave it unset.
     const theme = battleCfg.mode === 'war' || battleCfg.map === 'random' ? undefined : battleCfg.map;
-    loadWorld(seedStr, battleCfg.mode === 'war' ? 'beach' : 'arena', theme);
+    const mapKind = battleCfg.mode === 'war' ? 'beach' : battleCfg.mode === 'hunger' ? 'hunger' : 'arena';
+    loadWorld(seedStr, mapKind, theme);
     setupMatch();
   } else {
     setGameMode(menuMode);
@@ -676,7 +679,8 @@ function lobbyStart() {
   inventory.setLoadout(battleCfg.mode === 'war' ? WAR_LOADOUT : BATTLE_LOADOUT);
   health = 20; hud.setHealth(20);
   const theme = battleCfg.mode === 'war' || battleCfg.map === 'random' ? undefined : battleCfg.map;
-  loadWorld(currentSeedStr, battleCfg.mode === 'war' ? 'beach' : 'arena', theme);
+  const mapKind = battleCfg.mode === 'war' ? 'beach' : battleCfg.mode === 'hunger' ? 'hunger' : 'arena';
+  loadWorld(currentSeedStr, mapKind, theme);
   setupMatch();
   liveSig = menuSig();
   mp.startBattle(matchInitPayload());     // push the match to lobby guests
@@ -705,11 +709,12 @@ const mpHandlers = {
     currentSeedStr = String(d.seed);
     seedInput.value = currentSeedStr;
     arena = !!d.arena;
-    battleMap = d.battleMap === 'beach' ? 'beach' : 'arena';
+    battleMap = d.battleMap === 'beach' ? 'beach' : d.battleMap === 'hunger' ? 'hunger' : 'arena';
     arenaTheme = d.arenaTheme || 'ruins';
     botMgr.clear();
     world.regenerate(d.seed, arena ? battleMap : false, arenaTheme);
     if (arena && battleMap === 'arena') sky.setArenaTheme(arenaTheme);
+    if (battleMap === 'hunger') sky.setArenaTheme('jungle');   // match the host's wilderness sky
     edits.clear(); editsByChunk.clear(); chestStore.clear(); mobs.clearAll();
     for (const e of d.edits) recordEdit(e[0], e[1], e[2], e[3]);
     if (d.battle) {
@@ -925,7 +930,11 @@ let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
 let hungerTime = 0, hungerClosing = false, hungerSpawnIdx = 0, hungerArsenal = [];
 let hungerCountdown = 0, hungerCountShown = 0, hungerLastCount = 0;   // bloodbath countdown + cannon tracking
 let cornucopiaMesh = null;
-const HUNGER_GRACE = 26;        // seconds to loot before the ring begins to close
+const HUNGER_GRACE = 45;        // seconds to loot + scatter before the ring begins to close
+const HUNGER_CLOSE = 0.55;      // how fast the ring shrinks (blocks/sec) once it starts closing
+// The radius the deadly ring starts at for a zone mode. Hunger Games sprawls across the
+// huge wilderness; Battle Royale hugs the smaller arena.
+function zoneStart() { return gameMode === 'hunger' ? HUNGER.HALF - 3 : gameMode === 'br' ? ARENA.HALF - 2 : 999; }
 let waveNum = 0, waveBreak = 0;  // wave survival
 // War (D-Day): Allied attack from the sea, Axis defend the bunker line.
 const WAR_ALLIED = TEAM_RED, WAR_AXIS = TEAM_BLUE;
@@ -1016,7 +1025,7 @@ function setupMatch() {
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
   health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; dead = false;   // clean slate (also clears 999 invuln left by a BR elimination)
   hud.hideScoreboard();
-  zoneRadius = (gameMode === 'br' || gameMode === 'hunger') ? ARENA.HALF - 2 : 999;
+  zoneRadius = zoneStart();
   botMgr.clear();
   computeCoverPoints();
   setupHill(gameMode === 'koth');
@@ -1193,7 +1202,12 @@ function setupHungerLoot() {
   center.forEach((gid, i) => { const a = (i / center.length) * 6.2832; spots.push({ x: Math.cos(a) * 2.7, y: F + 0.7, z: Math.sin(a) * 2.7, kind: 'weapon', gun: gid, color: 0xffcf4a, once: true }); });
   const mid = [SMG, ASSAULT_RIFLE, SHOTGUN, ASSAULT_RIFLE, SMG, SHOTGUN, PLASMA_GUN, SNIPER];
   mid.forEach((gid, i) => { const a = (i / mid.length) * 6.2832 + 0.4; spots.push({ x: Math.cos(a) * 10, y: F, z: Math.sin(a) * 10, kind: 'weapon', gun: gid, color: 0xbcc4cf, once: true }); });
-  for (let i = 0; i < 6; i++) { const a = (i / 6) * 6.2832 + 0.2; spots.push({ x: Math.cos(a) * 22, y: F, z: Math.sin(a) * 22, kind: i % 2 ? 'health' : 'ammo' }); }   // outer scavenge for fleeing tributes
+  // Plaza-edge scavenge for tributes who flee the bloodbath empty-handed.
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * 6.2832 + 0.2; spots.push({ x: Math.cos(a) * 22, y: F, z: Math.sin(a) * 22, kind: i % 2 ? 'health' : 'ammo' }); }
+  // Caches stashed out in the wilderness — reward exploring + hiding far from the centre.
+  const stash = [ASSAULT_RIFLE, SHOTGUN, SNIPER, SMG, PLASMA_GUN, CLEAVE];
+  stash.forEach((gid, i) => { const a = (i / stash.length) * 6.2832 + 0.9; spots.push({ x: Math.cos(a) * 44, y: F, z: Math.sin(a) * 44, kind: 'weapon', gun: gid, color: 0xbcc4cf, once: true }); });
+  for (let i = 0; i < 10; i++) { const a = (i / 10) * 6.2832 + 0.5, r = 40 + (i % 3) * 11; spots.push({ x: Math.cos(a) * r, y: F, z: Math.sin(a) * r, kind: i % 2 ? 'health' : 'ammo' }); }
   pickups.setup(spots);
 }
 // Carve a flat, open arena around the cornucopia so loot + the spawn ring sit on clear
@@ -1221,7 +1235,7 @@ function armHungerBots() {
 function hungerReset() {
   hungerSpawnIdx = 0; hungerTime = 0; hungerClosing = false;
   hungerCountdown = 3.0; hungerCountShown = 99; hungerLastCount = Math.max(1, battleCfg.size);
-  zoneRadius = ARENA.HALF - 2; if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
+  zoneRadius = zoneStart(); if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
   hungerArsenal = [HANDGUN]; inventory.setLoadout(hungerArsenal);
   setupHungerLoot();
   hud.announce('🏹 Tributes — take your marks!', '#ffd24a');
@@ -1269,7 +1283,7 @@ function hungerTick(dt) {
   hungerTime += dt;
   if (hungerTime > HUNGER_GRACE) {       // scavenge grace, then the ring closes in
     if (!hungerClosing) { hungerClosing = true; hud.announce('⚠ The arena is closing in!', '#ff5b5b'); sfx.announce('multi'); }
-    zoneRadius = Math.max(4, zoneRadius - 0.5 * dt);
+    zoneRadius = Math.max(6, zoneRadius - HUNGER_CLOSE * dt);
     if (zoneMesh) zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
     stormTimer -= dt;
     if (stormTimer <= 0) {
@@ -1727,7 +1741,7 @@ function resetMatch() {
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
   timeStop.used = false; endTimeStop(false);
-  zoneRadius = (gameMode === 'br' || gameMode === 'hunger') ? ARENA.HALF - 2 : 999;
+  zoneRadius = zoneStart();
   matchWinner = null; endKillCam(false); abortDeathCam(); resetReel(); resetSharingan(); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
     warTickets = WAR_TICKETS; warTimer = WAR_TIME; warCapture = 0; warFinalAnnounced = false;
