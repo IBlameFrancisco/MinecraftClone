@@ -350,6 +350,24 @@ export class SFX {
     this._tone(840, 210, 0.10, 0.06, 'triangle');     // body
     this._tone(2200, 880, 0.07, 0.04, 'square');      // metallic glint
   }
+  // Fūga — loosing a fire arrow: a bow twang flaring into a fiery whoosh.
+  fireArrow() {
+    if (!this.ctx) return;
+    this._tone(660, 180, 0.12, 0.12, 'sawtooth');     // bow twang / launch sweep
+    this._noise(0.20, 1500, 1.0, 0.15, 'bandpass');   // fire whoosh
+    this._noise(0.10, 4400, 0.7, 0.06, 'highpass');   // flame crackle top
+    this._tone(190, 90, 0.10, 0.08, 'triangle');      // body
+  }
+  // A fire arrow bursting into flame on impact — a low fwoomp + crackle + thud.
+  fireArrowHit(pos = null) {
+    if (!this.ctx) return;
+    const o = pos ? this._spatial(pos.x, pos.y, pos.z) : null;
+    if (pos && !o) return;
+    this._noise(0.24, 880, 0.8, 0.22, 'lowpass', o);  // igniting fwoomp
+    this._noise(0.12, 3000, 1.4, 0.10, 'bandpass', o);// crackle
+    this._tone(240, 70, 0.16, 0.12, 'sawtooth', o);   // flame body
+    this._thump(80, 44, 0.14, 0.12, o);               // impact thud
+  }
   // Stand barrage — a rapid flurry of punch impacts (ORA ORA ORA), staggered over
   // ~0.35s. `pos` spatialises it to the target.
   standBarrage(pos = null) {
@@ -363,6 +381,51 @@ export class SFX {
     };
     punch();
     for (let i = 1; i < 7; i++) setTimeout(punch, i * 52);
+  }
+  // The barrage battle-cry — the iconic ORA-ORA-ORA / MUDA-MUDA-MUDA, formant-
+  // synthesised (sawtooth "vocal cords" through vowel formant filters) and synced over
+  // the punch flurry. `type` is 'ora' or 'muda'.
+  standChant(type, pos = null) {
+    if (!this.ctx) return;
+    const o = pos ? this._spatial(pos.x, pos.y, pos.z) : null;
+    if (pos && !o) return;
+    const out = o || this.master, ctx = this.ctx, t0 = ctx.currentTime;
+    const muda = type === 'muda';
+    const V = { a: [800, 1150], o: [450, 820], u: [330, 720] };   // vowel formant pairs (F1, F2)
+    // One voiced syllable: a shouted sawtooth shaped by two parallel bandpass formants.
+    const syl = (when, vowel, f0, dur, gain, onset) => {
+      const t = t0 + when;
+      const osc = ctx.createOscillator(); osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f0 * 1.07, t);
+      osc.frequency.exponentialRampToValueAtTime(f0 * 0.88, t + dur);   // downward shout inflection
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.linearRampToValueAtTime(gain, t + 0.012);
+      env.gain.setValueAtTime(gain, t + dur * 0.5);
+      env.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+      const [F1, F2] = V[vowel];
+      for (const [f, q, g] of [[F1, 7, 1.0], [F2, 10, 0.55]]) {
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+        const fg = ctx.createGain(); fg.gain.value = g;
+        osc.connect(bp).connect(fg).connect(env);
+      }
+      env.connect(out);
+      osc.start(t); osc.stop(t + dur + 0.03);
+      if (onset) {   // a percussive consonant tick (the 'd' in mu-Da / the punch of the 'r')
+        const src = ctx.createBufferSource(); src.buffer = this.noiseBuffer;
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 1.1;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.0001, t); ng.gain.linearRampToValueAtTime(0.055, t + 0.004); ng.gain.exponentialRampToValueAtTime(0.0006, t + 0.05);
+        src.connect(bp).connect(ng).connect(out);
+        src.start(t, Math.random() * 0.5); src.stop(t + 0.07);
+      }
+    };
+    const reps = 3, step = 0.116;     // three cries over ~0.35s, matching the punch flurry
+    for (let i = 0; i < reps; i++) {
+      const base = i * step, f0 = 180 - i * 7;
+      if (muda) { syl(base, 'u', f0, 0.058, 0.15, false); syl(base + 0.052, 'a', f0, 0.072, 0.19, true); }    // mu-da
+      else      { syl(base, 'o', f0, 0.05, 0.14, false);  syl(base + 0.05, 'a', f0, 0.072, 0.2, true); }       // o-ra
+    }
   }
   // Stand deflect — a bright metallic ting as a hit is caught.
   standBlock(pos = null) {

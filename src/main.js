@@ -28,7 +28,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, CleaveFx, Portals, makeViewModel, makeHeldWeapon, makeStandAvatar, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, FireArrows, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, CleaveFx, Portals, makeViewModel, makeHeldWeapon, makeStandAvatar, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -37,7 +37,8 @@ const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
 // Deathmatch arsenal (one per hotbar key, slot 10 = key 0), one of each weapon class.
-const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, FUGA, SHARINGAN];
+// First 10 fill the quick-bar (keys 1–0); the rest live in the battle armory (press E).
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, CLEAVE, FUGA, HOLLOW_PURPLE, LASER_CANNON, SHARINGAN];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -124,6 +125,7 @@ const mp = new Multiplayer(scene);
 const tracers = new Tracers(scene);
 const plasmas = new Plasmas(scene);
 const rockets = new Rockets(scene);
+const fireArrows = new FireArrows(scene);
 const grenades = new Grenades(scene);
 const blackholes = new BlackHoles(scene);
 const chakra = new ChakraFx(scene);
@@ -758,7 +760,7 @@ const mpHandlers = {
     hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo()); mp.recolorBots(colorForBot);
   },
   onRoundOver: (winner) => { matchWinner = winner; if (!(gameMode === 'gungame' && startKillCam(winner))) { hud.showRoundOver(winner); hud.showScoreboard(); } },
-  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; timeStop.used = false; endTimeStop(false); if (gameMode === 'hunger') hungerReset(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; },
+  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; timeStop.cd = 0; endTimeStop(false); if (gameMode === 'hunger') hungerReset(); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; },
   botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
@@ -816,7 +818,7 @@ function setGameMode(m) {
 function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0; protect = 0;
   wornStand = 0; despawnStand();                 // dismiss any Stand on the way out
-  timeStop.used = false; endTimeStop(false);     // clear any stopped time
+  timeStop.cd = 0; endTimeStop(false);     // clear any stopped time
   setupCornucopia(false); setupHill(false); setupZone(false);   // tear down all mode props so they don't linger on the menu
   matchWinner = null; matchOverTimer = 0;
   abortDeathCam(); clearAfterImages();
@@ -908,7 +910,7 @@ function respawnPlayer() {
   health = 20; hud.setHealth(20); invuln = 1.6; protect = 1.6;   // spawn protection vs PvP too
   grenadeCount = 2; hud.setGrenades(2);
   flashCharges = FLASH_MAX; flashRegen = 0; flashCD = 0;   // fresh flash steps on respawn
-  timeStop.used = false;                                   // a fresh life re-arms the time stop
+  timeStop.cd = 0;                                   // a fresh life re-arms the time stop
   if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
 }
 
@@ -919,9 +921,11 @@ let teamMode = false, myTeam = TEAM_NONE, scoreLimit = 20;
 let gameMode = 'dm';
 let gunLevelShown = -1;          // gun game: which ladder weapon we're holding
 let wornStand = 0;               // equipped Stand item id (0 = none) — worn, not held
-// Time stop (ZA WARUDO): a Stand ability, once per life — the owner moves while
-// every other entity + projectile freezes. `owner` = who stopped time (self/remote).
-const timeStop = { active: false, t: 0, owner: null, used: false };
+// Time stop (ZA WARUDO): a Stand ability on a cooldown — the owner moves while
+// every other entity + projectile freezes. `owner` = who stopped time (self/remote);
+// `cd` = seconds until it can be used again.
+const TS_COOLDOWN = 20;          // seconds before time stop can be used again
+const timeStop = { active: false, t: 0, owner: null, cd: 0 };
 let timeStopGrade = 0;           // smoothed monochrome amount fed to the grade shader
 let hillTimer = 0;               // koth scoring tick
 let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
@@ -1021,7 +1025,7 @@ function setupMatch() {
   matchWinner = null; matchOverTimer = 0; endKillCam(false); resetReel(); resetSharingan(); hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
-  timeStop.used = false; endTimeStop(false);
+  timeStop.cd = 0; endTimeStop(false);
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
   health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; dead = false;   // clean slate (also clears 999 invuln left by a BR elimination)
   hud.hideScoreboard();
@@ -1740,7 +1744,7 @@ function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
-  timeStop.used = false; endTimeStop(false);
+  timeStop.cd = 0; endTimeStop(false);
   zoneRadius = zoneStart();
   matchWinner = null; endKillCam(false); abortDeathCam(); resetReel(); resetSharingan(); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
@@ -1901,9 +1905,10 @@ function applyPickup(kind, gun) {
     if (!hungerArsenal.includes(gun)) {
       const prevIdx = inventory.selected;                  // appending keeps existing slots' indices
       hungerArsenal.push(gun);
-      inventory.setLoadout(hungerArsenal);                 // (resets selection to slot 0)
-      inventory.select(prevIdx === 0 ? hungerArsenal.length - 1 : prevIdx);   // auto-equip your first real weapon
-      hud.showName('Looted: ' + itemName(gun));
+      inventory.setLoadout(hungerArsenal);                 // (resets selection to slot 0; bar caps at 10)
+      const newIdx = hungerArsenal.length - 1;             // the pickup's slot (only on the bar if < 10)
+      inventory.select(newIdx < 10 && prevIdx === 0 ? newIdx : Math.min(prevIdx, 9));   // auto-equip your first real weapon if it fits the bar
+      hud.showName('Looted: ' + itemName(gun) + (newIdx >= 10 ? ' (press E to equip)' : ''));
       sfx.place(); particles.burst(player.pos.x, player.pos.y + 1, player.pos.z, [255, 210, 90], 22);
       return true;
     }
@@ -1981,7 +1986,6 @@ function shotTracer(kind, muzzle, dir, range, color) {
   const end = muzzle.clone().addScaledVector(dir, d);
   tracers.add(muzzle, end, color);
   if (kind === 'rail') tracers.add(muzzle, end, 0xe6d4ff);
-  else if (kind === 'fuga') { tracers.add(muzzle, end, 0xff9ec0); cleaveFx.spawn(muzzle.clone().addScaledVector(dir, Math.min(2.6, d)), dir, 1.3, 0.9); }
 }
 // A bot fires its current gun (authority): resolve damage + spawn/broadcast visuals.
 // Bots resolve every gun as instant hitscan for clean damage attribution. Most
@@ -2006,7 +2010,7 @@ function botFire(bot, dir) {
     : gun.kind === 'beam' ? 0xff5570
     : gun.kind === 'hollowpurple' ? 0xb060ff
     : gun.kind === 'sharingan' ? 0xff2838
-    : gun.kind === 'fuga' ? 0xff2d6a
+    : gun.kind === 'fuga' ? 0xff7a1e
     : (gun.zoom ? 0xbfe4ff : 0xffd27a);
   const dmg = botEffectiveDamage(gun);
   if (gun.kind === 'shotgun') {
@@ -2014,12 +2018,12 @@ function botFire(bot, dir) {
   } else if (gun.kind === 'rail') {
     botBullet(bot, dir, gun.range, dmg, true); shotTracer('rail', muzzle, dir, gun.range, color);
   } else if (gun.kind === 'fuga') {
-    botBullet(bot, dir, gun.range, dmg, true); shotTracer('fuga', muzzle, dir, gun.range, gun.color || 0xff2d6a);
+    botBullet(bot, dir, gun.range, dmg, true); fireArrows.spawn(muzzle, dir, gun.speed || 72, 0, gun.range, true);
   } else {
     const pd = gun.spread ? spreadDir(dir, gun.spread) : dir;
     botBullet(bot, pd, gun.range, dmg, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
   }
-  if (botSoundBudget > 0) { botSoundBudget--; sfx.gunAt(gun.kind === 'rail' ? 'rail' : gun.kind === 'shotgun' ? 'shotgun' : gun.zoom ? 'sniper' : 'handgun', muzzle.x, muzzle.y, muzzle.z); }
+  if (botSoundBudget > 0) { botSoundBudget--; sfx.gunAt(gun.kind === 'rail' ? 'rail' : gun.kind === 'shotgun' ? 'shotgun' : gun.kind === 'fuga' ? 'rail' : gun.sound || (gun.zoom ? 'sniper' : 'handgun'), muzzle.x, muzzle.y, muzzle.z); }
   // Log the bot's shot for the kill-cam replay (render it as a simple tracer of its colour).
   recordFire(gun.kind === 'shotgun' ? 'shotgun' : gun.kind === 'rail' ? 'rail' : 'hitscan', muzzle, dir, { r: gun.range, c: color });
   if (mp.isHost) mp.broadcast({ t: 'bfire', kind: gun.kind, x: muzzle.x, y: muzzle.y, z: muzzle.z, dx: dir.x, dy: dir.y, dz: dir.z, range: gun.range, color });
@@ -2033,7 +2037,7 @@ function respawn() {
   if (difficulty === HARDCORE) return;
   dead = false; health = 20; hunger = 20; hud.setHealth(20); hud.setHunger(20);
   player.pos.copy(SPAWN); player.vel.set(0, 0, 0);
-  timeStop.used = false; endTimeStop(false);   // a fresh life re-arms the Stand time stop (sandbox)
+  timeStop.cd = 0; endTimeStop(false);   // a fresh life re-arms the Stand time stop (sandbox)
   refreshOverlays(); renderer.domElement.requestPointerLock();
 }
 
@@ -2059,9 +2063,10 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'KeyE') {
     if (dead) return;
-    // No creative inventory mid-battle: it would let you grab any gun from the palette
-    // (e.g. an end-game weapon) and bypass your fixed loadout / Gun Game ladder level.
-    if (inventory.open) closeInventory(); else if (player.locked && mode !== BATTLE) openInventory(2);  // not from pause/menu
+    // Battle opens the "armory": it only lists the mode's own arsenal (your loadout /
+    // looted guns / the Gun Game ladder weapon), so it can't bypass the loadout — it just
+    // lets you assign any of those weapons to your 10 quick-slots.
+    if (inventory.open) closeInventory(); else if (player.locked) openInventory(2);  // not from pause/menu
   } else if (e.code === 'Escape' && inventory.open) {
     inventory.close(); refreshOverlays();
   } else if (e.code === 'KeyG') {
@@ -2381,9 +2386,9 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); snd('rail'); }
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
-  else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), (d.r || 15) * 0.5, d.arc || 1.1); if (withSound) sfx.slash(); }
-  else if (k === 'fuga') { const nd = dir.clone().normalize(), end = muzzle.clone().addScaledVector(nd, d.r || 60); cleaveFx.spawn(muzzle.clone().addScaledVector(nd, Math.min(3.0, d.r || 3)), nd, 1.5, 0.95); tracers.add(muzzle, end, d.c || 0xff2d6a); if (withSound) sfx.slash(); }
-  else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) sfx.standBarrage({ x: d.x, y: d.y, z: d.z }); const ro = d.o && mp.remotes.get(d.o); if (ro) { ro.standAtk = 0.36; ro.standFace = new THREE.Vector3(d.x, d.y, d.z); } }
+  else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), Math.min(13, (d.r || 15) * 0.5), d.arc || 1.1); if (withSound) sfx.slash(); }
+  else if (k === 'fuga') { fireArrows.spawn(muzzle, dir.clone().normalize(), d.sp || 72, 0, d.r || 80, true); if (withSound) sfx.fireArrow(); }
+  else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) { const p = { x: d.x, y: d.y, z: d.z }; sfx.standBarrage(p); sfx.standChant(d.vc || 'ora', p); } const ro = d.o && mp.remotes.get(d.o); if (ro) { ro.standAtk = 0.36; ro.standFace = new THREE.Vector3(d.x, d.y, d.z); } }
   else if (k === 'cannon') { hungerCannon(d.n || 2); }   // a tribute fell (Hunger Games, relayed to guests)
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
   else if (k === 'flash') { const end = new THREE.Vector3(d.ex ?? d.x, d.ey ?? d.y, d.ez ?? d.z); spawnAfterImages(muzzle, end, '', getSkin(d.skin), 3); if (withSound) sfx.flashStep(); }
@@ -2403,31 +2408,57 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'fuga') fireFuga(gun, muzzle);
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
 }
-// Fūga (Sukuna, ranged Dismantle): fling a fast crescent slash down the aim line that
-// pierces every enemy it passes through, up to the wall. A piercing hitscan cut with a
-// spinning-blade visual — the long-range sibling of Cleave & Dismantle.
+// Fūga: loose a blazing fire arrow — a piercing projectile that streaks down the aim and
+// burns through everything it flies through, exploding into flame on a wall.
 function fireFuga(gun, muzzle) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   const dir = spreadDir(_dir, (gun.spread || 0) * (1 - adsAmount * 0.6)).clone().normalize();
-  const block = voxelRaycast(_eye, dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
-  const wallDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
-  for (const m of mobs.list) { const t = m.rayHit(_eye.x, _eye.y, _eye.z, dir.x, dir.y, dir.z, wallDist); if (t < wallDist) m.hurt(gun.damage, player.pos.x, player.pos.z); }
-  const enemies = [];
-  if (mp.online) for (const ph of mp.raycastAll(_eye, dir, wallDist)) enemies.push({ id: ph.id, head: ph.head, bot: false });
-  if (isAuthority()) for (const bh of botMgr.raycastAll(_eye, dir, wallDist, null)) enemies.push({ id: bh.id, head: bh.head, bot: true });
-  let struck = false;
-  for (const e of enemies) {
-    if (friendly(e.id)) continue;
-    const dmg = e.head ? Math.round(gun.damage * 1.4) : gun.damage;
-    if (e.bot) botHurt(e.id, dmg, myName(), e.head); else mp.sendHit(e.id, dmg, e.head);
-    hud.hitMarker(e.head); struck = true;
+  fireArrows.spawn(muzzle, dir, gun.speed || 72, gun.damage, gun.range, false);
+  sfx.fireArrow(); addShake(0.04);
+  broadcastFire('fuga', muzzle, dir, { sp: gun.speed || 72, r: gun.range });
+}
+// Distance from point P to the segment A→B (squared not needed — used with a small radius).
+function _distToSeg(px, py, pz, ax, ay, az, bx, by, bz) {
+  const ex = bx - ax, ey = by - ay, ez = bz - az;
+  const len2 = ex * ex + ey * ey + ez * ez || 1e-6;
+  let t = ((px - ax) * ex + (py - ay) * ey + (pz - az) * ez) / len2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(px - (ax + ex * t), py - (ay + ey * t), pz - (az + ez * t));
+}
+// A fire arrow pierces: damage each NEW enemy whose body the arrow's swept path A→B
+// crosses (tracked in `hitSet`) and throw a fiery spurt off them. Authority resolves
+// bots; everyone resolves remotes/mobs.
+function fireArrowPierce(ax, ay, az, bx, by, bz, hitSet, dmg) {
+  const R = 1.1;
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id) || hitSet.has(b.id)) continue;
+    if (_distToSeg(b.pos.x, b.pos.y + 1, b.pos.z, ax, ay, az, bx, by, bz) < R) {
+      hitSet.add(b.id); botHurt(b.id, dmg, myName(), false);
+      particles.burst(b.pos.x, b.pos.y + 1, b.pos.z, [255, 150, 40], 14); particles.burst(b.pos.x, b.pos.y + 1, b.pos.z, [255, 90, 20], 6);
+      hud.hitMarker(false);
+    }
   }
-  const end = _eye.clone().addScaledVector(dir, wallDist);
-  cleaveFx.spawn(_eye.clone().addScaledVector(dir, Math.min(3.0, wallDist)), dir, 1.5, 0.95);   // a crescent flung forward
-  tracers.add(muzzle, end, gun.color || 0xff2d6a);
-  particles.burst(end.x, end.y, end.z, [255, 40, 90], struck ? 8 : 4);
-  sfx.slash();
-  broadcastFire('fuga', muzzle, dir, { r: wallDist, c: gun.color || 0xff2d6a });
+  for (const m of mobs.list) {
+    if (hitSet.has(m)) continue;
+    if (_distToSeg(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, ax, ay, az, bx, by, bz) < R) {
+      hitSet.add(m); m.hurt(dmg, ax, az); particles.burst(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, [255, 150, 40], 12);
+    }
+  }
+  if (mp.online) for (const [id, r] of mp.remotes) {
+    if (friendly(id) || hitSet.has(id) || !r.group.visible) continue;
+    const gp = r.group.position;
+    if (_distToSeg(gp.x, gp.y + 1, gp.z, ax, ay, az, bx, by, bz) < R) {
+      hitSet.add(id); mp.sendHit(id, dmg);
+      particles.burst(gp.x, gp.y + 1, gp.z, [255, 150, 40], 14); hud.hitMarker();
+    }
+  }
+}
+// The arrow strikes a wall / burns out — a blossom of fire.
+function fireArrowEnd(pos, ghost) {
+  particles.burst(pos.x, pos.y, pos.z, [255, 160, 40], 24);
+  particles.burst(pos.x, pos.y, pos.z, [255, 90, 20], 14);
+  particles.burst(pos.x, pos.y, pos.z, [255, 235, 160], 7);
+  if (!ghost) sfx.fireArrowHit({ x: pos.x, y: pos.y, z: pos.z });
 }
 
 // Cleave & Dismantle (Sukuna): sweep a fan of cursed slashes that carve every enemy
@@ -2464,7 +2495,7 @@ function fireCleave(gun, muzzle) {
   }
   for (const m of mobs.list) tryHit(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z, (dmg) => m.hurt(dmg, player.pos.x, player.pos.z));
   if (struck) hud.hitMarker(false);
-  cleaveFx.spawn(_eye.clone(), aim, range * 0.5, gun.arc || 1.1);
+  cleaveFx.spawn(_eye.clone(), aim, Math.min(13, range * 0.5), gun.arc || 1.1);   // cap the fan so a long-range slash doesn't fill the screen
   sfx.slash(); addShake(0.13);
   broadcastFire('cleave', muzzle, _dir, { r: range, arc: gun.arc || 1.1 });
 }
@@ -2521,14 +2552,15 @@ function cycleStand() {
   if (wornStand) { hud.showName('✦ ' + gunOf(wornStand).name); sfx.standSummon(); }
   else { hud.showName('Stand dismissed'); despawnStand(); }
 }
-// Z — stop time (Star Platinum / The World). Once per life: the owner keeps acting
+// Z — stop time (Star Platinum / The World). On a 20s cooldown: the owner keeps acting
 // while everything else freezes. Broadcasts so co-op peers freeze too.
 function activateTimeStop() {
   const m = currentStand();
   if (!m || !m.timeStop) return;                          // need a Stand that can stop time
-  if (timeStop.active || timeStop.used) return;           // once until you're killed again
+  if (timeStop.active) return;
+  if (timeStop.cd > 0) { hud.announce(`🕛 Time stop recharging — ${Math.ceil(timeStop.cd)}s`, '#9fb0d6'); return; }
   if (dead || eliminated || (mode !== BATTLE && mode !== SURVIVAL)) return;
-  timeStop.active = true; timeStop.t = m.timeStop; timeStop.owner = selfId(); timeStop.used = true;
+  timeStop.active = true; timeStop.t = m.timeStop; timeStop.owner = selfId(); timeStop.cd = TS_COOLDOWN;
   hud.announce('🕛 ' + (m.tsCall || 'Toki yo tomare!'), '#e6ecff'); sfx.timeStop(); addShake(0.5);
   for (let i = 0; i < 28; i++) { const a = (i / 28) * 6.2832; particles.burst(player.pos.x + Math.cos(a) * 1.5, player.pos.y + 1, player.pos.z + Math.sin(a) * 1.5, [205, 215, 255], 3); }
   if (mp.online) mp.broadcast({ t: 'timestop', dur: m.timeStop, o: selfId() });
@@ -2563,9 +2595,10 @@ function updateStand(active, dt) {
     const ac = [(m.accent >> 16) & 255, (m.accent >> 8) & 255, m.accent & 255];
     particles.burst(tgt.x, tgt.y, tgt.z, ac, 16); particles.burst(tgt.x, tgt.y, tgt.z, [255, 255, 255], 6);
     damageNumbers.spawn(new THREE.Vector3(tgt.x, tgt.y + 0.7, tgt.z), m.attackDamage, false);
-    hud.hitMarker(false); sfx.standBarrage({ x: tgt.x, y: tgt.y, z: tgt.z }); addShake(0.05);
+    const tpos = { x: tgt.x, y: tgt.y, z: tgt.z };
+    hud.hitMarker(false); sfx.standBarrage(tpos); sfx.standChant(m.chant, tpos); addShake(0.05);   // punches + the ORA/MUDA battle-cry
     if (Math.random() < 0.33) hud.showName(m.callout);
-    if (mp.online) mp.broadcast({ t: 'pfire', k: 'ora', x: tgt.x, y: tgt.y, z: tgt.z, dx: 0, dy: 0, dz: 0, ac: m.accent, o: mp.myId });
+    if (mp.online) mp.broadcast({ t: 'pfire', k: 'ora', x: tgt.x, y: tgt.y, z: tgt.z, dx: 0, dy: 0, dz: 0, ac: m.accent, vc: m.chant, o: mp.myId });
   }
   // Float just off the user's right shoulder (slightly forward so it stays in view),
   // surging toward the target on the barrage.
@@ -2642,7 +2675,9 @@ function castBullet(origin, dir, range, damage, tracerStart, color, depth = 0) {
     if (!friendly(enemy.id)) {
       const dmg = enemy.head ? Math.round(damage * 1.7) : damage;
       if (enemy.bot) botHurt(enemy.id, dmg, myName(), enemy.head); else mp.sendHit(enemy.id, dmg, enemy.head);
-      particles.burst(end.x, end.y, end.z, enemy.head ? [255, 220, 60] : [255, 70, 70], enemy.head ? 16 : 10);
+      // Blood spray scales with the hit; headshots pop a bright golden spark on top.
+      particles.burst(end.x, end.y, end.z, enemy.head ? [255, 220, 60] : [220, 40, 48], Math.min(22, (enemy.head ? 14 : 8) + Math.round(dmg * 0.35)));
+      if (enemy.head) particles.burst(end.x, end.y, end.z, [255, 255, 220], 6);
       if (!_suppressDmgNum) damageNumbers.spawn(end, dmg, enemy.head);
       hud.hitMarker(enemy.head);
     }
@@ -2655,6 +2690,7 @@ function castBullet(origin, dir, range, damage, tracerStart, color, depth = 0) {
   } else if (blockHit.hit) {
     end = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
     particles.burst(end.x, end.y, end.z, blockTint(world.getBlock(blockHit.x, blockHit.y, blockHit.z)), 6);
+    if (Math.random() < 0.7) particles.burst(end.x, end.y, end.z, [255, 214, 140], 2);   // a bright impact spark off the surface
   } else {
     end = origin.clone().addScaledVector(dir, range);
   }
@@ -2664,7 +2700,7 @@ function castBullet(origin, dir, range, damage, tracerStart, color, depth = 0) {
 function fireHitscan(gun, muzzle) {
   const dir = spreadDir(_dir, gun.spread * (1 - adsAmount * 0.85));
   castBullet(_eye.clone(), dir.clone(), gun.range, gun.damage, muzzle, gun.zoom ? 0xbfe4ff : 0xffe08a);
-  sfx.gun(gun.zoom ? 'sniper' : 'handgun');
+  sfx.gun(gun.sound || (gun.zoom ? 'sniper' : 'handgun'));
 }
 
 // Shotgun: a cone of pellets (no per-pellet damage numbers — markers suffice).
@@ -3274,6 +3310,7 @@ function frame() {
   // someone ELSE stopped time, the local player is frozen too.
   const tsActive = timeStop.active, tsMine = tsActive && timeStop.owner === selfId(), tsFrozenMe = tsActive && !tsMine;
   if (tsActive && loaded) { timeStop.t -= dt; if (timeStop.t <= 0) endTimeStop(true); }
+  if (timeStop.cd > 0 && loaded) timeStop.cd = Math.max(0, timeStop.cd - dt);   // recharge in real time (ticks even during your own stopped time)
   timeStopGrade += ((tsActive ? 1 : 0) - timeStopGrade) * Math.min(1, 9 * dt);
   postfx.setTimeStop(timeStopGrade);
   const wsdt = tsActive ? 0 : sdt;   // "world" dt — entities + projectiles freeze in stopped time
@@ -3435,7 +3472,12 @@ function frame() {
         if (gun.mag) ammo[id]--;
         // Per-gun recoil: vertical kick, a little horizontal sway, viewmodel kickback.
         const rc = gun.recoil || 0.015;
-        muzzle.flash();
+        // Muzzle flash tinted + sized per weapon (energy guns glow their colour; heavy
+        // guns flare bigger) for a distinct signature on every shot.
+        const fcol = gun.kind === 'plasma' ? 0x9af0ea : gun.kind === 'rail' ? 0xc9a3ff
+          : gun.kind === 'fuga' ? 0xff8a2a : gun.kind === 'cleave' ? 0xff6a98 : gun.zoom ? 0xcfe7ff : 0xffe2a0;
+        const fscale = gun.kind === 'rocket' ? 1.8 : gun.kind === 'shotgun' ? 1.55 : gun.kind === 'rail' ? 1.4 : rc > 0.04 ? 1.3 : 1.0;
+        muzzle.flash(fcol, fscale);
         // ADS reduces vertical recoil; recoil also kicks the viewmodel.
         recoilPitch += rc * (1 - adsAmount * 0.45);
         recoilYaw += (Math.random() - 0.5) * rc * 0.9 * (1 - adsAmount * 0.6);
@@ -3504,6 +3546,7 @@ function frame() {
   const enemyBots = isAuthority() ? botMgr.bots : null;   // bolts/rockets collide with arena bots
   plasmas.update(wsdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
   rockets.update(wsdt, world, mobs, enemyBots, mp, portals, rocketImpact);
+  fireArrows.update(wsdt, world, fireArrowPierce, fireArrowEnd);
   blackholes.update(wsdt, world, blackHoleHooks);
   // Curve the player's in-flight Rasenshuriken toward where they're aiming (sweep your view to bend it).
   chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
@@ -3552,7 +3595,7 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, camera, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, blackholes, blackHoleHooks, chakra, chakraHooks, rasenshurikenImpact, laser, hollowPurple, portals,
+  world, player, sky, scene, renderer, camera, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, fireArrows, blackholes, blackHoleHooks, chakra, chakraHooks, rasenshurikenImpact, laser, hollowPurple, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },
@@ -3587,7 +3630,7 @@ window.__game = {
   get standInfo() { return { worn: wornStand, equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
   __standDeflect: (dmg) => standDeflect(dmg),
   __setCountdown: (v) => { hungerCountdown = v; hungerCountShown = 99; },
-  get timeStopInfo() { return { active: timeStop.active, owner: timeStop.owner, t: +timeStop.t.toFixed(2), used: timeStop.used, grade: +timeStopGrade.toFixed(2) }; },
+  get timeStopInfo() { return { active: timeStop.active, owner: timeStop.owner, t: +timeStop.t.toFixed(2), cd: +timeStop.cd.toFixed(2), grade: +timeStopGrade.toFixed(2) }; },
   __timeStop: () => activateTimeStop(),
   __remoteTimeStop: (owner, dur) => onRemoteTimeStop(owner, dur),
   __reelLast: () => (killReel.length ? killReel[killReel.length - 1].a : null),
