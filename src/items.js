@@ -119,8 +119,9 @@ export const ITEMS = {
   // Stands manifest a spirit at your side. Passive while equipped: `block` is the
   // fraction of an attacker's damage it deflects, and it auto-barrages the nearest
   // enemy within `reach` for `attackDamage` every `attackRate`s. No gun in hand.
-  [STAR_PLATINUM]: { name: 'Star Platinum', gun: { kind: 'stand', block: 0.78, reach: 6.5, attackRate: 0.6, attackDamage: 13, knockback: 12, color: 0x7d5fff, accent: 0x35e6e0, callout: 'ORA ORA ORA!' } },
-  [THE_WORLD]:     { name: 'The World',     gun: { kind: 'stand', block: 0.72, reach: 6.0, attackRate: 0.5, attackDamage: 15, knockback: 14, color: 0xf4c542, accent: 0xff4d6a, callout: 'MUDA MUDA MUDA!' } },
+  // `timeStop`/`tsCall`: press Z to freeze time for that many seconds — once per life.
+  [STAR_PLATINUM]: { name: 'Star Platinum', gun: { kind: 'stand', block: 0.78, reach: 6.5, attackRate: 0.6, attackDamage: 13, knockback: 12, color: 0x7d5fff, accent: 0x35e6e0, callout: 'ORA ORA ORA!', timeStop: 4.0, tsCall: 'STAR PLATINUM — toki yo tomare!' } },
+  [THE_WORLD]:     { name: 'The World',     gun: { kind: 'stand', block: 0.72, reach: 6.0, attackRate: 0.5, attackDamage: 15, knockback: 14, color: 0xf4c542, accent: 0xff4d6a, callout: 'MUDA MUDA MUDA!', timeStop: 6.0, tsCall: 'ZA WARUDO! Toki yo tomare!' } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 

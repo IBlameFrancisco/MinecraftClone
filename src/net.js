@@ -172,6 +172,7 @@ export class Multiplayer {
         if (this.isHost) { this.handlers.onDeathAuthority?.(d.by, d.id); this._relay(conn.peer, d); }
         break;
       case 'pfire': this.handlers.onPlayerFire?.(d); if (this.isHost) this._relay(conn.peer, d); break;   // a remote player's shot (visual)
+      case 'timestop': this.handlers.onTimeStop?.(d.o, d.dur); if (this.isHost) this._relay(conn.peer, d); break;   // a Stand froze time
       case 'bpos': this._syncBots(d.bots); break;     // host → guests
       case 'bfire': this.handlers.onBotFire?.(d); break;
       case 'board': this.handlers.onBoard?.(d); break;

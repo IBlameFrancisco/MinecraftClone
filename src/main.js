@@ -97,10 +97,10 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 
 // ---------- Cinematic post-processing ----------
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null } },
+  uniforms: { tDiffuse: { value: null }, uTimeStop: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
   fragmentShader: `
-    uniform sampler2D tDiffuse; varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform float uTimeStop; varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
       vec2 d = vUv - 0.5;
@@ -109,6 +109,13 @@ const GradeShader = {
       c.rgb = (c.rgb - 0.5) * 1.06 + 0.5;              // gentle contrast
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
       c.rgb = mix(vec3(l), c.rgb, 1.22);               // a touch more vibrance
+      // ZA WARUDO: time stops — drain colour to a cold monochrome + deepen the vignette.
+      if (uTimeStop > 0.001) {
+        float g = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        vec3 mono = vec3(g) * vec3(0.82, 0.86, 1.1);
+        c.rgb = mix(c.rgb, mono, uTimeStop);
+        c.rgb *= mix(1.0, mix(0.42, 1.06, vig), uTimeStop);
+      }
       gl_FragColor = c;
     }`,
 };
@@ -117,7 +124,8 @@ composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.52, 0.55, 0.78);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
-composer.addPass(new ShaderPass(GradeShader));
+const gradePass = new ShaderPass(GradeShader);
+composer.addPass(gradePass);
 const fxaaPass = new ShaderPass(FXAAShader);
 composer.addPass(fxaaPass);
 
@@ -851,13 +859,14 @@ const mpHandlers = {
   onBotFire: (d) => { shotTracer(d.kind, new THREE.Vector3(d.x, d.y, d.z), new THREE.Vector3(d.dx, d.dy, d.dz), d.range, d.color); sfx.gunAt(d.kind === 'rail' ? 'rail' : d.kind === 'shotgun' ? 'shotgun' : 'handgun', d.x, d.y, d.z); },
   // Another player's shot — render it visually (no damage; their client resolves hits).
   onPlayerFire: (d) => spawnGhostShot(d, true),
+  onTimeStop: (owner, dur) => onRemoteTimeStop(owner, dur),
   onBoard: (d) => {
     board = d.board; teamMode = d.team; scoreLimit = d.scoreLimit;
     const me = board.find((e) => e.id === selfId()); myTeam = me ? me.team : TEAM_NONE;
     hud.setScoreboard(board, teamMode, scoreLimit, myTeam, warTeamInfo()); mp.recolorBots(colorForBot);
   },
   onRoundOver: (winner) => { matchWinner = winner; if (!(gameMode === 'gungame' && startKillCam(winner))) { hud.showRoundOver(winner); hud.showScoreboard(); } },
-  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; },
+  onRoundReset: () => { hud.hideRoundOver(); hud.hideScoreboard(); eliminated = false; player.flying = false; dead = false; timeStop.used = false; endTimeStop(false); const sp = teamSpawnPoint(myTeam); player.pos.set(sp.x, sp.y, sp.z); player.vel.set(0, 0, 0); health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; },
   botColor: (team) => colorForBot(team),
 };
 hud.onChatSend = (t) => { if (mp.online) mp.sendChat(t); else hud.addChat(playerName(), t, false); };
@@ -915,6 +924,7 @@ function setGameMode(m) {
 function leaveBattleCleanup() {
   eliminated = false; player.flying = false; invuln = 0; protect = 0;
   wornStand = 0; despawnStand();                 // dismiss any Stand on the way out
+  timeStop.used = false; endTimeStop(false);     // clear any stopped time
   setupCornucopia(false);                        // tear down the Hunger Games loot altar
   matchWinner = null; matchOverTimer = 0;
   abortDeathCam(); clearAfterImages();
@@ -972,6 +982,7 @@ function die() {
 
 // Battle: credit the kill. Most modes respawn; Battle Royale eliminates you.
 function battleDeath() {
+  if (timeStop.active && timeStop.owner === selfId()) endTimeStop(false);   // your own stopped time ends if you fall
   const now = performance.now() / 1000;
   const killer = (now - lastHitTime < 10) ? lastHitBy : null;
   hud.addKill(myName(), killer);
@@ -1004,6 +1015,7 @@ function respawnPlayer() {
   health = 20; hud.setHealth(20); invuln = 1.6; protect = 1.6;   // spawn protection vs PvP too
   grenadeCount = 2; hud.setGrenades(2);
   flashCharges = FLASH_MAX; flashRegen = 0; flashCD = 0;   // fresh flash steps on respawn
+  timeStop.used = false;                                   // a fresh life re-arms the time stop
   if (gameMode === 'gungame') gunLevelShown = -1;   // re-apply current ladder gun
 }
 
@@ -1014,6 +1026,10 @@ let teamMode = false, myTeam = TEAM_NONE, scoreLimit = 20;
 let gameMode = 'dm';
 let gunLevelShown = -1;          // gun game: which ladder weapon we're holding
 let wornStand = 0;               // equipped Stand item id (0 = none) — worn, not held
+// Time stop (ZA WARUDO): a Stand ability, once per life — the owner moves while
+// every other entity + projectile freezes. `owner` = who stopped time (self/remote).
+const timeStop = { active: false, t: 0, owner: null, used: false };
+let timeStopGrade = 0;           // smoothed monochrome amount fed to the grade shader
 let hillTimer = 0;               // koth scoring tick
 let zoneRadius = 999, stormTimer = 0, eliminated = false;   // battle royale
 // Hunger Games: ring spawn around a central cornucopia, scavenge loot, last one
@@ -1108,6 +1124,7 @@ function setupMatch() {
   matchWinner = null; matchOverTimer = 0; endKillCam(false); resetReel(); resetSharingan(); hud.hideRoundOver();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; hillTimer = 0; stormTimer = 0; eliminated = false; waveNum = 0; waveBreak = 0;
+  timeStop.used = false; endTimeStop(false);
   streak = 0; grenadeCount = 2; hud.setGrenades(2); player.flying = false;
   health = 20; hud.setHealth(20); invuln = 1.5; protect = 1.5; dead = false;   // clean slate (also clears 999 invuln left by a BR elimination)
   hud.hideScoreboard();
@@ -1820,6 +1837,7 @@ function resetMatch() {
   myKills = 0; myDeaths = 0; humanScore.clear();
   combo = 0; comboTimer = 0; firstBlood = true;
   gunLevelShown = -1; eliminated = false; stormTimer = 0; player.flying = false;
+  timeStop.used = false; endTimeStop(false);
   zoneRadius = (gameMode === 'br' || gameMode === 'hunger') ? ARENA.HALF - 2 : 999;
   matchWinner = null; endKillCam(false); abortDeathCam(); resetReel(); resetSharingan(); hud.hideRoundOver(); hud.hideScoreboard();
   if (gameMode === 'war') {   // fresh assault: reset the clock, reinforcements and objective
@@ -2156,6 +2174,8 @@ window.addEventListener('keydown', (e) => {
     if (!dead && !inventory.open && player.locked) chargingChakra = true;   // hold to channel chakra
   } else if (e.code === 'KeyX') {
     if (!dead && !inventory.open && player.locked) cycleStand();            // don / switch / dismiss the worn Stand
+  } else if (e.code === 'KeyZ') {
+    if (!dead && !inventory.open && player.locked) activateTimeStop();      // ZA WARUDO — stop time (once per life)
   } else if (e.code === 'KeyT' || e.code === 'Enter') {
     if (player.locked && !inventory.open && !dead && !hud.isChatOpen()) { e.preventDefault(); player.keys.clear(); hud.openChat(); }
   }
@@ -2564,6 +2584,28 @@ function cycleStand() {
   wornStand = order[(order.indexOf(wornStand) + 1) % order.length];
   if (wornStand) { hud.showName('✦ ' + gunOf(wornStand).name); sfx.standSummon(); }
   else { hud.showName('Stand dismissed'); despawnStand(); }
+}
+// Z — stop time (Star Platinum / The World). Once per life: the owner keeps acting
+// while everything else freezes. Broadcasts so co-op peers freeze too.
+function activateTimeStop() {
+  const m = currentStand();
+  if (!m || !m.timeStop) return;                          // need a Stand that can stop time
+  if (timeStop.active || timeStop.used) return;           // once until you're killed again
+  if (dead || eliminated || (mode !== BATTLE && mode !== SURVIVAL)) return;
+  timeStop.active = true; timeStop.t = m.timeStop; timeStop.owner = selfId(); timeStop.used = true;
+  hud.announce('🕛 ' + (m.tsCall || 'Toki yo tomare!'), '#e6ecff'); sfx.timeStop(); addShake(0.5);
+  for (let i = 0; i < 28; i++) { const a = (i / 28) * 6.2832; particles.burst(player.pos.x + Math.cos(a) * 1.5, player.pos.y + 1, player.pos.z + Math.sin(a) * 1.5, [205, 215, 255], 3); }
+  if (mp.online) mp.broadcast({ t: 'timestop', dur: m.timeStop, o: selfId() });
+}
+function onRemoteTimeStop(owner, dur) {
+  if (!owner || owner === selfId() || timeStop.active) return;
+  timeStop.active = true; timeStop.t = dur || 4; timeStop.owner = owner;
+  hud.announce('🕛 Time has stopped!', '#e6ecff'); sfx.timeStop();
+}
+function endTimeStop(announce) {
+  if (!timeStop.active) return;
+  timeStop.active = false; timeStop.owner = null; timeStop.t = 0;
+  if (announce) { hud.announce('…time resumes', '#cfe0ff'); sfx.timeResume(); }
 }
 function updateStand(active, dt) {
   const m = active ? currentStand() : null;
@@ -3288,10 +3330,17 @@ function frame() {
   // Hunger Games: tributes are pinned on their podiums through the 3-2-1-GO countdown.
   const hungerFrozen = gameMode === 'hunger' && hungerCountdown > 0;
   if (hungerFrozen && loaded && !dead) tickHungerCountdown(sdt);
-  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated && !killCam.active && !deathCam.active && !hungerFrozen;
+  // Time stop: the owner moves; everything else (entities + projectiles) freezes. If
+  // someone ELSE stopped time, the local player is frozen too.
+  const tsActive = timeStop.active, tsMine = tsActive && timeStop.owner === selfId(), tsFrozenMe = tsActive && !tsMine;
+  if (tsActive && loaded) { timeStop.t -= dt; if (timeStop.t <= 0) endTimeStop(true); }
+  timeStopGrade += ((tsActive ? 1 : 0) - timeStopGrade) * Math.min(1, 9 * dt);
+  gradePass.uniforms.uTimeStop.value = timeStopGrade;
+  const wsdt = tsActive ? 0 : sdt;   // "world" dt — entities + projectiles freeze in stopped time
+  const active = loaded && player.locked && !inventory.open && !dead && !hud.isChatOpen() && !eliminated && !killCam.active && !deathCam.active && !hungerFrozen && !tsFrozenMe;
 
   if (loaded && player.locked && !dead) {
-    if (hungerFrozen) { player.keys.clear(); player.vel.x = 0; player.vel.z = 0; }   // pinned at the podium until "GO"
+    if (hungerFrozen || tsFrozenMe) { player.keys.clear(); player.vel.x = 0; player.vel.z = 0; }   // pinned (podium countdown / caught in stopped time)
     player.update(deathCam.active ? 0 : dt);   // frozen while the death cam plays
     // Fell off the arena into the void → eliminate + respawn.
     if (mode === BATTLE && !deathCam.active && player.pos.y < ARENA.FLOOR - 25) battleDeath();
@@ -3334,7 +3383,7 @@ function frame() {
   ambient.color.copy(sky.dirColor); ambient.intensity = Math.max(0.25, sky.ambIntensity * 0.6);
   hemi.color.copy(sky.uniforms.topColor.value); hemi.intensity = Math.max(0.4, sky.ambIntensity + 0.15);
 
-  mobs.update(loaded && !dead && mode !== BATTLE && !frozen ? dt : 0, player, sky.isNight, {
+  mobs.update(loaded && !dead && mode !== BATTLE && !frozen && !tsActive ? dt : 0, player, sky.isNight, {
     damagePlayer, onKill, explode, peaceful: difficulty === PEACEFUL, dmgMul: DMG_MUL[difficulty],
     fire: (x, y, z) => { particles.burst(x, y, z, [255, 150, 40], 2); if (Math.random() < 0.5) particles.burst(x, y, z, [90, 90, 90], 1); },
   });
@@ -3346,13 +3395,13 @@ function frame() {
     if (!frozen) tickAmaterasu(dt);
     if (precogCD > 0) precogCD -= dt;
     if (precogT > 0) { precogT -= dt; setEnemyXray(true); if (precogT <= 0) { setEnemyXray(false); hud.setPrecog(false); } }
-    const botDt = (matchWinner || frozen || hungerFrozen) ? 0 : (precogT > 0 ? dt * 0.4 : dt);   // frozen at the podiums during the countdown; slow-mo during Precognition
+    const botDt = (matchWinner || frozen || hungerFrozen || tsActive) ? 0 : (precogT > 0 ? dt * 0.4 : dt);   // frozen during the countdown + stopped time; slow-mo during Precognition
     if (isAuthority()) {
       botSoundBudget = 4;     // cap concurrent bot gunshot sounds this frame
       botMgr.update(botDt, { world, los: losClear, targets: buildTargets(), fire: botFire, coverPoints, arenaFloorY: ARENA.FLOOR });
       if (!frozen) manageBots(dt);
       if (!frozen && arenaTheme === 'ruins' && gameMode !== 'war') lavaBurnEntities(dt);   // ruins pit ring-out
-      if (!matchWinner && !frozen) modeTick(dt);
+      if (!matchWinner && !frozen && !tsActive) modeTick(dt);   // zone/objective logic also pauses in stopped time
       if (mp.isHost) { botBroadcastT -= dt; if (botBroadcastT <= 0) { botBroadcastT = 0.066; broadcastBotPositions(); } }
     }
     // Gun Game weapon follows your level on every client (host kills are local,
@@ -3513,16 +3562,16 @@ function frame() {
   muzzle.update(dt);
   tracers.update(dt);
   const enemyBots = isAuthority() ? botMgr.bots : null;   // bolts/rockets collide with arena bots
-  plasmas.update(sdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
-  rockets.update(sdt, world, mobs, enemyBots, mp, portals, rocketImpact);
-  blackholes.update(sdt, world, blackHoleHooks);
+  plasmas.update(wsdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
+  rockets.update(wsdt, world, mobs, enemyBots, mp, portals, rocketImpact);
+  blackholes.update(wsdt, world, blackHoleHooks);
   // Curve the player's in-flight Rasenshuriken toward where they're aiming (sweep your view to bend it).
   chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
-  chakra.update(sdt, world, chakraHooks);
+  chakra.update(wsdt, world, chakraHooks);
   laser.update(dt); hollowPurple.update(sdt); cleaveFx.update(sdt); sharinganFx.update(dt);
   updateStand(active, sdt);
 
-  grenades.update(sdt, world);
+  grenades.update(wsdt, world);
   grenadeCD -= sdt;
   portals.update(dt, portalBodies());
   mp.update(dt);
@@ -3598,6 +3647,9 @@ window.__game = {
   get standInfo() { return { worn: wornStand, equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
   __standDeflect: (dmg) => standDeflect(dmg),
   __setCountdown: (v) => { hungerCountdown = v; hungerCountShown = 99; },
+  get timeStopInfo() { return { active: timeStop.active, owner: timeStop.owner, t: +timeStop.t.toFixed(2), used: timeStop.used, grade: +timeStopGrade.toFixed(2) }; },
+  __timeStop: () => activateTimeStop(),
+  __remoteTimeStop: (owner, dur) => onRemoteTimeStop(owner, dur),
   __reelLast: () => (killReel.length ? killReel[killReel.length - 1].a : null),
   get hungerInfo() {
     const weapons = pickups.list.filter((p) => p.kind === 'weapon').map((p) => ({ x: +p.mesh.position.x.toFixed(2), z: +p.mesh.position.z.toFixed(2), y: +p.base.toFixed(2), gun: p.gun, gone: !!p.gone }));
