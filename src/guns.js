@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows. A tight,
@@ -1538,6 +1538,23 @@ export function makeViewModel(id) {
       for (const c of claws) c.material.opacity = p;
       haze.material.opacity = (0.3 + 0.2 * Math.abs(Math.sin(t * 4)));
       haze.scale.setScalar(0.42 + 0.06 * Math.sin(t * 6));
+    };
+  } else if (id === FUGA) {
+    // Sukuna's cursed hand with two fingers extended forward, a crescent blade of
+    // cursed energy coiled at the fingertips ready to be flung down a line.
+    box(0.2, 0.09, 0.2, 0xe8b89a, 0, -0.16, -0.3);          // back of the hand
+    box(0.05, 0.24, 0.06, 0xe8b89a, -0.04, 0.0, -0.4);      // index finger (extended)
+    box(0.05, 0.2, 0.06, 0xe8b89a, 0.05, -0.02, -0.38);     // middle finger
+    box(0.09, 0.12, 0.08, 0xe8b89a, 0.14, -0.12, -0.24);    // thumb
+    const blade = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 16, Math.PI * 1.15),
+      new THREE.MeshBasicMaterial({ color: 0xff3a5e, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    blade.position.set(0, 0.03, -0.5); blade.rotation.set(Math.PI / 2, 0, 0.4); g.add(blade);   // crescent of cursed energy
+    const haze = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff2a4a, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    haze.scale.setScalar(0.42); haze.position.set(0, 0.03, -0.5); g.add(haze);
+    g.userData.chakraAnim = (charge, dt, t) => {
+      blade.rotation.z += dt * 3.2;                          // the crescent spins, hungry to fly
+      blade.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 6));
+      haze.material.opacity = 0.3 + 0.18 * Math.abs(Math.sin(t * 5));
     };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xe2e2e6, 0, 0, -0.2);            // white chassis

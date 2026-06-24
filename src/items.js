@@ -41,6 +41,7 @@ export const SHARINGAN = 288;
 export const CLEAVE = 289;
 export const STAR_PLATINUM = 290;
 export const THE_WORLD = 291;
+export const FUGA = 292;
 
 // Stands (JoJo): equip one and a manifested spirit floats at your side — it auto-blocks
 // incoming attacks and barrages whatever enemy strays into its reach.
@@ -48,7 +49,7 @@ export const STANDS = [STAR_PLATINUM, THE_WORLD];
 
 // Stands aren't held weapons — they're worn (see STANDS), so they stay out of GUNS
 // (the selectable hotbar/creative-palette set).
-export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, PORTAL_GUN];
+export const GUNS = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, PORTAL_GUN];
 
 // Tool metadata. speed = mining-time divisor on matching blocks; damage = melee.
 function tool(type, tier) {
@@ -116,6 +117,10 @@ export const ITEMS = {
   // the closer the target as the cut "adjusts" to point-blank range (Cleave). A fast
   // close/mid slasher: `arc` is the cone half-angle, `cleave` the point-blank bonus.
   [CLEAVE]: { name: 'Cleave & Dismantle', gun: { kind: 'cleave', rate: 0.42, damage: 15, range: 15, arc: 1.12, cleave: 17, knockback: 15, recoil: 0.03, color: 0xe0143c } },
+  // Sukuna's RANGED Dismantle — Fūga (鵬撃). Fling fast crescent slashes of cursed
+  // energy down a line: each cut pierces every enemy it passes through, all the way to
+  // the wall. Auto-fire, fast cadence — the long-range counterpart to Cleave & Dismantle.
+  [FUGA]: { name: 'Fūga', gun: { kind: 'fuga', rate: 0.13, damage: 11, range: 72, auto: true, pierce: true, spread: 0.022, mag: 16, reload: 1.5, recoil: 0.024, color: 0xff2d6a } },
   // Stands manifest a spirit at your side. Passive while equipped: `block` is the
   // fraction of an attacker's damage it deflects, and it auto-barrages the nearest
   // enemy within `reach` for `attackDamage` every `attackRate`s. No gun in hand.
