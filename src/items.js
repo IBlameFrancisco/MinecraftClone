@@ -123,10 +123,11 @@ export const ITEMS = {
   // Dismantle now reaches far down the field as a sweeping fan; Cleave still bites
   // hardest at point-blank (near² falloff), so distance trades raw power for reach.
   [CLEAVE]: { name: 'Cleave & Dismantle', gun: { kind: 'cleave', rate: 0.5, damage: 15, range: 58, arc: 0.95, cleave: 17, knockback: 14, recoil: 0.03, color: 0xe0143c } },
-  // Fūga (鵬撃) — ONE devastating fire arrow. A giant blazing arrow streaks down the field
-  // wreathed in flame, PIERCES (one-shotting) everything in its line, and erupts in a huge
-  // fiery explosion (AoE) on impact. A single super-strong shot — fires once, then reloads.
-  [FUGA]: { name: 'Fūga', gun: { kind: 'fuga', rate: 0.9, damage: 65, range: 110, speed: 96, splash: 34, radius: 5.0, pierce: true, spread: 0.0, mag: 1, reload: 1.8, recoil: 0.07, color: 0xff7a1e } },
+  // Fūga (鵬撃) — DRAW the flaming bow (hold to charge), then loose ONE devastating fire
+  // arrow. A fuller draw means a bigger, faster arrow that hits harder. The arrow streaks
+  // down the field, PIERCES (one-shotting) everything in its line, and erupts in a huge
+  // fiery explosion (AoE) on impact. A charged super-attack — no chakra, pure fire.
+  [FUGA]: { name: 'Fūga', gun: { kind: 'fuga', charge: 1.4, damage: 78, range: 110, speed: 96, splash: 40, radius: 5.5, recoil: 0.08, color: 0xff7a1e } },
   // Stands manifest a spirit at your side. Passive while equipped: `block` is the
   // fraction of an attacker's damage it deflects, and it auto-barrages the nearest
   // enemy within `reach` for `attackDamage` every `attackRate`s. No gun in hand.

@@ -363,6 +363,19 @@ export class SFX {
     this._tone(840, 210, 0.10, 0.06, 'triangle');     // body
     this._tone(2200, 880, 0.07, 0.04, 'square');      // metallic glint
   }
+  // Fūga — drawing the flaming bow: a swelling fire roar that rises as you charge.
+  fireCharge() {
+    if (!this.ctx) return;
+    this._tone(120, 520, 1.2, 0.12, 'sawtooth');      // rising pitch as the flames gather
+    this._noise(1.1, 900, 0.7, 0.13, 'bandpass');     // building fire roar
+    this._noise(0.9, 2800, 0.6, 0.05, 'highpass');    // crackle
+  }
+  // The bow reaches full draw — a sharp fiery flare-up.
+  fireReady() {
+    if (!this.ctx) return;
+    this._tone(900, 1500, 0.12, 0.10, 'square');
+    this._noise(0.12, 3200, 2.0, 0.12, 'bandpass');
+  }
   // Fūga — loosing a fire arrow: a bow twang flaring into a fiery whoosh.
   fireArrow() {
     if (!this.ctx) return;
