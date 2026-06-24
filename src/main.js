@@ -1561,9 +1561,9 @@ function recordReel(dt) {
   reelClock += reelAcc; reelAcc = 0;
   const a = {};
   const myWep = gunOf(inventory.selectedId()) ? inventory.selectedId() : 0;
-  if (!dead && !eliminated) a['me'] = [player.pos.x, player.pos.y, player.pos.z, player.yaw, myWep];
-  for (const b of botMgr.bots) if (b.alive && b.mesh) a[b.id] = [b.pos.x, b.pos.y, b.pos.z, b.yaw, b.gunId || 0];
-  if (mp.online) for (const [id, r] of mp.remotes) if (r.group && r.group.visible) a[id] = [r.group.position.x, r.group.position.y, r.group.position.z, r.target ? r.target.yaw : r.group.rotation.y, r.wep || 0];
+  if (!dead && !eliminated) a['me'] = [player.pos.x, player.pos.y, player.pos.z, player.yaw, myWep, wornStand];
+  for (const b of botMgr.bots) if (b.alive && b.mesh) a[b.id] = [b.pos.x, b.pos.y, b.pos.z, b.yaw, b.gunId || 0, 0];
+  if (mp.online) for (const [id, r] of mp.remotes) if (r.group && r.group.visible) a[id] = [r.group.position.x, r.group.position.y, r.group.position.z, r.target ? r.target.yaw : r.group.rotation.y, r.wep || 0, r.st || 0];
   killReel.push({ t: reelClock, a });
   const cut = reelClock - REEL_SECS;
   while (killReel.length > 2 && killReel[0].t < cut) killReel.shift();
@@ -1617,6 +1617,10 @@ function reelWep(key) {   // the most recent weapon this actor held in the reel
   for (let i = killReel.length - 1; i >= 0; i--) { const v = killReel[i].a[key]; if (v && v[4]) return v[4]; }
   return 0;
 }
+function reelStand(key) {   // the Stand this actor wore in the reel (index 5)
+  for (let i = killReel.length - 1; i >= 0; i--) { const v = killReel[i].a[key]; if (v && v[5]) return v[5]; }
+  return 0;
+}
 function buildReplayAvatar(key) {
   const bot = botMgr.get(key);
   let name = '?', skin;
@@ -1627,11 +1631,16 @@ function buildReplayAvatar(key) {
   av.userData.yawOff = bot ? 0 : Math.PI;   // bots store avatar-yaw; players store look-yaw
   const wep = reelWep(key);                 // show the gun/jutsu they were holding
   if (wep) { try { av.add(makeHeldWeapon(wep)); } catch { /* ignore */ } }
+  const st = reelStand(key);                // and the Stand they wore, floating at their side
+  if (st) { const m = gunOf(st); if (m && m.kind === 'stand') { try { const s = makeStandAvatar(m); s.position.set(1.15, 0, 0.3); av.add(s); av.userData.stand = s; } catch { /* ignore */ } } }
   av.visible = false; scene.add(av);
   return av;
 }
 function disposeReplayAvatar(av) {
   if (!av) return;
+  // Detach the Stand first and dispose it map-safely (its sprites share the global
+  // glow texture — the avatar traverse below would otherwise dispose that).
+  if (av.userData.stand) { av.remove(av.userData.stand); disposeStandGroup(av.userData.stand); av.userData.stand = null; }
   scene.remove(av);
   av.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } else if (o.isSprite && o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
 }
@@ -1689,6 +1698,8 @@ function updateReplay(dt) {
   const vyaw = sampleReel(replay.victimKey, qt, _rV);
   if (kyaw != null) { replay.avK.visible = true; replay.avK.position.copy(_rK); replay.avK.rotation.y = kyaw + replay.avK.userData.yawOff; }
   if (vyaw != null) { replay.avV.visible = true; replay.avV.position.copy(_rV); replay.avV.rotation.y = vyaw + replay.avV.userData.yawOff; }
+  if (replay.avK.userData.stand) replay.avK.userData.stand.userData.anim(replay.clock, 0, 0);   // Stands idle-bob beside their owner in the replay
+  if (replay.avV.userData.stand) replay.avV.userData.stand.userData.anim(replay.clock, 0, 0);
   // Replay the actual shots/attacks as they happened, in time with the action.
   while (replay.fires && replay.fireIdx < replay.fires.length && replay.fires[replay.fireIdx].t <= qt) {
     spawnGhostShot(replay.fires[replay.fireIdx], true); replay.fireIdx++;
@@ -2443,7 +2454,7 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
   else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), (d.r || 15) * 0.5, d.arc || 1.1); if (withSound) sfx.slash(); }
-  else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) sfx.standBarrage({ x: d.x, y: d.y, z: d.z }); }
+  else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) sfx.standBarrage({ x: d.x, y: d.y, z: d.z }); const ro = d.o && mp.remotes.get(d.o); if (ro) { ro.standAtk = 0.36; ro.standFace = new THREE.Vector3(d.x, d.y, d.z); } }
   else if (k === 'cannon') { hungerCannon(d.n || 2); }   // a tribute fell (Hunger Games, relayed to guests)
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
   else if (k === 'flash') { const end = new THREE.Vector3(d.ex ?? d.x, d.ey ?? d.y, d.ez ?? d.z); spawnAfterImages(muzzle, end, '', getSkin(d.skin), 3); if (withSound) sfx.flashStep(); }
@@ -2572,7 +2583,7 @@ function updateStand(active, dt) {
     damageNumbers.spawn(new THREE.Vector3(tgt.x, tgt.y + 0.7, tgt.z), m.attackDamage, false);
     hud.hitMarker(false); sfx.standBarrage({ x: tgt.x, y: tgt.y, z: tgt.z }); addShake(0.05);
     if (Math.random() < 0.33) hud.showName(m.callout);
-    if (mp.online) mp.broadcast({ t: 'pfire', k: 'ora', x: tgt.x, y: tgt.y, z: tgt.z, dx: 0, dy: 0, dz: 0, ac: m.accent });
+    if (mp.online) mp.broadcast({ t: 'pfire', k: 'ora', x: tgt.x, y: tgt.y, z: tgt.z, dx: 0, dy: 0, dz: 0, ac: m.accent, o: mp.myId });
   }
   // Float just off the user's right shoulder (slightly forward so it stays in view),
   // surging toward the target on the barrage.
@@ -2590,6 +2601,29 @@ function updateStand(active, dt) {
   stand.group.rotation.y = Math.atan2(faceX, faceZ);
   stand.group.userData.anim(stand.t, stand.atk > 0 ? 1 : 0, stand.blockK);
   stand.blockK = Math.max(0, stand.blockK - dt * 4);
+}
+function disposeStandGroup(g) { g.traverse((o) => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); }); }
+// Render each remote player's Stand beside them (co-op): attached to their avatar
+// group (so it follows + is cleaned up with them), bobbing idle and lunging forward
+// on a barrage (driven by the 'ora' relay setting r.standAtk).
+let _remoteStandT = 0;
+function updateRemoteStands(dt) {
+  if (!mp.online) return;
+  _remoteStandT += dt;
+  for (const [, r] of mp.remotes) {
+    const want = r.bot ? 0 : (r.st || 0);
+    if (r._standId !== want) {
+      if (r.stand) { r.group.remove(r.stand); disposeStandGroup(r.stand); r.stand = null; }
+      const m = want ? gunOf(want) : null;
+      if (m && m.kind === 'stand') { r.stand = makeStandAvatar(m); r.stand.position.set(1.15, 0, 0.3); r.group.add(r.stand); }
+      r._standId = want;
+    }
+    if (!r.stand) continue;
+    r.stand.visible = r.group.visible;
+    r.standAtk = Math.max(0, (r.standAtk || 0) - dt);
+    r.stand.position.z = 0.3 + (r.standAtk > 0 ? 0.85 : 0);   // surge forward (the avatar's facing) on a barrage
+    r.stand.userData.anim(_remoteStandT, r.standAtk > 0 ? 1 : 0, 0);
+  }
 }
 
 // Nearest damageable enemy (remote humans + local bots) along a ray.
@@ -3492,9 +3526,10 @@ function frame() {
   grenadeCD -= sdt;
   portals.update(dt, portalBodies());
   mp.update(dt);
+  updateRemoteStands(dt);   // show each remote player's Stand beside them
   // Keep broadcasting in-game even while dead so peers can hide our avatar (alive flag);
   // only the home menu suppresses it.
-  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated, wep: gunOf(inventory.selectedId()) ? inventory.selectedId() : 0, ch: +chakraAuraI.toFixed(2) });
+  if (loaded && !atMenu) mp.sendPos({ x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, alive: !dead && !eliminated, wep: gunOf(inventory.selectedId()) ? inventory.selectedId() : 0, ch: +chakraAuraI.toFixed(2), st: wornStand });
 
   // Feel: decay shake + multikill window; update the 3D-audio listener (camera).
   shakeAmt *= Math.max(0, 1 - 9 * dt);
@@ -3563,6 +3598,7 @@ window.__game = {
   get standInfo() { return { worn: wornStand, equipped: !!currentStand(), out: !!(stand.group && stand.group.visible), id: stand.id, attacking: stand.atk > 0, blockK: +stand.blockK.toFixed(2), pos: stand.group ? [+stand.group.position.x.toFixed(1), +stand.group.position.y.toFixed(1), +stand.group.position.z.toFixed(1)] : null }; },
   __standDeflect: (dmg) => standDeflect(dmg),
   __setCountdown: (v) => { hungerCountdown = v; hungerCountShown = 99; },
+  __reelLast: () => (killReel.length ? killReel[killReel.length - 1].a : null),
   get hungerInfo() {
     const weapons = pickups.list.filter((p) => p.kind === 'weapon').map((p) => ({ x: +p.mesh.position.x.toFixed(2), z: +p.mesh.position.z.toFixed(2), y: +p.base.toFixed(2), gun: p.gun, gone: !!p.gone }));
     return { mode: gameMode, eliminated, closing: hungerClosing, time: +hungerTime.toFixed(1), zone: +zoneRadius.toFixed(1), countdown: +hungerCountdown.toFixed(2), arsenal: hungerArsenal.slice(), weapons, aliveBots: botMgr.bots.filter((b) => b.alive).length, hasCornucopia: !!cornucopiaMesh, winner: matchWinner };
