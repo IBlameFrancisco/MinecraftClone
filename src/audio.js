@@ -381,6 +381,23 @@ export class SFX {
     this._noise(0.5, 220, 0.7, 0.18, 'lowpass');      // muffled blast
     this._noise(0.06, 1400, 1.2, 0.12, 'bandpass');   // crack of the report
   }
+  // Time stop (ZA WARUDO) — a heavy downward thud + a winding-down whir that snaps
+  // into dead silence, like the world's clock jamming to a halt.
+  timeStop() {
+    if (!this.ctx) return;
+    this._tone(420, 60, 0.6, 0.28, 'sawtooth');       // the world winding down
+    this._tone(210, 30, 0.7, 0.2, 'triangle');        // sub drop
+    this._tone(900, 70, 0.45, 0.12, 'square');        // overtone slowing
+    this._noise(0.5, 900, 0.8, 0.16, 'lowpass');      // pressure drop
+    this._tone(70, 60, 0.9, 0.3, 'sine');             // deep impact thud
+  }
+  // Time resumes — a rising whoosh as colour and motion flood back.
+  timeResume() {
+    if (!this.ctx) return;
+    this._tone(80, 520, 0.45, 0.22, 'sawtooth');
+    this._tone(160, 760, 0.4, 0.12, 'triangle');
+    this._noise(0.35, 1600, 1.4, 0.12, 'highpass');
+  }
   // Stand summon — a short rising whoosh as the spirit manifests.
   standSummon() {
     if (!this.ctx) return;
