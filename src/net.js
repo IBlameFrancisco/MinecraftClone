@@ -275,6 +275,7 @@ export class Multiplayer {
     r.skinId = d.skin;                            // remember their skin (for the kill-cam replay avatar)
     this._setHeldWeapon(r, d.wep | 0);
     r.ch = d.ch || 0;                              // chakra-channel intensity (the protective aura)
+    r.st = d.st | 0;                               // worn Stand id (main renders the spirit beside them)
   }
 
   // A glowing chakra shield bubble + spinning ground ring shown around a remote
