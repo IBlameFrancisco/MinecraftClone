@@ -11,7 +11,7 @@ import { getSkin, randomBotSkin } from './skins.js';
 import {
   HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, PLASMA_GUN, ROCKET_LAUNCHER, gunOf,
 } from './items.js';
-import { isSlippery } from './blocks.js';
+import { isSlippery, isSolid } from './blocks.js';
 
 const GRAVITY = 28;
 const TWO_PI = Math.PI * 2;
@@ -334,7 +334,7 @@ export class BotManager {
       const dn = Math.hypot(desiredX, desiredZ);
       if (dn > 0.001) {
         const fx = desiredX / dn, fz = desiredZ / dn, fy = Math.floor(b.pos.y + 1.1);   // head height: clear of a 1-step
-        const tall = (ox, oz) => ctx.world.getBlock(Math.floor(b.pos.x + ox), fy, Math.floor(b.pos.z + oz)) !== 0;
+        const tall = (ox, oz) => isSolid(ctx.world.getBlock(Math.floor(b.pos.x + ox), fy, Math.floor(b.pos.z + oz)));   // only solid blocks are walls (not water/glass decor)
         if (tall(fx * 1.0, fz * 1.0)) {                          // un-steppable obstacle straight ahead
           const px = -fz, pz = fx;                               // perpendicular
           const lBlk = tall(fx * 0.6 + px * 1.1, fz * 0.6 + pz * 1.1);
@@ -370,8 +370,8 @@ export class BotManager {
       if (b.onGround && b.jumpCD <= 0) {
         const fx = b.pos.x + mx * (HALF + 0.3), fz = b.pos.z + mz * (HALF + 0.3);
         const footY = Math.floor(b.pos.y + 0.1);
-        if (ctx.world.getBlock(Math.floor(fx), footY, Math.floor(fz)) !== 0 &&
-            ctx.world.getBlock(Math.floor(fx), footY + 1, Math.floor(fz)) === 0) { b.vel.y = 7.4; b.jumpCD = 0.6; }
+        if (isSolid(ctx.world.getBlock(Math.floor(fx), footY, Math.floor(fz))) &&
+            !isSolid(ctx.world.getBlock(Math.floor(fx), footY + 1, Math.floor(fz)))) { b.vel.y = 7.4; b.jumpCD = 0.6; }
       }
     } else { const f = onIce ? 0.95 : 0.8; b.vel.x *= f; b.vel.z *= f; b.moveX *= 0.8; b.moveZ *= 0.8; }
 
