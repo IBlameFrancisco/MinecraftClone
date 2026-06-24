@@ -173,6 +173,67 @@ export class Plasmas {
   }
 }
 
+// ---------------- Fire Arrows (Fūga) ----------------
+// A blazing arrow that streaks down the aim line wrapped in fire, leaving a wake of
+// embers, and PIERCES every enemy it passes through (main resolves the per-target
+// damage via onPierce, tracking already-hit ids); it bursts into flame on a wall/range.
+const _ARROW_FWD = new THREE.Vector3(0, 0, 1);
+export class FireArrows {
+  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.embers = []; }
+  spawn(pos, dir, speed, damage, range, ghost) {
+    const g = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.075, 0.95, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff9c2a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    shaft.rotation.x = Math.PI / 2;                       // align the length to +Z
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.42, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfff3cc, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    tip.rotation.x = Math.PI / 2; tip.position.z = 0.6;   // white-hot arrowhead out front
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xfff0c0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    core.scale.setScalar(0.7);
+    const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff6a14, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    aura.scale.setScalar(1.7);
+    g.add(shaft, tip, core, aura);
+    g.position.copy(pos);
+    g.quaternion.setFromUnitVectors(_ARROW_FWD, dir.clone().normalize());
+    g.scale.setScalar(1.4);
+    this.group.add(g);
+    this.list.push({ m: g, aura, core, vel: dir.clone().multiplyScalar(speed), pos: pos.clone(), dir: dir.clone().normalize(), damage, range, travelled: 0, t: 0, ghost, hitSet: new Set() });
+  }
+  _ember(pos, dir) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff8a2a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    s.scale.setScalar(0.42 + Math.random() * 0.34);
+    s.position.copy(pos).addScaledVector(dir, -0.3);
+    s.position.x += (Math.random() - 0.5) * 0.28; s.position.y += (Math.random() - 0.5) * 0.28; s.position.z += (Math.random() - 0.5) * 0.28;
+    this.group.add(s); this.embers.push({ s, life: 0.36, max: 0.36, vy: 0.5 + Math.random() * 0.7 });
+  }
+  update(dt, world, onPierce, onEnd) {
+    for (let i = this.embers.length - 1; i >= 0; i--) {
+      const e = this.embers[i]; e.life -= dt;
+      if (e.life <= 0) { this.group.remove(e.s); e.s.material.dispose(); this.embers.splice(i, 1); }
+      else { const k = e.life / e.max; e.s.material.opacity = 0.85 * k * k; e.s.scale.setScalar(0.42 * k + 0.05); e.s.position.y += e.vy * dt; e.s.material.color.setRGB(1, 0.45 * k + 0.18, 0.06 * k); }
+    }
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const p = this.list[i]; p.t += dt;
+      const fl = 0.6 + 0.4 * Math.sin(p.t * 42);
+      p.aura.scale.setScalar(1.5 + fl * 0.5); p.aura.material.rotation += dt * 5;
+      p.core.scale.setScalar(0.62 + fl * 0.22);
+      const ax = p.pos.x, ay = p.pos.y, az = p.pos.z;   // segment start (this frame)
+      const step = p.vel.clone().multiplyScalar(dt);
+      p.pos.add(step); p.travelled += step.length();
+      p.m.position.copy(p.pos);
+      this._ember(p.pos, p.dir);
+      const done = p.travelled > p.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
+      // Pierce along the SWEPT segment (a fast arrow would tunnel past a per-frame point check).
+      if (!p.ghost && onPierce) onPierce(ax, ay, az, p.pos.x, p.pos.y, p.pos.z, p.hitSet, p.damage);
+      if (done) {
+        if (onEnd) onEnd(p.pos.clone(), p.ghost);
+        this.group.remove(p.m); p.m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+        this.list.splice(i, 1);
+      }
+    }
+  }
+}
+
 // ---------------- Rockets ----------------
 // A travelling missile with a smoke/fire trail; on contact it calls back to do an
 // AoE explosion (damage + knockback + block destruction) in main.
@@ -1158,11 +1219,12 @@ export class MuzzleFlash {
     camera.add(this.spr);
     this.life = 0; this.max = 0.06;
   }
-  flash() {
+  flash(color = 0xffffff, scale = 1) {
     this.life = this.max;
     this.spr.material.opacity = 1;
+    this.spr.material.color.setHex(color);                  // per-weapon tint (energy guns glow their colour)
     this.spr.material.rotation = Math.random() * 6.28;
-    this._base = 1.0 + Math.random() * 0.5;     // size varies per shot
+    this._base = scale * (1.0 + Math.random() * 0.5);        // size varies per shot
   }
   update(dt) {
     if (this.life > 0) {
@@ -1540,21 +1602,25 @@ export function makeViewModel(id) {
       haze.scale.setScalar(0.42 + 0.06 * Math.sin(t * 6));
     };
   } else if (id === FUGA) {
-    // Sukuna's cursed hand with two fingers extended forward, a crescent blade of
-    // cursed energy coiled at the fingertips ready to be flung down a line.
-    box(0.2, 0.09, 0.2, 0xe8b89a, 0, -0.16, -0.3);          // back of the hand
-    box(0.05, 0.24, 0.06, 0xe8b89a, -0.04, 0.0, -0.4);      // index finger (extended)
-    box(0.05, 0.2, 0.06, 0xe8b89a, 0.05, -0.02, -0.38);     // middle finger
-    box(0.09, 0.12, 0.08, 0xe8b89a, 0.14, -0.12, -0.24);    // thumb
-    const blade = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 16, Math.PI * 1.15),
-      new THREE.MeshBasicMaterial({ color: 0xff3a5e, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    blade.position.set(0, 0.03, -0.5); blade.rotation.set(Math.PI / 2, 0, 0.4); g.add(blade);   // crescent of cursed energy
-    const haze = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff2a4a, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    haze.scale.setScalar(0.42); haze.position.set(0, 0.03, -0.5); g.add(haze);
+    // A blazing longbow with a fire arrow nocked and drawn, wreathed in flame.
+    box(0.045, 0.36, 0.05, 0x6b4a2a, 0.0, -0.04, -0.22);    // vertical riser/grip
+    const up = box(0.038, 0.28, 0.045, 0x8a5a2c, 0.0, 0.2, -0.26); up.rotation.x = -0.5;   // upper limb bends forward
+    const lo = box(0.038, 0.28, 0.045, 0x8a5a2c, 0.0, -0.28, -0.26); lo.rotation.x = 0.5;  // lower limb bends forward
+    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.66, 4), new THREE.MeshBasicMaterial({ color: 0xdfe2ec, transparent: true, opacity: 0.75, fog: false }));
+    str.position.set(0, -0.04, -0.15); g.add(str);          // bowstring
+    const aShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.52, 6), new THREE.MeshBasicMaterial({ color: 0xffb24a, fog: false }));
+    aShaft.rotation.x = Math.PI / 2; aShaft.position.set(0, -0.04, -0.36); g.add(aShaft);  // nocked arrow shaft
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.14, 8), new THREE.MeshBasicMaterial({ color: 0xfff3cc, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    head.rotation.x = -Math.PI / 2; head.position.set(0, -0.04, -0.66); g.add(head);       // white-hot arrowhead
+    const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff6a14, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    flame.scale.setScalar(0.46); flame.position.set(0, -0.04, -0.5); g.add(flame);
+    const tip = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffd24a, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    tip.scale.setScalar(0.24); tip.position.set(0, -0.04, -0.66); g.add(tip);
     g.userData.chakraAnim = (charge, dt, t) => {
-      blade.rotation.z += dt * 3.2;                          // the crescent spins, hungry to fly
-      blade.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 6));
-      haze.material.opacity = 0.3 + 0.18 * Math.abs(Math.sin(t * 5));
+      flame.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 10));
+      flame.scale.setScalar(0.4 + 0.14 * Math.abs(Math.sin(t * 12)));
+      flame.material.rotation += dt * 3;
+      tip.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 15));   // the arrowhead pulses molten
     };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xe2e2e6, 0, 0, -0.2);            // white chassis

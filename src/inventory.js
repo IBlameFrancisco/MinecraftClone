@@ -111,10 +111,14 @@ export class Inventory {
   }
 
   // Replace the (creative-set) hotbar with a fixed loadout — used for Battle mode.
+  // The quick-bar is capped at 10 slots (keys 1–0); the FULL arsenal lives in the
+  // battle inventory ("armory"), from which any weapon can be assigned to a slot.
   setLoadout(ids) {
-    this.cHotbar = ids.map((id) => ({ id, count: 1 }));
+    this.arsenal = ids.slice();                                  // every weapon this mode allows
+    const n = Math.min(10, ids.length);                          // the bar never exceeds the 1–0 number row
+    this.cHotbar = ids.slice(0, n).map((id) => ({ id, count: 1 }));
     this.fixedLoadout = true;
-    if (ids.length !== this.slotCount) this._buildHotbar(ids.length);   // grow/shrink the bar to the loadout
+    if (n !== this.slotCount) this._buildHotbar(n);              // grow/shrink the bar to the loadout (≤10)
     this.renderHotbar();
     if (this.open) this.renderScreen();
     this.select(0);
@@ -219,6 +223,7 @@ export class Inventory {
     this.chestGridEl.style.display = chest ? 'grid' : 'none';
     this.chestHrEl.style.display = chest ? 'block' : 'none';
     this.titleEl.textContent = chest ? 'Chest'
+      : this.fixedLoadout ? 'Armory — tap a weapon to equip it to the selected slot'
       : this.creative ? 'Creative — pick a block'
       : this.craftSize === 3 ? 'Crafting Table' : 'Inventory';
 
@@ -228,6 +233,9 @@ export class Inventory {
       this.chestGridEl.innerHTML = '';
       this.chestSlots.forEach((s, i) => this.chestGridEl.appendChild(this._makeSlot('chest', i, s)));
       this.sMain.forEach((s, i) => this.gridEl.appendChild(this._makeSlot('main', i, s)));
+    } else if (this.fixedLoadout) {
+      // Battle armory: the mode's whole arsenal, click to slot it onto the quick-bar.
+      (this.arsenal || []).forEach((id) => this.gridEl.appendChild(this._makeSlot('palette', id, { id, count: 1 })));
     } else if (this.creative) {
       [...PLACEABLE, ...GUNS].forEach((id) => this.gridEl.appendChild(this._makeSlot('palette', id, { id, count: 1 })));
     } else {

@@ -76,20 +76,20 @@ export const ITEMS = {
   [STONE_AXE]:    { name: 'Stone Axe', ...tool('axe', 2) },
   [STONE_SHOVEL]: { name: 'Stone Shovel', ...tool('shovel', 2) },
   [STONE_SWORD]:  { name: 'Stone Sword', ...tool('sword', 2) },
-  [HANDGUN]:    { name: 'Handgun',    gun: { kind: 'hitscan', rate: 0.16, damage: 6,  range: 64,  mag: 12, reload: 1.0, recoil: 0.018, color: 0x3a3f47 } },
-  [SMG]:        { name: 'SMG',        gun: { kind: 'hitscan', rate: 0.075, damage: 4, range: 48, auto: true, spread: 0.030, mag: 30, reload: 1.3, recoil: 0.010, color: 0x44464f } },
-  [ASSAULT_RIFLE]: { name: 'Assault Rifle', gun: { kind: 'hitscan', rate: 0.10, damage: 6, range: 74, auto: true, spread: 0.016, mag: 30, reload: 1.6, recoil: 0.018, color: 0x3a4a36 } },
-  [SHOTGUN]:    { name: 'Shotgun',    gun: { kind: 'shotgun', rate: 0.85, damage: 4, pellets: 9, range: 26, spread: 0.12, mag: 6, reload: 0.95, recoil: 0.06, color: 0x5a3a26 } },
-  [SNIPER]:     { name: 'Sniper',     gun: { kind: 'hitscan', rate: 1.1,  damage: 34, range: 240, zoom: true, mag: 5, reload: 1.7, recoil: 0.06, color: 0x23262b } },
-  [RAILGUN]:    { name: 'Railgun',    gun: { kind: 'rail',    rate: 1.4, damage: 42, range: 260, pierce: true, mag: 4, reload: 2.1, recoil: 0.07, color: 0x342b4a } },
-  [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.30, damage: 12, range: 90,  speed: 40, mag: 20, reload: 1.4, recoil: 0.03, color: 0x2bd6c0 } },
-  [ROCKET_LAUNCHER]: { name: 'Rocket Launcher', gun: { kind: 'rocket', rate: 1.0, damage: 18, splash: 48, radius: 4.0, speed: 34, range: 96, mag: 3, reload: 2.0, recoil: 0.08, color: 0x556b2f } },
+  [HANDGUN]:    { name: 'Handgun',    gun: { kind: 'hitscan', sound: 'handgun', rate: 0.16, damage: 7,  range: 64,  mag: 13, reload: 1.0, recoil: 0.016, color: 0x3a3f47 } },
+  [SMG]:        { name: 'SMG',        gun: { kind: 'hitscan', sound: 'smg', rate: 0.072, damage: 4, range: 54, auto: true, spread: 0.028, mag: 30, reload: 1.25, recoil: 0.010, color: 0x44464f } },
+  [ASSAULT_RIFLE]: { name: 'Assault Rifle', gun: { kind: 'hitscan', sound: 'assault', rate: 0.10, damage: 6, range: 76, auto: true, spread: 0.014, mag: 30, reload: 1.55, recoil: 0.016, color: 0x3a4a36 } },
+  [SHOTGUN]:    { name: 'Shotgun',    gun: { kind: 'shotgun', rate: 0.78, damage: 4, pellets: 9, range: 30, spread: 0.115, mag: 6, reload: 0.9, recoil: 0.06, color: 0x5a3a26 } },
+  [SNIPER]:     { name: 'Sniper',     gun: { kind: 'hitscan', sound: 'sniper', rate: 1.1,  damage: 34, range: 240, zoom: true, mag: 5, reload: 1.6, recoil: 0.06, color: 0x23262b } },
+  [RAILGUN]:    { name: 'Railgun',    gun: { kind: 'rail',    rate: 1.4, damage: 42, range: 260, pierce: true, mag: 4, reload: 2.0, recoil: 0.07, color: 0x342b4a } },
+  [PLASMA_GUN]: { name: 'Plasma Gun', gun: { kind: 'plasma',  rate: 0.28, damage: 13, range: 92,  speed: 54, mag: 20, reload: 1.35, recoil: 0.03, color: 0x2bd6c0 } },
+  [ROCKET_LAUNCHER]: { name: 'Rocket Launcher', gun: { kind: 'rocket', rate: 1.0, damage: 18, splash: 48, radius: 4.2, speed: 40, range: 96, mag: 3, reload: 2.0, recoil: 0.08, color: 0x556b2f } },
   [PORTAL_GUN]: { name: 'Portal Gun', gun: { kind: 'portal',  rate: 0.40, range: 90,  speed: 55, recoil: 0.01, color: 0xdadada } },
   // Lobs a singularity that anchors, drags every nearby combatant into its core
   // (shredding DOT), then collapses in a final implosion blast.
   [BLACK_HOLE_BOMB]: { name: 'Black Hole Bomb', gun: { kind: 'blackhole', rate: 1.6, damage: 15, range: 82, speed: 24, radius: 16, pull: 38, duration: 4.4, splash: 100, mag: 2, reload: 3.4, recoil: 0.05, color: 0x7b3ff2 } },
   // Belt-fed LMG (MG42): a brutal sustained-fire weapon — the bunker nest gun.
-  [HEAVY_MG]: { name: 'MG42', gun: { kind: 'hitscan', rate: 0.055, damage: 6, range: 82, auto: true, spread: 0.042, mag: 75, reload: 3.2, recoil: 0.022, color: 0x2b2b2f } },
+  [HEAVY_MG]: { name: 'MG42', gun: { kind: 'hitscan', sound: 'mg42', rate: 0.058, damage: 6, range: 84, auto: true, spread: 0.046, mag: 75, reload: 3.2, recoil: 0.024, color: 0x2b2b2f } },
   // Ninjutsu: channel the chakra (hold to gather), then grind the spinning sphere
   // into a foe at point-blank. The longer the charge, the bigger the orb and the
   // more devastating the hit + knockback.
@@ -115,18 +115,20 @@ export const ITEMS = {
   // Sukuna's cursed technique — Cleave & Dismantle. Sweep a fan of imaginary-edge
   // slashes that carve every enemy in a forward arc (Dismantle), biting far harder
   // the closer the target as the cut "adjusts" to point-blank range (Cleave). A fast
-  // close/mid slasher: `arc` is the cone half-angle, `cleave` the point-blank bonus.
-  [CLEAVE]: { name: 'Cleave & Dismantle', gun: { kind: 'cleave', rate: 0.42, damage: 15, range: 15, arc: 1.12, cleave: 17, knockback: 15, recoil: 0.03, color: 0xe0143c } },
-  // Sukuna's RANGED Dismantle — Fūga (鵬撃). Fling fast crescent slashes of cursed
-  // energy down a line: each cut pierces every enemy it passes through, all the way to
-  // the wall. Auto-fire, fast cadence — the long-range counterpart to Cleave & Dismantle.
-  [FUGA]: { name: 'Fūga', gun: { kind: 'fuga', rate: 0.13, damage: 11, range: 72, auto: true, pierce: true, spread: 0.022, mag: 16, reload: 1.5, recoil: 0.024, color: 0xff2d6a } },
+  // long-range slasher: `arc` is the cone half-angle, `cleave` the point-blank bonus.
+  // Dismantle now reaches far down the field as a sweeping fan; Cleave still bites
+  // hardest at point-blank (near² falloff), so distance trades raw power for reach.
+  [CLEAVE]: { name: 'Cleave & Dismantle', gun: { kind: 'cleave', rate: 0.5, damage: 15, range: 58, arc: 0.95, cleave: 17, knockback: 14, recoil: 0.03, color: 0xe0143c } },
+  // Fūga (鵬撃) — rain blazing fire arrows down the field. Each arrow streaks through the
+  // air wreathed in flame and PIERCES every enemy it flies through, bursting into fire on
+  // a wall. Auto-fire, fast cadence — an epic storm of fire arrows.
+  [FUGA]: { name: 'Fūga', gun: { kind: 'fuga', rate: 0.14, damage: 12, range: 80, speed: 78, auto: true, pierce: true, spread: 0.018, mag: 16, reload: 1.5, recoil: 0.026, color: 0xff7a1e } },
   // Stands manifest a spirit at your side. Passive while equipped: `block` is the
   // fraction of an attacker's damage it deflects, and it auto-barrages the nearest
   // enemy within `reach` for `attackDamage` every `attackRate`s. No gun in hand.
   // `timeStop`/`tsCall`: press Z to freeze time for that many seconds — once per life.
-  [STAR_PLATINUM]: { name: 'Star Platinum', gun: { kind: 'stand', block: 0.78, reach: 6.5, attackRate: 0.6, attackDamage: 13, knockback: 12, color: 0x7d5fff, accent: 0x35e6e0, callout: 'ORA ORA ORA!', timeStop: 4.0, tsCall: 'STAR PLATINUM — toki yo tomare!' } },
-  [THE_WORLD]:     { name: 'The World',     gun: { kind: 'stand', block: 0.72, reach: 6.0, attackRate: 0.5, attackDamage: 15, knockback: 14, color: 0xf4c542, accent: 0xff4d6a, callout: 'MUDA MUDA MUDA!', timeStop: 6.0, tsCall: 'ZA WARUDO! Toki yo tomare!' } },
+  [STAR_PLATINUM]: { name: 'Star Platinum', gun: { kind: 'stand', block: 0.78, reach: 6.5, attackRate: 0.6, attackDamage: 13, knockback: 12, color: 0x7d5fff, accent: 0x35e6e0, callout: 'ORA ORA ORA!', chant: 'ora', timeStop: 4.0, tsCall: 'STAR PLATINUM — toki yo tomare!' } },
+  [THE_WORLD]:     { name: 'The World',     gun: { kind: 'stand', block: 0.72, reach: 6.0, attackRate: 0.5, attackDamage: 15, knockback: 14, color: 0xf4c542, accent: 0xff4d6a, callout: 'MUDA MUDA MUDA!', chant: 'muda', timeStop: 6.0, tsCall: 'ZA WARUDO! Toki yo tomare!' } },
 };
 export function gunOf(id) { return isItem(id) && ITEMS[id].gun ? ITEMS[id].gun : null; }
 
