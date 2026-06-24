@@ -2408,20 +2408,24 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'rasengan') fireRasengan(gun);
   else if (gun.kind === 'rasenshuriken') { chakra.throw(muzzle, _dir.clone(), gun, mp.myId || 'me', rasenshurikenImpact); sfx.rasenshuriken(); addShake(0.18); }
   else if (gun.kind === 'cleave') fireCleave(gun, muzzle);
-  else if (gun.kind === 'fuga') fireFuga(gun, muzzle);
+  else if (gun.kind === 'fuga') fireFuga(gun, 1);
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
 }
-// Fūga: loose a blazing fire arrow — a piercing projectile that streaks down the aim and
-// burns through everything it flies through, exploding into flame on a wall.
-function fireFuga(gun, muzzle) {
+// Fūga: loose a blazing fire arrow whose size/speed/power scale with the bow draw `cf`
+// (0..1). A piercing projectile that one-shots down its line and erupts in AoE fire.
+function fireFuga(gun, cf = 1) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
-  const dir = spreadDir(_dir, (gun.spread || 0) * (1 - adsAmount * 0.6)).clone().normalize();
-  fireArrows.spawn(muzzle, dir, gun.speed || 90, gun.damage, gun.range, false, gun.splash || 0, gun.radius || 0);
-  // A roaring launch — fire blooms off the bow.
-  particles.burst(muzzle.x, muzzle.y, muzzle.z, [255, 170, 50], 22);
+  const muzzle = _eye.clone().addScaledVector(_dir, 0.6);
+  const dir = _dir.clone().normalize();
+  const dmg = Math.max(1, Math.round(gun.damage * (0.45 + 0.55 * cf)));
+  const splash = Math.round((gun.splash || 0) * (0.4 + 0.6 * cf));
+  const speed = (gun.speed || 90) * (0.75 + 0.25 * cf);
+  const scale = 1.5 + 1.1 * cf;                          // a fuller draw looses a bigger arrow
+  fireArrows.spawn(muzzle, dir, speed, dmg, gun.range, false, splash, gun.radius || 0, scale);
+  particles.burst(muzzle.x, muzzle.y, muzzle.z, [255, 170, 50], 16 + Math.round(16 * cf));
   particles.burst(muzzle.x, muzzle.y, muzzle.z, [255, 90, 20], 10);
-  sfx.fireArrow(); addShake(0.16);
-  broadcastFire('fuga', muzzle, dir, { sp: gun.speed || 90, r: gun.range });
+  sfx.fireArrow(); addShake(0.1 + 0.14 * cf);
+  broadcastFire('fuga', muzzle, dir, { sp: speed, r: gun.range });
 }
 // Distance from point P to the segment A→B (squared not needed — used with a small radius).
 function _distToSeg(px, py, pz, ax, ay, az, bx, by, bz) {
@@ -2996,6 +3000,8 @@ function rocketImpact(pos, gun) {
 // Unleash a charged jutsu (cf = 0..1 charge fraction). Jutsu draw from the chakra
 // reserve — a weak tap costs less, a full charge costs the most. No chakra → fizzle.
 function releaseCharge(gun, cf) {
+  // Fūga is pure fire, not a chakra jutsu — it draws no chakra; the draw `cf` is its power.
+  if (gun.kind === 'fuga') { fireFuga(gun, cf); vmRecoil = Math.min(1, vmRecoil + 0.7); return true; }
   // Gun Game cycles you through every weapon — don't gate the jutsu tiers on the
   // chakra reserve, or a player could reach the Rasengan/Rasenshuriken and be
   // unable to fire (and unable to win). Every other mode pays the chakra cost.
@@ -3475,8 +3481,8 @@ function frame() {
       if (lmb && !reloading && !empty) {                            // can't gather while empty/reloading
         const was = chargeT;
         chargeT = Math.min(gun.charge, chargeT + dt);
-        if (was === 0 && chargeT > 0) sfx.chakraCharge();           // rising hum on gather start
-        if (was < gun.charge && chargeT >= gun.charge) sfx.chakraReady();  // ping at full charge
+        if (was === 0 && chargeT > 0) { gun.kind === 'fuga' ? sfx.fireCharge() : sfx.chakraCharge(); }   // rising roar/hum on draw
+        if (was < gun.charge && chargeT >= gun.charge) { gun.kind === 'fuga' ? sfx.fireReady() : sfx.chakraReady(); }  // ping at full draw
       } else if (!lmb && chargeT > 0.06) {
         const fired = releaseCharge(gun, Math.min(1, chargeT / gun.charge)); chargeT = 0;
         if (fired && gun.mag) { ammo[id]--; if (ammoFor(gun, id) <= 0) startReload(gun, id); }   // only spend ammo if it actually fired

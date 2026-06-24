@@ -181,7 +181,7 @@ export class Plasmas {
 const _ARROW_FWD = new THREE.Vector3(0, 0, 1);
 export class FireArrows {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.embers = []; }
-  spawn(pos, dir, speed, damage, range, ghost, splash = 0, splashR = 0) {
+  spawn(pos, dir, speed, damage, range, ghost, splash = 0, splashR = 0, scale = 0) {
     const g = new THREE.Group();
     const mb = (c, o = 1) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.13, 1.6, 10), mb(0xffb347));
@@ -199,7 +199,7 @@ export class FireArrows {
     g.add(tail, shaft, head, outer, aura, core);
     g.position.copy(pos);
     g.quaternion.setFromUnitVectors(_ARROW_FWD, dir.clone().normalize());
-    g.scale.setScalar(ghost ? 1.6 : 2.0);
+    g.scale.setScalar(scale > 0 ? scale : (ghost ? 1.6 : 2.0));
     this.group.add(g);
     this.list.push({ m: g, tail, aura, outer, core, vel: dir.clone().multiplyScalar(speed), pos: pos.clone(), dir: dir.clone().normalize(), damage, range, splash, splashR, travelled: 0, t: 0, ghost, hitSet: new Set() });
   }
@@ -1722,25 +1722,32 @@ export function makeViewModel(id) {
       haze.scale.setScalar(0.42 + 0.06 * Math.sin(t * 6));
     };
   } else if (id === FUGA) {
-    // A blazing longbow with a fire arrow nocked and drawn, wreathed in flame.
-    box(0.045, 0.36, 0.05, 0x6b4a2a, 0.0, -0.04, -0.22);    // vertical riser/grip
-    const up = box(0.038, 0.28, 0.045, 0x8a5a2c, 0.0, 0.2, -0.26); up.rotation.x = -0.5;   // upper limb bends forward
-    const lo = box(0.038, 0.28, 0.045, 0x8a5a2c, 0.0, -0.28, -0.26); lo.rotation.x = 0.5;  // lower limb bends forward
-    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.66, 4), new THREE.MeshBasicMaterial({ color: 0xdfe2ec, transparent: true, opacity: 0.75, fog: false }));
-    str.position.set(0, -0.04, -0.15); g.add(str);          // bowstring
-    const aShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.52, 6), new THREE.MeshBasicMaterial({ color: 0xffb24a, fog: false }));
-    aShaft.rotation.x = Math.PI / 2; aShaft.position.set(0, -0.04, -0.36); g.add(aShaft);  // nocked arrow shaft
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.14, 8), new THREE.MeshBasicMaterial({ color: 0xfff3cc, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    head.rotation.x = -Math.PI / 2; head.position.set(0, -0.04, -0.66); g.add(head);       // white-hot arrowhead
-    const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff6a14, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    flame.scale.setScalar(0.46); flame.position.set(0, -0.04, -0.5); g.add(flame);
-    const tip = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xffd24a, transparent: true, opacity: 0.92, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    tip.scale.setScalar(0.24); tip.position.set(0, -0.04, -0.66); g.add(tip);
+    // A bow drawn from living fire — flaming limbs, a blazing string and a fire arrow,
+    // every part pure flame (no wood). It swells brighter and larger as it is drawn.
+    const fmat = (c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    const fglow = (c, s, x, y, z, op = 0.8) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: c, transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); sp.scale.setScalar(s); sp.position.set(x, y, z); g.add(sp); return sp; };
+    const fmesh = (geo, c, x, y, z, rx = 0) => { const m = new THREE.Mesh(geo, fmat(c)); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
+    const riser = fmesh(new THREE.BoxGeometry(0.05, 0.42, 0.05), 0xff9c2a, 0, -0.04, -0.22);          // flaming riser/grip
+    const up = fmesh(new THREE.BoxGeometry(0.05, 0.3, 0.05), 0xff7a1e, 0, 0.2, -0.26, -0.5);          // upper flame limb
+    const lo = fmesh(new THREE.BoxGeometry(0.05, 0.3, 0.05), 0xff7a1e, 0, -0.28, -0.26, 0.5);         // lower flame limb
+    const str = fmesh(new THREE.CylinderGeometry(0.008, 0.008, 0.66, 5), 0xffe06a, 0, -0.04, -0.15);  // fire string
+    const aShaft = fmesh(new THREE.CylinderGeometry(0.017, 0.017, 0.52, 6), 0xffb24a, 0, -0.04, -0.36, Math.PI / 2);  // fire arrow shaft
+    const head = fmesh(new THREE.ConeGeometry(0.05, 0.16, 8), 0xfff3cc, 0, -0.04, -0.66, -Math.PI / 2);               // white-hot head
+    const halo = fglow(0xff5a14, 1.5, 0, -0.04, -0.3, 0.5);    // overall blaze enveloping the whole bow
+    const tipU = fglow(0xff6a1e, 0.6, 0, 0.36, -0.32, 0.85);
+    const tipL = fglow(0xff6a1e, 0.6, 0, -0.44, -0.32, 0.85);
+    const grip = fglow(0xff8a2a, 0.7, 0, -0.04, -0.22, 0.85);
+    const flame = fglow(0xffae3a, 0.7, 0, -0.04, -0.5, 0.85);
+    const tip = fglow(0xffe27a, 0.38, 0, -0.04, -0.66, 1.0);
     g.userData.chakraAnim = (charge, dt, t) => {
-      flame.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 10));
-      flame.scale.setScalar(0.4 + 0.14 * Math.abs(Math.sin(t * 12)));
-      flame.material.rotation += dt * 3;
-      tip.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 15));   // the arrowhead pulses molten
+      const c = Math.max(0, Math.min(1, charge)), fl = 0.6 + 0.4 * Math.abs(Math.sin(t * 13));
+      for (const o of [riser, up, lo, str, aShaft]) o.material.opacity = 0.75 + 0.25 * fl;
+      halo.material.opacity = (0.4 + 0.2 * fl) * (0.7 + 0.5 * c); halo.scale.setScalar(1.4 + 0.7 * c + 0.12 * fl); halo.material.rotation += dt * 1.5;
+      grip.material.opacity = 0.7 + 0.25 * fl; grip.scale.setScalar(0.66 + 0.45 * c);
+      flame.material.opacity = (0.7 + 0.25 * fl) * (0.7 + 0.4 * c); flame.scale.setScalar(0.62 + 0.5 * c + 0.12 * fl); flame.material.rotation += dt * 3;
+      tipU.material.opacity = tipL.material.opacity = 0.7 + 0.25 * fl;
+      tipU.scale.setScalar(0.58 + 0.3 * c); tipL.scale.setScalar(0.58 + 0.3 * c);
+      tip.material.opacity = 0.8 + 0.2 * fl; head.material.opacity = 0.8 + 0.2 * c;
     };
   } else if (id === HOMING_MISSILE) {
     // A shoulder-fired launcher tube with a missile nose poking out and a small sight.
