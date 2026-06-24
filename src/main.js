@@ -12,7 +12,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES, isHot,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf, itemName,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, STAR_PLATINUM, THE_WORLD } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, HUNGER, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
@@ -37,7 +37,7 @@ const MELEE_REACH = 4;
 
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
 // Deathmatch arsenal (one per hotbar key, slot 10 = key 0), one of each weapon class.
-const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, SHARINGAN];
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, LASER_CANNON, HOLLOW_PURPLE, CLEAVE, FUGA, SHARINGAN];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -1198,7 +1198,7 @@ function setupCornucopia(on) {
 // on a mid ring, and respawning health/ammo further out.
 function setupHungerLoot() {
   const F = ARENA.FLOOR + 1.4, spots = [];
-  const center = [ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, CLEAVE, SNIPER, PLASMA_GUN];
+  const center = [ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, CLEAVE, FUGA, SNIPER, PLASMA_GUN];
   center.forEach((gid, i) => { const a = (i / center.length) * 6.2832; spots.push({ x: Math.cos(a) * 2.7, y: F + 0.7, z: Math.sin(a) * 2.7, kind: 'weapon', gun: gid, color: 0xffcf4a, once: true }); });
   const mid = [SMG, ASSAULT_RIFLE, SHOTGUN, ASSAULT_RIFLE, SMG, SHOTGUN, PLASMA_GUN, SNIPER];
   mid.forEach((gid, i) => { const a = (i / mid.length) * 6.2832 + 0.4; spots.push({ x: Math.cos(a) * 10, y: F, z: Math.sin(a) * 10, kind: 'weapon', gun: gid, color: 0xbcc4cf, once: true }); });
@@ -1981,6 +1981,7 @@ function shotTracer(kind, muzzle, dir, range, color) {
   const end = muzzle.clone().addScaledVector(dir, d);
   tracers.add(muzzle, end, color);
   if (kind === 'rail') tracers.add(muzzle, end, 0xe6d4ff);
+  else if (kind === 'fuga') { tracers.add(muzzle, end, 0xff9ec0); cleaveFx.spawn(muzzle.clone().addScaledVector(dir, Math.min(2.6, d)), dir, 1.3, 0.9); }
 }
 // A bot fires its current gun (authority): resolve damage + spawn/broadcast visuals.
 // Bots resolve every gun as instant hitscan for clean damage attribution. Most
@@ -2005,12 +2006,15 @@ function botFire(bot, dir) {
     : gun.kind === 'beam' ? 0xff5570
     : gun.kind === 'hollowpurple' ? 0xb060ff
     : gun.kind === 'sharingan' ? 0xff2838
+    : gun.kind === 'fuga' ? 0xff2d6a
     : (gun.zoom ? 0xbfe4ff : 0xffd27a);
   const dmg = botEffectiveDamage(gun);
   if (gun.kind === 'shotgun') {
     for (let i = 0; i < gun.pellets; i++) { const pd = spreadDir(dir, gun.spread); botBullet(bot, pd, gun.range, dmg, false); shotTracer('shotgun', muzzle, pd, gun.range, color); }
   } else if (gun.kind === 'rail') {
     botBullet(bot, dir, gun.range, dmg, true); shotTracer('rail', muzzle, dir, gun.range, color);
+  } else if (gun.kind === 'fuga') {
+    botBullet(bot, dir, gun.range, dmg, true); shotTracer('fuga', muzzle, dir, gun.range, gun.color || 0xff2d6a);
   } else {
     const pd = gun.spread ? spreadDir(dir, gun.spread) : dir;
     botBullet(bot, pd, gun.range, dmg, false); shotTracer('hitscan', muzzle, pd, gun.range, color);
@@ -2378,6 +2382,7 @@ function spawnGhostShot(d, withSound) {
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
   else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
   else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), (d.r || 15) * 0.5, d.arc || 1.1); if (withSound) sfx.slash(); }
+  else if (k === 'fuga') { const nd = dir.clone().normalize(), end = muzzle.clone().addScaledVector(nd, d.r || 60); cleaveFx.spawn(muzzle.clone().addScaledVector(nd, Math.min(3.0, d.r || 3)), nd, 1.5, 0.95); tracers.add(muzzle, end, d.c || 0xff2d6a); if (withSound) sfx.slash(); }
   else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) sfx.standBarrage({ x: d.x, y: d.y, z: d.z }); const ro = d.o && mp.remotes.get(d.o); if (ro) { ro.standAtk = 0.36; ro.standFace = new THREE.Vector3(d.x, d.y, d.z); } }
   else if (k === 'cannon') { hungerCannon(d.n || 2); }   // a tribute fell (Hunger Games, relayed to guests)
   else if (k === 'sharingan') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 40); particles.burst(end.x, end.y, end.z, [200, 20, 40], d.lock ? 14 : 5); }
@@ -2395,7 +2400,34 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'rasengan') fireRasengan(gun);
   else if (gun.kind === 'rasenshuriken') { chakra.throw(muzzle, _dir.clone(), gun, mp.myId || 'me', rasenshurikenImpact); sfx.rasenshuriken(); addShake(0.18); }
   else if (gun.kind === 'cleave') fireCleave(gun, muzzle);
+  else if (gun.kind === 'fuga') fireFuga(gun, muzzle);
   else if (gun.kind === 'portal') firePortal(secondary ? 1 : 0, gun);
+}
+// Fūga (Sukuna, ranged Dismantle): fling a fast crescent slash down the aim line that
+// pierces every enemy it passes through, up to the wall. A piercing hitscan cut with a
+// spinning-blade visual — the long-range sibling of Cleave & Dismantle.
+function fireFuga(gun, muzzle) {
+  player.eyePosition(_eye); camera.getWorldDirection(_dir);
+  const dir = spreadDir(_dir, (gun.spread || 0) * (1 - adsAmount * 0.6)).clone().normalize();
+  const block = voxelRaycast(_eye, dir, gun.range, (x, y, z) => world.getBlock(x, y, z));
+  const wallDist = block.hit ? Math.hypot(block.x + 0.5 - _eye.x, block.y + 0.5 - _eye.y, block.z + 0.5 - _eye.z) : gun.range;
+  for (const m of mobs.list) { const t = m.rayHit(_eye.x, _eye.y, _eye.z, dir.x, dir.y, dir.z, wallDist); if (t < wallDist) m.hurt(gun.damage, player.pos.x, player.pos.z); }
+  const enemies = [];
+  if (mp.online) for (const ph of mp.raycastAll(_eye, dir, wallDist)) enemies.push({ id: ph.id, head: ph.head, bot: false });
+  if (isAuthority()) for (const bh of botMgr.raycastAll(_eye, dir, wallDist, null)) enemies.push({ id: bh.id, head: bh.head, bot: true });
+  let struck = false;
+  for (const e of enemies) {
+    if (friendly(e.id)) continue;
+    const dmg = e.head ? Math.round(gun.damage * 1.4) : gun.damage;
+    if (e.bot) botHurt(e.id, dmg, myName(), e.head); else mp.sendHit(e.id, dmg, e.head);
+    hud.hitMarker(e.head); struck = true;
+  }
+  const end = _eye.clone().addScaledVector(dir, wallDist);
+  cleaveFx.spawn(_eye.clone().addScaledVector(dir, Math.min(3.0, wallDist)), dir, 1.5, 0.95);   // a crescent flung forward
+  tracers.add(muzzle, end, gun.color || 0xff2d6a);
+  particles.burst(end.x, end.y, end.z, [255, 40, 90], struck ? 8 : 4);
+  sfx.slash();
+  broadcastFire('fuga', muzzle, dir, { r: wallDist, c: gun.color || 0xff2d6a });
 }
 
 // Cleave & Dismantle (Sukuna): sweep a fan of cursed slashes that carve every enemy
