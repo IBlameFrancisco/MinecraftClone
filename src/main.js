@@ -12,7 +12,7 @@ import {
   hardness, BLOCK_TOOL, BLOCK_REQUIRES, isHot,
 } from './blocks.js';
 import { isFood, foodValue, APPLE, COAL, toolOf, meleeDamage, gunOf, itemName,
-  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, STAR_PLATINUM, THE_WORLD } from './items.js';
+  HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, ROCKET_LAUNCHER, RAILGUN, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, HOMING_MISSILE, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { World } from './world.js';
 import { ARENA, BEACH, HUNGER, BEACH_SPAWN_ALLIED, BEACH_SPAWN_AXIS, BEACH_NESTS, beachGroundY, ARENA_THEME_NAMES } from './worldgen.js';
 import { Player } from './player.js';
@@ -28,7 +28,7 @@ import { waterTime } from './materials.js';
 import { blockTint, CRACK_TEXTURES } from './textures.js';
 import { Multiplayer, makeAvatar } from './net.js';
 import { SKINS, DEFAULT_SKIN, getSkin } from './skins.js';
-import { Tracers, Plasmas, Rockets, FireArrows, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, CleaveFx, Portals, makeViewModel, makeHeldWeapon, makeStandAvatar, MuzzleFlash, DamageNumbers } from './guns.js';
+import { Tracers, Plasmas, Rockets, FireArrows, HomingMissiles, Grenades, BlackHoles, ChakraFx, LaserBeam, HollowPurple, SharinganFx, CleaveFx, Portals, makeViewModel, makeHeldWeapon, makeStandAvatar, MuzzleFlash, DamageNumbers } from './guns.js';
 import { BotManager } from './bots.js';
 import { Pickups } from './pickups.js';
 
@@ -38,7 +38,7 @@ const MELEE_REACH = 4;
 // Battle mode: full gun loadout (9 slots = 9 guns) + arena spawn points.
 // Deathmatch arsenal (one per hotbar key, slot 10 = key 0), one of each weapon class.
 // First 10 fill the quick-bar (keys 1–0); the rest live in the battle armory (press E).
-const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, CLEAVE, FUGA, HOLLOW_PURPLE, LASER_CANNON, SHARINGAN];
+const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, CLEAVE, FUGA, HOLLOW_PURPLE, HOMING_MISSILE, LASER_CANNON, SHARINGAN];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
 const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
@@ -126,6 +126,7 @@ const tracers = new Tracers(scene);
 const plasmas = new Plasmas(scene);
 const rockets = new Rockets(scene);
 const fireArrows = new FireArrows(scene);
+const homing = new HomingMissiles(scene);
 const grenades = new Grenades(scene);
 const blackholes = new BlackHoles(scene);
 const chakra = new ChakraFx(scene);
@@ -2380,12 +2381,13 @@ function spawnGhostShot(d, withSound) {
     snd(k === 'rail' ? 'rail' : k === 'shotgun' ? 'shotgun' : 'handgun');
   } else if (k === 'plasma') { plasmas.spawn(muzzle, dir.clone().normalize(), d.sp || 40, 0, d.r || 70, true); if (withSound) sfx.plasma(); }
   else if (k === 'rocket') { rockets.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 30, range: d.r || 70 }, 'remote', true); snd('shotgun'); }
+  else if (k === 'homing') { homing.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 26, range: d.r || 130 }, 'remote', true); snd('shotgun'); }
   else if (k === 'grenade') { grenades.spawn(muzzle, dir, d.fuse || 1.6, null, true); if (withSound) sfx.place(); }
   else if (k === 'rasengan') { const nd = dir.clone().normalize(), cf = d.cf || 1; chakra.grind(muzzle.clone().addScaledVector(nd, 2.4), nd, 0x4aa3ff, 0.3 + 0.18 * cf, 0.8 + 0.6 * cf); if (withSound) sfx.rasengan(); }
   else if (k === 'rasenshuriken') { chakra.throw(muzzle, dir.clone().normalize(), { kind: 'rasenshuriken', speed: d.sp || 34, radius: d.rad || 10, splash: 0, range: d.r || 92 }, 'remote', null, false); if (withSound) sfx.rasenshuriken(); }
   else if (k === 'beam') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 60); tracers.add(muzzle, end, d.c || 0xff2e54); tracers.add(muzzle, end, 0xffffff); snd('rail'); }
   else if (k === 'blackhole') { blackholes.spawn(muzzle, dir.clone().normalize(), { speed: d.sp || 24, range: d.r || 82, radius: d.rad || 16, duration: d.du || 4.4, splash: 0, damage: 0 }, 'remote', true); if (withSound) sfx.blackhole(); }
-  else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.explosionAt(d.x, d.y, d.z); }
+  else if (k === 'hollowpurple') { const end = muzzle.clone().addScaledVector(dir.clone().normalize(), d.r || 80); hollowPurple.spawn(muzzle, end, d.rad || 4); if (withSound) sfx.hollowPurple({ x: end.x, y: end.y, z: end.z }); }
   else if (k === 'cleave') { cleaveFx.spawn(muzzle, dir.clone().normalize(), Math.min(13, (d.r || 15) * 0.5), d.arc || 1.1); if (withSound) sfx.slash(); }
   else if (k === 'fuga') { fireArrows.spawn(muzzle, dir.clone().normalize(), d.sp || 72, 0, d.r || 80, true); if (withSound) sfx.fireArrow(); }
   else if (k === 'ora') { const ac = d.ac || 0x7d5fff, col = [(ac >> 16) & 255, (ac >> 8) & 255, ac & 255]; particles.burst(d.x, d.y, d.z, col, 16); particles.burst(d.x, d.y, d.z, [255, 255, 255], 6); if (withSound) { const p = { x: d.x, y: d.y, z: d.z }; sfx.standBarrage(p); sfx.standChant(d.vc || 'ora', p); } const ro = d.o && mp.remotes.get(d.o); if (ro) { ro.standAtk = 0.36; ro.standFace = new THREE.Vector3(d.x, d.y, d.z); } }
@@ -2401,6 +2403,7 @@ function fireGun(gun, secondary) {
   else if (gun.kind === 'rail') { fireRail(gun, muzzle); broadcastFire('rail', muzzle, _dir, { r: gun.range, c: 0xb98bff }); }
   else if (gun.kind === 'plasma') { plasmas.spawn(muzzle, _dir, gun.speed, gun.damage, gun.range); sfx.plasma(); broadcastFire('plasma', muzzle, _dir, { sp: gun.speed, r: gun.range }); }
   else if (gun.kind === 'rocket') { rockets.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); broadcastFire('rocket', muzzle, _dir, { sp: gun.speed, r: gun.range }); }
+  else if (gun.kind === 'homing') { homing.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.gun('shotgun'); broadcastFire('homing', muzzle, _dir, { sp: gun.speed, r: gun.range }); }
   else if (gun.kind === 'blackhole') { blackholes.spawn(muzzle, _dir.clone(), gun, mp.myId || 'me'); sfx.blackhole(); broadcastFire('blackhole', muzzle, _dir, { sp: gun.speed, r: gun.range, du: gun.duration, rad: gun.radius }); }
   else if (gun.kind === 'rasengan') fireRasengan(gun);
   else if (gun.kind === 'rasenshuriken') { chakra.throw(muzzle, _dir.clone(), gun, mp.myId || 'me', rasenshurikenImpact); sfx.rasenshuriken(); addShake(0.18); }
@@ -2413,9 +2416,12 @@ function fireGun(gun, secondary) {
 function fireFuga(gun, muzzle) {
   player.eyePosition(_eye); camera.getWorldDirection(_dir);
   const dir = spreadDir(_dir, (gun.spread || 0) * (1 - adsAmount * 0.6)).clone().normalize();
-  fireArrows.spawn(muzzle, dir, gun.speed || 72, gun.damage, gun.range, false);
-  sfx.fireArrow(); addShake(0.04);
-  broadcastFire('fuga', muzzle, dir, { sp: gun.speed || 72, r: gun.range });
+  fireArrows.spawn(muzzle, dir, gun.speed || 90, gun.damage, gun.range, false, gun.splash || 0, gun.radius || 0);
+  // A roaring launch — fire blooms off the bow.
+  particles.burst(muzzle.x, muzzle.y, muzzle.z, [255, 170, 50], 22);
+  particles.burst(muzzle.x, muzzle.y, muzzle.z, [255, 90, 20], 10);
+  sfx.fireArrow(); addShake(0.16);
+  broadcastFire('fuga', muzzle, dir, { sp: gun.speed || 90, r: gun.range });
 }
 // Distance from point P to the segment A→B (squared not needed — used with a small radius).
 function _distToSeg(px, py, pz, ax, ay, az, bx, by, bz) {
@@ -2453,12 +2459,35 @@ function fireArrowPierce(ax, ay, az, bx, by, bz, hitSet, dmg) {
     }
   }
 }
-// The arrow strikes a wall / burns out — a blossom of fire.
-function fireArrowEnd(pos, ghost) {
-  particles.burst(pos.x, pos.y, pos.z, [255, 160, 40], 24);
-  particles.burst(pos.x, pos.y, pos.z, [255, 90, 20], 14);
-  particles.burst(pos.x, pos.y, pos.z, [255, 235, 160], 7);
-  if (!ghost) sfx.fireArrowHit({ x: pos.x, y: pos.y, z: pos.z });
+// The arrow strikes a wall / burns out — a huge fiery eruption with an AoE fire blast.
+function fireArrowEnd(pos, ghost, splash = 0, splashR = 0) {
+  particles.burst(pos.x, pos.y, pos.z, [255, 170, 50], 60);
+  particles.burst(pos.x, pos.y, pos.z, [255, 90, 20], 36);
+  particles.burst(pos.x, pos.y, pos.z, [255, 240, 170], 16);
+  for (let i = 0; i < 12; i++) { const a = (i / 12) * 6.2832; particles.burst(pos.x + Math.cos(a) * 2.2, pos.y + 0.3, pos.z + Math.sin(a) * 2.2, [255, 120, 30], 4); }   // a ring of flame
+  if (ghost) return;
+  shockShake(pos, 0.8, 24); sfx.fireArrowHit({ x: pos.x, y: pos.y, z: pos.z });
+  if (splash <= 0) return;
+  const hitR = splashR || 5;
+  const fall = (d) => Math.max(1, Math.round(splash * (1 - 0.5 * d / hitR)));
+  if (isAuthority()) for (const b of botMgr.bots) {
+    if (!b.alive || friendly(b.id)) continue;
+    const d = Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z);
+    if (d < hitR) botHurt(b.id, fall(d), myName(), false);
+  }
+  for (const m of mobs.list) { const d = Math.hypot(m.pos.x - pos.x, m.pos.y + m.height * 0.5 - pos.y, m.pos.z - pos.z); if (d < hitR) m.hurt(fall(d), pos.x, pos.z); }
+  if (mp.online) for (const [id, r] of mp.remotes) { if (friendly(id) || !r.group.visible) continue; const gp = r.group.position; const d = Math.hypot(gp.x - pos.x, gp.y + 1 - pos.y, gp.z - pos.z); if (d < hitR) mp.sendHit(id, fall(d)); }
+}
+// The nearest enemy position for a homing missile to chase (main knows teams). `owner`
+// is the firer; for our own missiles friendly() (local perspective) is correct.
+const _homeBest = new THREE.Vector3();
+function homingTarget(pos) {
+  let best = null, bestD = Infinity;
+  const consider = (x, y, z) => { const d = (x - pos.x) ** 2 + (y - pos.y) ** 2 + (z - pos.z) ** 2; if (d < bestD) { bestD = d; best = _homeBest.set(x, y, z); } };
+  if (isAuthority()) for (const b of botMgr.bots) { if (!b.alive || friendly(b.id)) continue; consider(b.pos.x, b.pos.y + 1, b.pos.z); }
+  if (mp.online) for (const [id, r] of mp.remotes) { if (friendly(id) || !r.group.visible) continue; const gp = r.group.position; consider(gp.x, gp.y + 1, gp.z); }
+  for (const m of mobs.list) consider(m.pos.x, m.pos.y + m.height * 0.5, m.pos.z);
+  return best;
 }
 
 // Cleave & Dismantle (Sukuna): sweep a fan of cursed slashes that carve every enemy
@@ -2804,10 +2833,16 @@ function fireHollowPurple(gun, cf = 1) {
   if (mp.online) for (const [id, r] of mp.remotes) { if (friendly(id)) continue; if (distToLine(r.group.position.x, r.group.position.y + 1, r.group.position.z) <= radius) { mp.sendHit(id, dmg); struck = true; } }
   if (struck) hud.hitMarker(false);
   hollowPurple.spawn(muzzle, end, radius);
-  particles.burst(end.x, end.y, end.z, [180, 90, 255], 50);
-  particles.burst(muzzle.x, muzzle.y, muzzle.z, [120, 140, 255], 20);
-  shockShake(end, 0.9, 30); addShake(0.25 + 0.2 * cf); vmRecoil = Math.min(1, vmRecoil + 0.8);
-  sfx.explosionAt(end.x, end.y, end.z);
+  // The clap — limitless red and blue slamming together at the muzzle.
+  particles.burst(muzzle.x, muzzle.y, muzzle.z, [255, 60, 90], 16);
+  particles.burst(muzzle.x, muzzle.y, muzzle.z, [70, 120, 255], 16);
+  particles.burst(muzzle.x, muzzle.y, muzzle.z, [215, 150, 255], 12);
+  // Annihilation at the wall + purple embers strewn down the erased corridor.
+  particles.burst(end.x, end.y, end.z, [180, 90, 255], 60);
+  particles.burst(end.x, end.y, end.z, [255, 255, 255], 18);
+  for (let i = 1; i <= 6; i++) { const tt = i / 7; particles.burst(_eye.x + _dir.x * wallDist * tt, _eye.y + _dir.y * wallDist * tt, _eye.z + _dir.z * wallDist * tt, [170, 80, 255], 4); }
+  shockShake(end, 1.15, 34); addShake(0.4 + 0.25 * cf); vmRecoil = Math.min(1, vmRecoil + 0.9);
+  sfx.hollowPurple(end);
   broadcastFire('hollowpurple', muzzle, _dir, { r: wallDist, rad: radius });
 }
 
@@ -3547,6 +3582,7 @@ function frame() {
   plasmas.update(wsdt, world, mobs, enemyBots, mp, portals, plasmaImpact);
   rockets.update(wsdt, world, mobs, enemyBots, mp, portals, rocketImpact);
   fireArrows.update(wsdt, world, fireArrowPierce, fireArrowEnd);
+  homing.update(wsdt, world, mobs, enemyBots, mp, portals, rocketImpact, homingTarget);
   blackholes.update(wsdt, world, blackHoleHooks);
   // Curve the player's in-flight Rasenshuriken toward where they're aiming (sweep your view to bend it).
   chakraHooks.guideDir = (active && !dead) ? camera.getWorldDirection(_guideDir) : null;
@@ -3595,7 +3631,7 @@ startWorld();
 frame();
 
 window.__game = {
-  world, player, sky, scene, renderer, camera, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, fireArrows, blackholes, blackHoleHooks, chakra, chakraHooks, rasenshurikenImpact, laser, hollowPurple, portals,
+  world, player, sky, scene, renderer, camera, mobs, inventory, mp, botMgr, tracers, plasmas, rockets, fireArrows, homing, blackholes, blackHoleHooks, chakra, chakraHooks, rasenshurikenImpact, laser, hollowPurple, portals,
   crackMesh, crackMat, CRACK_TEXTURES, edits,
   toggleMode, applyDifficulty, openInventory, newWorld, loadWorld,
   enterBattle: () => { menuMode = BATTLE; startSelectedMode(currentSeedStr, true); },

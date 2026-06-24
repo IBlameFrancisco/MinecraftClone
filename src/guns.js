@@ -3,7 +3,7 @@
 // the world/mobs/player references); this module owns the effects and portals.
 
 import * as THREE from 'three';
-import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, STAR_PLATINUM, THE_WORLD } from './items.js';
+import { HANDGUN, SNIPER, PLASMA_GUN, PORTAL_GUN, SMG, ASSAULT_RIFLE, SHOTGUN, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, HEAVY_MG, RASENGAN, RASENSHURIKEN, LASER_CANNON, HOLLOW_PURPLE, SHARINGAN, CLEAVE, FUGA, HOMING_MISSILE, STAR_PLATINUM, THE_WORLD } from './items.js';
 import { isSolid } from './blocks.js';
 
 // A soft white radial sprite texture, tinted per-use for additive glows. A tight,
@@ -173,60 +173,68 @@ export class Plasmas {
   }
 }
 
-// ---------------- Fire Arrows (Fūga) ----------------
-// A blazing arrow that streaks down the aim line wrapped in fire, leaving a wake of
-// embers, and PIERCES every enemy it passes through (main resolves the per-target
-// damage via onPierce, tracking already-hit ids); it bursts into flame on a wall/range.
+// ---------------- Fire Arrow (Fūga) ----------------
+// ONE giant blazing arrow — a white-hot shaft sheathed in roaring flame, dragging a thick
+// comet tail of fire and embers — that streaks down the aim, PIERCES (one-shotting) every
+// enemy in its line (main resolves per-target damage via onPierce), and erupts in a huge
+// fiery explosion (AoE via onEnd) on a wall.
 const _ARROW_FWD = new THREE.Vector3(0, 0, 1);
 export class FireArrows {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.embers = []; }
-  spawn(pos, dir, speed, damage, range, ghost) {
+  spawn(pos, dir, speed, damage, range, ghost, splash = 0, splashR = 0) {
     const g = new THREE.Group();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.075, 0.95, 8),
-      new THREE.MeshBasicMaterial({ color: 0xff9c2a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    shaft.rotation.x = Math.PI / 2;                       // align the length to +Z
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.42, 12),
-      new THREE.MeshBasicMaterial({ color: 0xfff3cc, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    tip.rotation.x = Math.PI / 2; tip.position.z = 0.6;   // white-hot arrowhead out front
-    const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xfff0c0, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    core.scale.setScalar(0.7);
-    const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff6a14, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    aura.scale.setScalar(1.7);
-    g.add(shaft, tip, core, aura);
+    const mb = (c, o = 1) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.13, 1.6, 10), mb(0xffb347));
+    shaft.rotation.x = Math.PI / 2;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.8, 14), mb(0xfff6dd));
+    head.rotation.x = Math.PI / 2; head.position.z = 1.0;                 // big white-hot arrowhead
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.4, 12, 1, true), mb(0xff5a12, 0.5));
+    tail.rotation.x = -Math.PI / 2; tail.position.z = -1.5;               // a flame streak trailing behind
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xfff2cc, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    core.scale.setScalar(1.1);
+    const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff7a1e, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    aura.scale.setScalar(2.6);
+    const outer = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff3a08, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    outer.scale.setScalar(4.2);
+    g.add(tail, shaft, head, outer, aura, core);
     g.position.copy(pos);
     g.quaternion.setFromUnitVectors(_ARROW_FWD, dir.clone().normalize());
-    g.scale.setScalar(1.4);
+    g.scale.setScalar(ghost ? 1.6 : 2.0);
     this.group.add(g);
-    this.list.push({ m: g, aura, core, vel: dir.clone().multiplyScalar(speed), pos: pos.clone(), dir: dir.clone().normalize(), damage, range, travelled: 0, t: 0, ghost, hitSet: new Set() });
+    this.list.push({ m: g, tail, aura, outer, core, vel: dir.clone().multiplyScalar(speed), pos: pos.clone(), dir: dir.clone().normalize(), damage, range, splash, splashR, travelled: 0, t: 0, ghost, hitSet: new Set() });
   }
-  _ember(pos, dir) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0xff8a2a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    s.scale.setScalar(0.42 + Math.random() * 0.34);
-    s.position.copy(pos).addScaledVector(dir, -0.3);
-    s.position.x += (Math.random() - 0.5) * 0.28; s.position.y += (Math.random() - 0.5) * 0.28; s.position.z += (Math.random() - 0.5) * 0.28;
-    this.group.add(s); this.embers.push({ s, life: 0.36, max: 0.36, vy: 0.5 + Math.random() * 0.7 });
+  _ember(pos, dir, big) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: big ? 0xff5a14 : 0xffa83a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const sz = big ? 1.1 + Math.random() * 0.7 : 0.4 + Math.random() * 0.4;
+    s.scale.setScalar(sz);
+    s.position.copy(pos).addScaledVector(dir, -0.5 - Math.random() * 0.5);
+    s.position.x += (Math.random() - 0.5) * 0.5; s.position.y += (Math.random() - 0.5) * 0.5; s.position.z += (Math.random() - 0.5) * 0.5;
+    this.group.add(s); this.embers.push({ s, life: 0.5, max: 0.5, sz, vy: 0.4 + Math.random() * 0.8 });
   }
   update(dt, world, onPierce, onEnd) {
     for (let i = this.embers.length - 1; i >= 0; i--) {
       const e = this.embers[i]; e.life -= dt;
       if (e.life <= 0) { this.group.remove(e.s); e.s.material.dispose(); this.embers.splice(i, 1); }
-      else { const k = e.life / e.max; e.s.material.opacity = 0.85 * k * k; e.s.scale.setScalar(0.42 * k + 0.05); e.s.position.y += e.vy * dt; e.s.material.color.setRGB(1, 0.45 * k + 0.18, 0.06 * k); }
+      else { const k = e.life / e.max; e.s.material.opacity = 0.9 * k * k; e.s.scale.setScalar(e.sz * k + 0.05); e.s.position.y += e.vy * dt; e.s.material.color.setRGB(1, 0.4 * k + 0.16, 0.04 * k); }
     }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i]; p.t += dt;
-      const fl = 0.6 + 0.4 * Math.sin(p.t * 42);
-      p.aura.scale.setScalar(1.5 + fl * 0.5); p.aura.material.rotation += dt * 5;
-      p.core.scale.setScalar(0.62 + fl * 0.22);
+      const fl = 0.6 + 0.4 * Math.sin(p.t * 46);
+      p.aura.scale.setScalar(2.4 + fl * 0.8); p.aura.material.rotation += dt * 6;
+      p.outer.scale.setScalar(3.8 + fl * 1.2); p.outer.material.rotation -= dt * 4;
+      p.core.scale.setScalar(1.0 + fl * 0.3);
+      if (p.tail) { p.tail.scale.set(1, 0.8 + 0.4 * fl, 1); p.tail.material.opacity = 0.35 + 0.2 * fl; }
       const ax = p.pos.x, ay = p.pos.y, az = p.pos.z;   // segment start (this frame)
       const step = p.vel.clone().multiplyScalar(dt);
       p.pos.add(step); p.travelled += step.length();
       p.m.position.copy(p.pos);
-      this._ember(p.pos, p.dir);
+      // A thick comet tail: a few small embers + a big flame puff every frame.
+      this._ember(p.pos, p.dir, false); this._ember(p.pos, p.dir, false); this._ember(p.pos, p.dir, true);
       const done = p.travelled > p.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
       // Pierce along the SWEPT segment (a fast arrow would tunnel past a per-frame point check).
       if (!p.ghost && onPierce) onPierce(ax, ay, az, p.pos.x, p.pos.y, p.pos.z, p.hitSet, p.damage);
       if (done) {
-        if (onEnd) onEnd(p.pos.clone(), p.ghost);
+        if (onEnd) onEnd(p.pos.clone(), p.ghost, p.splash, p.splashR);
         this.group.remove(p.m); p.m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
         this.list.splice(i, 1);
       }
@@ -308,6 +316,81 @@ export class Rockets {
       }
       if (hit) {
         if (p.ghost) ghostBurst(this.group, p.pos, 0xffa84a); else onImpact(p.pos.clone(), p.gun, p.ownerId);
+        this.group.remove(p.m); p.m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+        this.list.splice(i, 1);
+      }
+    }
+  }
+}
+
+// ---------------- Homing Missiles ----------------
+// A guided missile that locks onto the nearest enemy and steers toward it (capped turn
+// rate) trailing fire and smoke, detonating in an AoE blast on contact. `findTarget`
+// (supplied by main, which knows teams) returns the current enemy position to chase.
+export class HomingMissiles {
+  constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; this.trail = []; }
+  spawn(pos, dir, gun, ownerId, ghost) {
+    const g = new THREE.Group();
+    const nd = dir.clone().normalize();
+    const mb = (c) => new THREE.MeshBasicMaterial({ color: c, fog: false });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.42, 12), mb(0xcdd2d8));
+    body.rotation.x = Math.PI / 2;
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.22, 12), mb(0xe23a2a));
+    nose.rotation.x = Math.PI / 2; nose.position.z = 0.32;
+    for (let i = 0; i < 4; i++) { const f = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.13, 0.12), mb(0x9aa0a8)); const a = i * Math.PI / 2; f.position.set(Math.cos(a) * 0.085, Math.sin(a) * 0.085, -0.16); f.rotation.z = a; g.add(f); }
+    const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x7fe4ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    flame.scale.setScalar(0.55); flame.position.z = -0.32;
+    const lock = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x3ad0ff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    lock.scale.setScalar(0.95);
+    g.add(body, nose, flame, lock);
+    g.position.copy(pos);
+    g.quaternion.setFromUnitVectors(_ARROW_FWD, nd);
+    this.group.add(g);
+    this.list.push({ m: g, flame, vel: nd.clone().multiplyScalar(gun.speed), pos: pos.clone(), dir: nd.clone(), gun, ownerId, travelled: 0, t: 0, ghost, retargetCD: 0, target: null });
+  }
+  _puff(pos, hot) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: hot ? 0x9ae8ff : 0x9a9088, transparent: true, opacity: hot ? 0.6 : 0.38, blending: hot ? THREE.AdditiveBlending : THREE.NormalBlending, depthWrite: false, fog: false }));
+    s.scale.setScalar(hot ? 0.32 : 0.46); s.position.copy(pos); s.material.rotation = Math.random() * 6.28;
+    this.group.add(s); this.trail.push({ s, life: 0.34, max: 0.34, hot });
+  }
+  update(dt, world, mobs, bots, mp, portals, onImpact, findTarget) {
+    for (let i = this.trail.length - 1; i >= 0; i--) {
+      const tr = this.trail[i]; tr.life -= dt;
+      if (tr.life <= 0) { this.group.remove(tr.s); tr.s.material.dispose(); this.trail.splice(i, 1); }
+      else { const k = tr.life / tr.max; if (tr.hot) { tr.s.material.opacity = 0.6 * k; tr.s.scale.setScalar(0.32 + (1 - k) * 0.2); } else { tr.s.material.opacity = 0.38 * k; tr.s.scale.setScalar(0.46 + (1 - k) * 0.7); tr.s.material.rotation += dt * 0.8; } }
+    }
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const p = this.list[i]; p.t += dt;
+      if (p.flame) { const fl = Math.abs(Math.sin(p.t * 60)); p.flame.scale.setScalar(0.45 + fl * 0.28); p.flame.material.color.setRGB(0.5 + 0.3 * fl, 0.85, 1); }
+      // Homing: steer the velocity toward the nearest enemy, capped to a max turn rate.
+      if (!p.ghost && findTarget) {
+        p.retargetCD -= dt;
+        if (p.retargetCD <= 0) { p.target = findTarget(p.pos, p.ownerId); p.retargetCD = 0.08; }
+        if (p.target) {
+          const dx = p.target.x - p.pos.x, dy = p.target.y - p.pos.y, dz = p.target.z - p.pos.z, dl = Math.hypot(dx, dy, dz);
+          if (dl > 0.001) {
+            const desired = new THREE.Vector3(dx / dl, dy / dl, dz / dl);
+            const speed = p.vel.length(), cur = p.vel.clone().multiplyScalar(1 / speed);
+            const ang = cur.angleTo(desired), f = ang > 1e-4 ? Math.min(1, (p.gun.turn || 4) * dt / ang) : 1;
+            cur.lerp(desired, f).normalize();
+            p.vel.copy(cur).multiplyScalar(speed); p.dir.copy(cur);
+            p.m.quaternion.setFromUnitVectors(_ARROW_FWD, cur);
+          }
+        }
+      }
+      const step = p.vel.clone().multiplyScalar(dt);
+      p.pos.add(step); p.travelled += step.length();
+      if (portals) portals.redirect(p, dt);
+      p.m.position.copy(p.pos);
+      this._puff(p.pos, true); this._puff(p.pos, false);
+      let hit = p.travelled > p.gun.range || isSolid(world.getBlock(Math.floor(p.pos.x), Math.floor(p.pos.y), Math.floor(p.pos.z)));
+      if (!hit && !p.ghost) {
+        for (const mob of mobs.list) { if (Math.hypot(mob.pos.x - p.pos.x, mob.pos.y + mob.height * 0.5 - p.pos.y, mob.pos.z - p.pos.z) < 0.95) { hit = true; break; } }
+        if (!hit && bots) for (const b of bots) { if (!b.alive) continue; if (Math.hypot(b.pos.x - p.pos.x, b.pos.y + 1 - p.pos.y, b.pos.z - p.pos.z) < 1.0) { hit = true; break; } }
+        if (!hit && mp && mp.online) for (const [id, r] of mp.remotes) { const gp = r.group.position; if (Math.hypot(gp.x - p.pos.x, gp.y + 1.05 - p.pos.y, gp.z - p.pos.z) < 0.9) { hit = true; break; } }
+      }
+      if (hit) {
+        if (p.ghost) ghostBurst(this.group, p.pos, 0x7fe4ff); else onImpact(p.pos.clone(), p.gun, p.ownerId);
         this.group.remove(p.m); p.m.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
         this.list.splice(i, 1);
       }
@@ -901,43 +984,80 @@ export class LaserBeam {
 // The clap of limitless red + blue: a wide imaginary-mass corridor erased in a
 // single purple blast. A transient expanding beam with red/blue fringes, a muzzle
 // flash and an impact shockwave.
+const _HP_UP = new THREE.Vector3(0, 1, 0);
 export class HollowPurple {
   constructor(scene) { this.group = new THREE.Group(); scene.add(this.group); this.list = []; }
+  // A helical "energy ribbon" of `color` wound around the beam axis (local Y), used for
+  // the limitless red + blue spiralling into the imaginary-mass purple corridor.
+  _helix(color, len, radius, phase) {
+    const turns = Math.min(9, Math.max(2.5, len / Math.max(2, radius * 3)));
+    const segs = Math.min(90, Math.ceil(turns * 14));
+    const pts = [];
+    for (let i = 0; i <= segs; i++) {
+      const u = i / segs, a = u * turns * Math.PI * 2 + phase;
+      pts.push(new THREE.Vector3(Math.cos(a) * radius * 0.72, (u - 0.5) * len, Math.sin(a) * radius * 0.72));
+    }
+    const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), segs, radius * 0.13, 6, false);
+    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  }
   spawn(start, end, radius) {
     const g = new THREE.Group();
     const dir = end.clone().sub(start), len = Math.max(0.5, dir.length());
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    const ndir = dir.clone().normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(_HP_UP, ndir);
     const beam = new THREE.Group(); beam.quaternion.copy(q); beam.position.copy(start).add(end).multiplyScalar(0.5);
-    const cyl = (r, c, o) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 20, 1, true),
+    const cyl = (r, c, o) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 22, 1, true),
       new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
-    const core = cyl(radius * 0.26, 0xffffff, 1);
-    const mid = cyl(radius * 0.6, 0x9a3cff, 0.9);
-    const outer = cyl(radius * 1.0, 0xb060ff, 0.42);
-    const red = cyl(radius * 1.14, 0xff2a44, 0.28);     // the limitless-red fringe
-    const blue = cyl(radius * 1.24, 0x2a6bff, 0.24);    // the limitless-blue fringe
-    beam.add(outer, blue, red, mid, core);
+    const core = cyl(radius * 0.22, 0xffffff, 1);
+    const inner = cyl(radius * 0.5, 0xd9a0ff, 0.95);
+    const mid = cyl(radius * 0.84, 0x9a3cff, 0.66);
+    const outer = cyl(radius * 1.2, 0xb060ff, 0.32);
+    const red = this._helix(0xff2a44, len, radius, 0);            // limitless red…
+    const blue = this._helix(0x2a6bff, len, radius, Math.PI);     // …and blue, intertwining
+    beam.add(outer, mid, inner, core, red, blue);
     g.add(beam);
     const sprite = (c, s, pos) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: c, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false })); sp.scale.setScalar(s); sp.position.copy(pos); g.add(sp); return sp; };
-    const flash = sprite(0xdcb0ff, radius * 2.6, start);
+    // The imaginary-mass orb that races down the corridor.
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.6, 18, 18),
+      new THREE.MeshBasicMaterial({ color: 0xc77bff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const orbCore = sprite(0xffffff, radius * 1.5, start);
+    const orbGlow = sprite(0xb060ff, radius * 3.2, start);
+    g.add(orb);
+    // The muzzle clap (red + blue collapsing together) and the terminal detonation.
+    const clapR = sprite(0xff3a54, radius * 1.6, start);
+    const clapB = sprite(0x3a7bff, radius * 1.6, start);
+    const flash = sprite(0xeed0ff, radius * 2.4, end);
     const shock = sprite(0xc070ff, radius * 1.2, end);
+    const ring = sprite(0x9a3cff, radius * 1.0, end);
     this.group.add(g);
-    this.list.push({ g, beam, core, mid, outer, red, blue, flash, shock, t: 0, max: 0.62, radius });
+    this.list.push({ g, beam, core, inner, mid, outer, red, blue, orb, orbCore, orbGlow, clapR, clapB, flash, shock, ring, start: start.clone(), end: end.clone(), ndir, t: 0, max: 0.85, radius });
   }
   update(dt) {
     for (let i = this.list.length - 1; i >= 0; i--) {
-      const f = this.list[i]; f.t += dt; const k = Math.min(1, f.t / f.max), fade = 1 - k;
-      const fade2 = fade * fade;                                // beam holds bright then snaps out
-      const punch = Math.min(1, f.t / 0.1);                     // snap to full width almost instantly
-      const grow = 0.28 + 0.72 * easeOutBack(punch);           // slight overshoot on the clap
-      f.beam.scale.set(grow, 1, grow);
-      f.core.material.opacity = Math.sqrt(fade); f.mid.material.opacity = 0.9 * fade; f.outer.material.opacity = 0.45 * fade2;
-      // The red/blue fringes flicker against each other as the corridor erases.
-      f.red.material.opacity = (0.3 + 0.08 * Math.sin(f.t * 44)) * fade;
-      f.blue.material.opacity = (0.26 + 0.08 * Math.sin(f.t * 44 + 2.1)) * fade;
-      f.beam.rotation.y += dt * 5;
-      // A hard white detonation flash that snaps out, leaving the purple shock to ripple.
-      f.flash.material.opacity = Math.max(0, 1 - k * 2.4); f.flash.scale.setScalar(f.radius * (2.4 + easeOutCubic(k) * 3.2));
-      f.shock.material.opacity = Math.max(0, (1 - k * 1.4) * 0.9); f.shock.scale.setScalar(f.radius * (1.0 + easeOutCubic(k) * 9));
+      const f = this.list[i]; f.t += dt; const k = Math.min(1, f.t / f.max), fade = 1 - k, fade2 = fade * fade;
+      const punch = Math.min(1, f.t / 0.1);
+      f.beam.scale.set(0.24 + 0.76 * easeOutBack(punch), 1, 0.24 + 0.76 * easeOutBack(punch));
+      f.core.material.opacity = Math.sqrt(fade); f.inner.material.opacity = 0.9 * fade; f.mid.material.opacity = 0.66 * fade; f.outer.material.opacity = 0.4 * fade2;
+      // Red & blue counter-rotate as they erase the corridor.
+      f.red.rotation.y += dt * 7; f.blue.rotation.y -= dt * 7;
+      f.red.material.opacity = (0.7 + 0.25 * Math.sin(f.t * 40)) * fade; f.blue.material.opacity = (0.7 + 0.25 * Math.sin(f.t * 40 + 2.1)) * fade;
+      f.beam.rotation.y += dt * 3;
+      // The orb races to the wall (first ~0.16s) then blossoms into the detonation.
+      const orbK = easeOutCubic(Math.min(1, f.t / 0.16));
+      f.orb.position.copy(f.start).lerp(f.end, orbK);
+      f.orbCore.position.copy(f.orb.position); f.orbGlow.position.copy(f.orb.position);
+      const opl = Math.max(0, 1 - k * 1.3);
+      f.orb.material.opacity = opl; f.orb.scale.setScalar(1 + 0.25 * Math.sin(f.t * 30));
+      f.orbCore.material.opacity = opl; f.orbGlow.material.opacity = 0.7 * opl; f.orbGlow.scale.setScalar(f.radius * (3.2 + Math.sin(f.t * 26) * 0.6));
+      // The muzzle clap snaps shut fast.
+      const clapO = Math.max(0, 1 - f.t / 0.16);
+      f.clapR.material.opacity = clapO; f.clapB.material.opacity = clapO;
+      f.clapR.scale.setScalar(f.radius * (1.6 - clapO * 0.7)); f.clapB.scale.setScalar(f.radius * (1.6 - clapO * 0.7));
+      // The terminal detonation: a hard flash + an expanding purple shock ring.
+      const dk = Math.max(0, Math.min(1, (f.t - 0.12) / (f.max - 0.12)));
+      f.flash.material.opacity = Math.max(0, 1 - dk * 2.6); f.flash.scale.setScalar(f.radius * (2.2 + easeOutCubic(dk) * 4.0));
+      f.shock.material.opacity = Math.max(0, (1 - dk * 1.3) * 0.9); f.shock.scale.setScalar(f.radius * (1.0 + easeOutCubic(dk) * 11));
+      f.ring.material.opacity = Math.max(0, (1 - dk) * 0.7); f.ring.scale.setScalar(f.radius * (0.8 + easeOutCubic(dk) * 15)); f.ring.material.rotation += dt * 1.6;
       f.shock.material.rotation += dt * 2.4;
       if (f.t >= f.max) { this._dispose(f.g); this.list.splice(i, 1); }
     }
@@ -1622,6 +1742,17 @@ export function makeViewModel(id) {
       flame.material.rotation += dt * 3;
       tip.material.opacity = 0.7 + 0.3 * Math.abs(Math.sin(t * 15));   // the arrowhead pulses molten
     };
+  } else if (id === HOMING_MISSILE) {
+    // A shoulder-fired launcher tube with a missile nose poking out and a small sight.
+    box(0.17, 0.17, 0.72, 0x4a4f56, 0.0, -0.04, -0.28);     // launch tube
+    box(0.19, 0.04, 0.16, 0x2c3036, 0.0, 0.07, -0.18);      // top rail
+    box(0.05, 0.08, 0.06, 0x1c2024, 0.0, 0.13, -0.06);      // rear sight
+    box(0.1, 0.18, 0.12, 0x33373d, 0.0, -0.2, 0.04);        // grip
+    const nose = box(0.09, 0.09, 0.16, 0xe23a2a, 0.0, -0.04, -0.64);   // red missile tip in the tube
+    nose.material = new THREE.MeshBasicMaterial({ color: 0xff5a48, fog: false });
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW_TEX, color: 0x3ad0ff, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    glow.scale.setScalar(0.32); glow.position.set(0.07, 0.07, -0.2); g.add(glow);   // lock-on indicator
+    g.userData.chakraAnim = (charge, dt, t) => { glow.material.opacity = 0.4 + 0.4 * Math.abs(Math.sin(t * 8)); };
   } else { // PORTAL_GUN
     box(0.16, 0.16, 0.5, 0xe2e2e6, 0, 0, -0.2);            // white chassis
     box(0.18, 0.18, 0.1, 0xbcbcc2, 0, 0, -0.42);           // emitter ring
