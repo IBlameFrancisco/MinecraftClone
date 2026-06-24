@@ -41,7 +41,7 @@ const MELEE_REACH = 4;
 const BATTLE_LOADOUT = [HANDGUN, ASSAULT_RIFLE, SHOTGUN, SNIPER, RAILGUN, ROCKET_LAUNCHER, BLACK_HOLE_BOMB, CLEAVE, FUGA, HOLLOW_PURPLE, HOMING_MISSILE, LASER_CANNON, SHARINGAN];
 // D-Day kit: WWII-flavoured (no plasma/portal sci-fi), with the belt-fed MG and a bazooka.
 const WAR_LOADOUT = [HANDGUN, SMG, ASSAULT_RIFLE, SHOTGUN, SNIPER, HEAVY_MG, ROCKET_LAUNCHER];
-const BATTLE_SPAWNS = [[34, 0], [-34, 0], [0, 34], [0, -34], [24, 24], [-24, 24], [24, -24], [-24, -24]];
+const BATTLE_SPAWNS = [[62, 0], [-62, 0], [0, 62], [0, -62], [44, 44], [-44, 44], [44, -44], [-44, -44]];
 
 // Difficulty (peaceful → hardcore) controls mob spawns, damage, and respawn.
 const PEACEFUL = 0, EASY = 1, NORMAL = 2, HARD = 3, HARDCORE = 4;
@@ -1008,10 +1008,12 @@ function nearestNest(x, z) {
 function computeCoverPoints() {
   coverPoints = [];
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    coverPoints.push(new THREE.Vector3(sx * 11.5, ARENA.FLOOR + 1, sz * 11.5));
-    coverPoints.push(new THREE.Vector3(sx * 20.5, ARENA.FLOOR + 1, sz * 20.5));
-    coverPoints.push(new THREE.Vector3(sx * 28, ARENA.FLOOR + 1, sz * 28));
+    coverPoints.push(new THREE.Vector3(sx * 22, ARENA.FLOOR + 1, sz * 22));
+    coverPoints.push(new THREE.Vector3(sx * 40, ARENA.FLOOR + 1, sz * 40));
+    coverPoints.push(new THREE.Vector3(sx * 54, ARENA.FLOOR + 1, sz * 54));
   }
+  // Mid-field cover on the cardinal axes too, so bots use the whole big arena.
+  for (const s of [-1, 1]) { coverPoints.push(new THREE.Vector3(s * 34, ARENA.FLOOR + 1, 0)); coverPoints.push(new THREE.Vector3(0, ARENA.FLOOR + 1, s * 34)); }
 }
 
 // Build the match (authority spawns bots; everyone rebuilds the board).
