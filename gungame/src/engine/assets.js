@@ -8,7 +8,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const BASE = import.meta.env.BASE_URL || '/';
 export const TEX = {};      // TEX.ground = { map, normalMap, roughnessMap }, etc.
 export const ENV = { map: null, background: null };
-export const MODELS = { soldier: null };   // { scene, animations } once loaded
+export const MODELS = { soldier: null, crate: null, barrel: null, crateStrong: null, container: null, barrier: null };
 
 const SETS = ['ground', 'wood', 'metal', 'rust'];
 
@@ -39,7 +39,20 @@ export async function loadAssets(renderer) {
   ENV.map = pmrem.fromEquirectangular(hdr).texture;   // image-based lighting + reflections
   ENV.background = hdr;                                // the visible sky
 
-  // rigged + animated character (Idle / Walk / Run / TPose clips)
-  const gltf = await new GLTFLoader().loadAsync(`${BASE}models/soldier.glb`);
-  MODELS.soldier = { scene: gltf.scene, animations: gltf.animations };
+  // rigged + animated character (Idle / Walk / Run / TPose clips) + static CC0 props
+  const loader = new GLTFLoader();
+  const [soldier, crate, barrel, crateStrong, container, barrier] = await Promise.all([
+    loader.loadAsync(`${BASE}models/soldier.glb`),
+    loader.loadAsync(`${BASE}models/crate.glb`),
+    loader.loadAsync(`${BASE}models/barrel.glb`),
+    loader.loadAsync(`${BASE}models/crateStrong.glb`),
+    loader.loadAsync(`${BASE}models/container.glb`),
+    loader.loadAsync(`${BASE}models/barrier.glb`),
+  ]);
+  MODELS.soldier = { scene: soldier.scene, animations: soldier.animations };
+  MODELS.crate = { scene: crate.scene };
+  MODELS.barrel = { scene: barrel.scene };
+  MODELS.crateStrong = { scene: crateStrong.scene };
+  MODELS.container = { scene: container.scene };
+  MODELS.barrier = { scene: barrier.scene };
 }

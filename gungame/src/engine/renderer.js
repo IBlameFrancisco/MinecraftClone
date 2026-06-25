@@ -17,7 +17,7 @@ export function createRenderer(container) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 0.85;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.appendChild(renderer.domElement);
   return renderer;
@@ -80,7 +80,7 @@ export function createComposer(renderer, scene, camera, opts = {}) {
     composer.addPass(gtao);
   }
 
-  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.42, 0.75, 0.85);   // strength, radius, threshold
+  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.24, 0.7, 0.92);   // strength, radius, threshold
   composer.addPass(bloom);
   composer.addPass(new OutputPass());            // ACES tonemap + sRGB
 

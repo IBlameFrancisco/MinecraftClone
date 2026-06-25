@@ -5,24 +5,32 @@
 import * as THREE from 'three';
 import { ENV } from './assets.js';
 
+// Sky/sun tuning for the golden-hour look. ENV_ROT spins the HDRI so its bright sun lines
+// up with SUN_DIR (the direction the key light comes FROM); tuned by eye against renders.
+const ENV_ROT = 2.1;                                  // radians, Y rotation of the sky
+const SUN_DIR = new THREE.Vector3(80, 34, 52);        // low, warm afternoon sun
+
 export function createSky(scene, renderer) {
   // --- real HDRI environment: IBL (reflections/fill) + visible sky ---
   if (ENV.map) scene.environment = ENV.map;
   if (ENV.background) {
     scene.background = ENV.background;
     scene.backgroundBlurriness = 0.0;
-    scene.backgroundIntensity = 1.0;
+    scene.backgroundIntensity = 0.62;   // dim the blinding low-sun disc
   }
-  // atmospheric haze so far geometry melts into the sky (background is unaffected)
-  scene.fog = new THREE.Fog(0xbcc8d6, 90, 320);
+  // rotate both the visible sky and the lighting it casts together
+  scene.backgroundRotation = new THREE.Euler(0, ENV_ROT, 0);
+  scene.environmentRotation = new THREE.Euler(0, ENV_ROT, 0);
+  // warm low-sun haze so far geometry melts into the golden sky
+  scene.fog = new THREE.Fog(0xcdb89a, 95, 330);
 
-  // --- key sun (warm, the main shadow caster) ---
-  const sun = new THREE.DirectionalLight(0xfff0cf, 3.1);
-  sun.position.set(72, 96, 38);            // roughly matches the HDRI's bright quadrant
+  // --- key sun (warm golden, the main shadow caster) ---
+  const sun = new THREE.DirectionalLight(0xffdca6, 3.4);
+  sun.position.copy(SUN_DIR);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 10;
-  sun.shadow.camera.far = 320;
+  sun.shadow.camera.far = 340;
   const S = 110;
   sun.shadow.camera.left = -S; sun.shadow.camera.right = S;
   sun.shadow.camera.top = S; sun.shadow.camera.bottom = -S;
@@ -32,13 +40,13 @@ export function createSky(scene, renderer) {
   scene.add(sun);
   scene.add(sun.target);
 
-  // --- cool rim / back light: rakes the far side so shapes pop off the sky ---
-  const rim = new THREE.DirectionalLight(0x9fc2ff, 0.7);
-  rim.position.set(-64, 44, -72);
+  // --- cool rim / back light: rakes the shadowed side so shapes pop (golden vs teal) ---
+  const rim = new THREE.DirectionalLight(0x88a8e0, 0.8);
+  rim.position.set(-70, 36, -64);
   scene.add(rim);
 
   // --- gentle sky/ground fill (HDRI does most of the ambient work) ---
-  const hemi = new THREE.HemisphereLight(0xbcd6ff, 0x584a38, 0.32);
+  const hemi = new THREE.HemisphereLight(0xcdd2e0, 0x5a4632, 0.3);
   scene.add(hemi);
 
   // --- drifting dust motes (subtle atmosphere + parallax depth) ---
