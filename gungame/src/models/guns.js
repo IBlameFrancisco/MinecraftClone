@@ -173,28 +173,48 @@ function buildPistol(detailed) {
 // ---------------------------------------------------------------------------
 // FIRST-PERSON HANDS
 // ---------------------------------------------------------------------------
-// A gloved hand + forearm. Built in a local frame where the palm wraps the grip
-// at the origin and the forearm tapers back toward the shooter (+Z). Positioned
-// + rotated per weapon so the player reads as actually holding the gun.
+// A small rounded mesh helper (for the gloved fist / knuckles).
+function ball(r, material, sx = 1, sy = 1, sz = 1) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 12), material);
+  m.scale.set(sx, sy, sz);
+  return m;
+}
+
+// A gloved fist + forearm, built from rounded primitives (no stacked boxes) so it reads
+// as an actual hand. Local frame: the fist grips at the origin, the forearm tapers back
+// toward the shooter (+Z). Positioned + rotated per weapon by addHands().
 function buildArm() {
   const glove = PALETTE.glove();
   const sleeve = PALETTE.sleeve();
   const arm = new THREE.Group();
-  // back of the hand over the grip
-  arm.add(box(0.052, 0.055, 0.078, glove, 0, 0, 0));
-  // knuckle ridge
-  arm.add(box(0.058, 0.022, 0.05, glove, 0, 0.033, -0.012));
-  // curled fingers wrapping under/forward
-  arm.add(box(0.06, 0.032, 0.045, glove, 0, -0.03, -0.016));
-  // thumb on the inner side
-  arm.add(box(0.022, 0.036, 0.032, glove, -0.033, 0.004, 0.006));
-  // wrist cuff
-  arm.add(box(0.064, 0.064, 0.045, sleeve, 0, -0.004, 0.052));
-  // forearm tapering back toward the camera
-  const fore = cyl(0.034, 0.052, 0.3, sleeve, 12);
-  fore.rotation.x = Math.PI / 2; // +Y -> +Z
-  fore.position.set(0, -0.014, 0.205);
+  // gloved fist — an elongated, slightly squashed sphere wrapping the grip
+  const fist = ball(0.05, glove, 1.05, 1.2, 1.45);
+  fist.position.set(0, 0, -0.008);
+  arm.add(fist);
+  // knuckle row across the top-front of the fist
+  for (let i = 0; i < 4; i++) {
+    const k = ball(0.013, glove, 1, 1, 1.2);
+    k.position.set(-0.021 + i * 0.014, 0.03, -0.038);
+    arm.add(k);
+  }
+  // thumb — a short rounded cylinder along the inner side, angled over the grip
+  const thumb = cyl(0.012, 0.015, 0.05, glove, 10);
+  thumb.rotation.set(0.5, 0, 0.7);
+  thumb.position.set(-0.032, 0.006, -0.004);
+  arm.add(thumb);
+  // wrist — a rounded cuff ring (sleeve)
+  const cuff = cyl(0.041, 0.044, 0.05, sleeve, 16);
+  cuff.rotation.x = Math.PI / 2;
+  cuff.position.set(0, -0.008, 0.05);
+  arm.add(cuff);
+  // forearm — a tapered cylinder running back toward the camera, capped at the elbow
+  const fore = cyl(0.036, 0.054, 0.3, sleeve, 16);
+  fore.rotation.x = Math.PI / 2;
+  fore.position.set(0, -0.014, 0.2);
   arm.add(fore);
+  const elbow = ball(0.05, sleeve, 1, 1, 0.7); // elbow cap
+  elbow.position.set(0, -0.016, 0.34);
+  arm.add(elbow);
   return arm;
 }
 
