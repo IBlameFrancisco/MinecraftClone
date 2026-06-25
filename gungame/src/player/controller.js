@@ -19,9 +19,10 @@ export class Controller {
     this.height = STAND_H; this.eye = STAND_EYE;
     this.crouching = false; this.sprinting = false;
     this.alive = true;
+    this.speedMul = 1;            // ability haste (Sharingan)
     this._fwd = new THREE.Vector3();
   }
-  spawn(p, yaw = 0) { this.pos.set(p.x, p.y, p.z); this.vel.set(0, 0, 0); this.yaw = yaw; this.pitch = 0; this.onGround = true; }
+  spawn(p, yaw = 0) { this.pos.set(p.x, p.y, p.z); this.vel.set(0, 0, 0); this.yaw = yaw; this.pitch = 0; this.onGround = true; this.speedMul = 1; }
 
   forward(out) { out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); return out; }
 
@@ -49,7 +50,7 @@ export class Controller {
     const wl = Math.hypot(fx, fz);
     if (wl > 0) { fx /= wl; fz /= wl; }
     this.sprinting = input.down('ShiftLeft') && !this.crouching && fz * -cosY + fx * -sinY > -0.2 && wl > 0;
-    const speed = this.crouching ? 2.7 : this.sprinting ? 8.4 : 5.4;
+    const speed = (this.crouching ? 2.7 : this.sprinting ? 8.4 : 5.4) * this.speedMul;
 
     // --- horizontal acceleration + friction ---
     const accel = this.onGround ? ACCEL : AIR_ACCEL;

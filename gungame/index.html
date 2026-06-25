@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>GunGame</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0e13'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23ff7a2f' stroke-width='2'/%3E%3Cline x1='16' y1='3' x2='16' y2='11' stroke='%2336d1ff' stroke-width='2'/%3E%3Cline x1='16' y1='21' x2='16' y2='29' stroke='%2336d1ff' stroke-width='2'/%3E%3Cline x1='3' y1='16' x2='11' y2='16' stroke='%2336d1ff' stroke-width='2'/%3E%3Cline x1='21' y1='16' x2='29' y2='16' stroke='%2336d1ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23ff7a2f'/%3E%3C/svg%3E" />
   <style>
     :root { --accent: #ff7a2f; --accent2: #36d1ff; --bg: #0b0e13; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -48,10 +49,74 @@
     @keyframes kf { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
     #toast { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 30px; font-weight: 700;
       letter-spacing: 1px; text-shadow: 0 2px 14px rgba(0,0,0,0.7); opacity: 0; }
-    #score { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; align-items: center;
-      background: rgba(14,18,25,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 18px; font-weight: 700; }
-    #score .you { color: var(--accent2); } #score .vs { opacity: 0.4; } #score .foe { color: var(--accent); }
+    #score { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center;
+      background: rgba(14,18,25,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 18px; font-weight: 800; font-size: 20px; }
+    #score .you { color: var(--accent2); } #score .vs { opacity: 0.4; font-size: 13px; font-weight: 600; } #score .foe { color: #ff5b5b; }
+    #score .lbl { font-size: 11px; letter-spacing: 1px; opacity: 0.85; margin: 0 4px; }
+    #timer { position: absolute; top: 54px; left: 50%; transform: translateX(-50%); font-weight: 700; font-size: 17px;
+      letter-spacing: 1px; opacity: 0.9; text-shadow: 0 2px 8px rgba(0,0,0,0.6); display: none; }
     #dmg { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 160px rgba(255,30,30,0); transition: box-shadow 0.1s; }
+    #abilities { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; }
+    .ab { position: relative; overflow: hidden; min-width: 124px; padding: 9px 14px; border-radius: 10px; background: rgba(14,18,25,0.6);
+      border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 9px; }
+    .ab .cool { position: absolute; left: 0; bottom: 0; width: 100%; height: 0%; background: rgba(0,0,0,0.55); transition: height 0.08s linear; }
+    .ab .key { position: relative; font-weight: 800; font-size: 13px; width: 22px; height: 22px; border-radius: 6px;
+      background: rgba(255,255,255,0.14); display: flex; align-items: center; justify-content: center; }
+    .ab .nm { position: relative; font-size: 13px; font-weight: 600; opacity: 0.85; white-space: nowrap; }
+    .ab.ready .key { background: var(--accent); color: #0b0e13; }
+    #timestop { position: fixed; inset: 0; pointer-events: none; z-index: 12; opacity: 0; transition: opacity 0.18s;
+      background: radial-gradient(120% 120% at 50% 50%, rgba(244,197,66,0.06) 35%, rgba(34,24,84,0.5) 100%); }
+    #timestop.show { opacity: 1; }
+    #timestop .za { position: absolute; left: 50%; top: 38%; transform: translateX(-50%); font-size: 46px; font-weight: 800;
+      letter-spacing: 6px; color: #f4c542; text-shadow: 0 4px 30px rgba(0,0,0,0.6); opacity: 0.55; }
+    #radar { position: absolute; top: 14px; left: 16px; opacity: 0.92; }
+    #scoreboard { position: fixed; inset: 0; z-index: 22; display: none; align-items: center; justify-content: center; pointer-events: none; }
+    #scoreboard.show { display: flex; }
+    #scoreboard .sb { background: rgba(10,14,20,0.86); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 22px 30px; min-width: 380px; }
+    #scoreboard .sbT { text-align: center; font-size: 13px; letter-spacing: 4px; text-transform: uppercase; opacity: 0.55; margin-bottom: 14px; }
+    #scoreboard .row { display: flex; justify-content: space-between; padding: 7px 14px; border-radius: 8px; font-size: 18px; font-weight: 600; }
+    #scoreboard .row.me { background: rgba(54,209,255,0.14); color: #aee9ff; }
+    #scoreboard .row .rk { opacity: 0.5; margin-right: 12px; }
+    #settingsRow { margin-top: 18px; display: flex; gap: 30px; justify-content: center; font-size: 13px; opacity: 0.85; }
+    #settingsRow label { display: flex; flex-direction: column; gap: 6px; letter-spacing: 1px; text-transform: uppercase; font-size: 11px; opacity: 0.7; }
+    #settingsRow input[type=range] { pointer-events: auto; width: 150px; accent-color: var(--accent); }
+
+    /* ---- mode / difficulty pickers ---- */
+    .pickers { display: flex; gap: 36px; margin-top: 30px; }
+    .pickcol { text-align: left; }
+    .pickcol > .h { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.5; margin-bottom: 10px; }
+    .chips { display: flex; flex-direction: column; gap: 8px; }
+    .chip { pointer-events: auto; cursor: pointer; min-width: 230px; padding: 11px 16px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.1); background: rgba(20,26,35,0.6); color: #e7ecf3; transition: all 0.12s; }
+    .chip:hover { border-color: rgba(255,255,255,0.28); }
+    .chip.sel { border-color: var(--accent); background: rgba(255,122,47,0.16); box-shadow: 0 6px 22px rgba(255,122,47,0.18); }
+    .chip .n { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
+    .chip .d { font-size: 12px; opacity: 0.6; margin-top: 2px; }
+    .chip.diff { min-width: 120px; }
+    #loadoutRow { margin-top: 22px; max-width: 640px; }
+    #loadoutRow > .h { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.5; margin-bottom: 10px; }
+    .lchips { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; }
+    .lchip { pointer-events: auto; cursor: pointer; padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      border: 1px solid rgba(255,255,255,0.1); background: rgba(20,26,35,0.6); transition: all 0.12s; }
+    .lchip:hover { border-color: rgba(255,255,255,0.28); }
+    .lchip.sel { border-color: var(--accent2); background: rgba(54,209,255,0.16); color: #aee9ff; }
+
+    /* ---- end-of-match screen ---- */
+    #endscreen { position: fixed; inset: 0; z-index: 35; display: none; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(120% 90% at 50% 12%, rgba(22,32,44,0.94), rgba(7,10,14,0.97)); text-align: center; backdrop-filter: blur(3px); }
+    #endscreen.show { display: flex; }
+    #endscreen .res { font-size: 78px; font-weight: 800; letter-spacing: 3px; text-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+    #endscreen .res.win { color: #6effa8; } #endscreen .res.lose { color: #ff6a6a; }
+    #endscreen .sub { opacity: 0.6; letter-spacing: 4px; text-transform: uppercase; font-size: 14px; margin-top: 2px; }
+    #standings { margin: 26px 0 8px; min-width: 340px; }
+    #standings .row { display: flex; justify-content: space-between; padding: 8px 16px; border-radius: 8px; font-size: 18px; font-weight: 600; }
+    #standings .row.me { background: rgba(54,209,255,0.14); color: #aee9ff; }
+    #standings .row .rk { opacity: 0.5; margin-right: 12px; }
+    #endbtns { display: flex; gap: 14px; margin-top: 22px; }
+    #endbtns button { pointer-events: auto; cursor: pointer; font-size: 18px; font-weight: 700; letter-spacing: 1px; padding: 12px 34px; border-radius: 10px; border: none; transition: transform 0.1s; }
+    #endbtns button:hover { transform: translateY(-2px); }
+    #rematchBtn { color: #0b0e13; background: linear-gradient(90deg, var(--accent), #ffb14a); }
+    #menuBtn { color: #e7ecf3; background: rgba(255,255,255,0.1); }
 
     /* ---- Menu ---- */
     #menu { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -80,7 +145,9 @@
 
   <div id="hud">
     <div id="dmg"></div>
-    <div id="score"><span class="you" id="scoreYou">0</span><span class="vs">/</span><span class="foe" id="scoreFoe">0</span></div>
+    <div id="score"><span class="you lbl">BLUE</span><span class="you" id="scoreYou">0</span><span class="vs">vs</span><span class="foe" id="scoreFoe">0</span><span class="foe lbl">RED</span></div>
+    <div id="timer">5:00</div>
+    <canvas id="radar" width="140" height="140"></canvas>
     <div id="killfeed"></div>
     <div id="crosshair"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span><span class="dot"></span></div>
     <div id="hitmarker"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span></div>
@@ -93,17 +160,66 @@
       <div class="name" id="wepName">Rifle</div>
       <div><span class="mag" id="magNum">30</span><span class="reserve" id="resNum">/ 90</span></div>
     </div>
+    <div id="abilities">
+      <div class="ab ready" id="ab0"><span class="cool"></span><span class="key">Q</span><span class="nm"></span></div>
+      <div class="ab ready" id="ab1"><span class="cool"></span><span class="key">E</span><span class="nm"></span></div>
+    </div>
   </div>
 
   <div id="pause">PAUSED — click to resume</div>
+  <div id="timestop"><div class="za">TOKI WO TOMARE</div></div>
+  <div id="scoreboard"><div class="sb"><div class="sbT" id="sbTitle">Standings</div><div id="sbRows"></div></div></div>
 
   <div id="menu">
     <h1>GUNGAME</h1>
-    <div class="sub">Stylized Arena FPS</div>
+    <div class="sub">Power-Fantasy Arena Shooter</div>
+    <div class="pickers">
+      <div class="pickcol">
+        <div class="h">Mode</div>
+        <div class="chips" id="modeChips">
+          <div class="chip sel" data-mode="tdm"><div class="n">Team Deathmatch</div><div class="d">Blue squad vs Red · first to 30</div></div>
+          <div class="chip" data-mode="ffa"><div class="n">Free-for-All</div><div class="d">Everyone for themselves · top frag wins</div></div>
+          <div class="chip" data-mode="gun"><div class="n">Gun Game</div><div class="d">Climb the weapon ladder to win</div></div>
+        </div>
+      </div>
+      <div class="pickcol">
+        <div class="h">Difficulty</div>
+        <div class="chips" id="diffChips">
+          <div class="chip diff" data-diff="easy"><div class="n">Easy</div></div>
+          <div class="chip diff sel" data-diff="normal"><div class="n">Normal</div></div>
+          <div class="chip diff" data-diff="hard"><div class="n">Hard</div></div>
+        </div>
+      </div>
+    </div>
+    <div id="loadoutRow"><div class="h">Loadout · Primary Weapon</div><div class="lchips" id="loadoutChips"></div></div>
+    <div id="abilityRow"><div class="h">Abilities · pick two (Q / E)</div><div class="lchips" id="abilityChips"></div></div>
+    <div id="settingsRow">
+      <label>Sensitivity<input id="setSens" type="range" min="0.3" max="2.5" step="0.1" value="1" /></label>
+      <label>Volume<input id="setVol" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
+    </div>
     <button class="play" id="playBtn">PLAY</button>
+    <div id="mpRow" style="margin-top: 14px; display: flex; gap: 8px; align-items: center; justify-content: center;">
+      <input id="mpUrl" value="ws://localhost:8787" spellcheck="false"
+        style="pointer-events:auto; width: 220px; padding: 9px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.14); background: rgba(20,26,35,0.7); color: #cfe0ff; font-size: 13px;" />
+      <button id="mpBtn" style="pointer-events:auto; cursor:pointer; font-weight:700; letter-spacing:1px; padding: 10px 22px; border-radius: 8px; border: 1px solid rgba(54,209,255,0.4); background: rgba(54,209,255,0.12); color: #aee9ff;">CONNECT · MULTIPLAYER</button>
+    </div>
     <div class="hint">
       <b>WASD</b> move &nbsp; <b>Shift</b> sprint &nbsp; <b>Ctrl</b> crouch &nbsp; <b>Space</b> jump<br />
       <b>Mouse</b> aim &nbsp; <b>Left-click</b> fire &nbsp; <b>R</b> reload &nbsp; <b>1/2</b> switch weapon
+    </div>
+    <div class="credits" style="margin-top:18px; font-size:11px; opacity:0.5; max-width:520px;">
+      Assets: Poly Haven (CC0 HDRI &amp; textures), Kenney (CC0 props), three.js soldier;
+      container by KolosStudios &amp; barrier by J-Toastie (CC-BY, via Poly Pizza). See CREDITS.md.
+    </div>
+  </div>
+
+  <div id="endscreen">
+    <div class="res" id="endRes">VICTORY</div>
+    <div class="sub" id="endSub">Team Deathmatch</div>
+    <div id="standings"></div>
+    <div id="endbtns">
+      <button id="rematchBtn">REMATCH</button>
+      <button id="menuBtn">MENU</button>
     </div>
   </div>
 

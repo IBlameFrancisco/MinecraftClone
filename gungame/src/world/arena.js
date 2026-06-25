@@ -8,6 +8,8 @@
 // identical every load.
 import * as THREE from 'three';
 import { PALETTE, box, cyl } from '../engine/materials.js';
+import { MODELS } from '../engine/assets.js';
+import { Destructible } from './destructible.js';
 
 const HALF = 70;          // arena half-extent -> 140x140 playfield
 const GROUND_Y = 0;       // top surface of the ground sits at y = 0
@@ -41,12 +43,36 @@ export function buildArena(scene) {
     return m;
   }
 
-  // A barrel: a rust cylinder (visual) approximated by a square collider box.
+  // Place a real CC0 prop model (crate/barrel): clone it, scale to `targetH` tall, plant
+  // its base at `baseY`, centre it at (x,z), and push a collider matching its scaled
+  // footprint. Returns false if the model isn't loaded so callers can fall back.
+  function placeProp(name, x, baseY, z, targetH, rotY = 0) {
+    const src = MODELS[name];
+    if (!src || !src.scene) return false;
+    const o = src.scene.clone(true);
+    o.rotation.y = rotY;
+    o.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(o);
+    const s = targetH / Math.max(0.001, bb.max.y - bb.min.y);
+    o.scale.setScalar(s);
+    o.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(o);
+    o.position.set(x - (b2.min.x + b2.max.x) / 2, baseY - b2.min.y, z - (b2.min.z + b2.max.z) / 2);
+    o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; if (m.material) m.material.envMapIntensity = 1.1; } });
+    group.add(o);
+    o.updateMatrixWorld(true);
+    const b3 = new THREE.Box3().setFromObject(o);
+    colliders.push({ min: { x: b3.min.x, y: baseY, z: b3.min.z }, max: { x: b3.max.x, y: baseY + targetH, z: b3.max.z } });
+    return true;
+  }
+
+  // A barrel: real CC0 model, square collider. Falls back to a rust cylinder if unloaded.
   function barrel(x, z, r = 0.9, h = 2.1) {
+    if (placeProp('barrel', x, GROUND_Y, z, h, Math.random() * Math.PI * 2)) return;
     const c = cyl(r, r, h, PALETTE.rust(), 14);
     c.position.set(x, GROUND_Y + h / 2, z);
     group.add(c);
-    const s = r * 0.92; // slightly inset square so it feels round-ish to the player
+    const s = r * 0.92;
     colliders.push({
       min: { x: x - s, y: GROUND_Y,     z: z - s },
       max: { x: x + s, y: GROUND_Y + h, z: z + s },
@@ -70,23 +96,46 @@ export function buildArena(scene) {
     }
   }
 
-  // A stack of shipping containers. `tints` is an array of materials, bottom-to-top.
+  // Place a real shipping-container model: uniform-scaled to `H` tall, oriented by `rotY`,
+  // base at `baseY`, centred at (x,z), optionally colour-tinted, collider from its real
+  // footprint. Returns false if the model isn't loaded.
+  function placeContainer(x, baseY, z, H, rotY, tintHex) {
+    const src = MODELS.container;
+    if (!src || !src.scene) return false;
+    const o = src.scene.clone(true);
+    o.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(o);
+    o.scale.setScalar(H / Math.max(0.001, bb.max.y - bb.min.y));
+    o.rotation.y = rotY;
+    o.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(o);
+    o.position.set(x - (b2.min.x + b2.max.x) / 2, baseY - b2.min.y, z - (b2.min.z + b2.max.z) / 2);
+    o.traverse((m) => {
+      if (!m.isMesh) return;
+      m.castShadow = true; m.receiveShadow = true;
+      if (m.material) { m.material = m.material.clone(); if (tintHex != null && m.material.color) m.material.color.lerp(new THREE.Color(tintHex), 0.55); m.material.envMapIntensity = 1.1; }
+    });
+    group.add(o);
+    o.updateMatrixWorld(true);
+    const b3 = new THREE.Box3().setFromObject(o);
+    colliders.push({ min: { x: b3.min.x, y: baseY, z: b3.min.z }, max: { x: b3.max.x, y: baseY + (b3.max.y - b3.min.y), z: b3.max.z } });
+    return true;
+  }
+
+  // A stack of shipping containers. `tints` is an array of materials, bottom-to-top; its
+  // length sets the stack height. Falls back to textured boxes if the model is missing.
   function containerStack(x, z, tints, rot = 0) {
-    const W = 12, H = 3.0, D = 5; // a chunky stylized container
+    const W = 12, H = 3.0, D = 5;
     let baseY = GROUND_Y;
     for (const tint of tints) {
-      // rotate footprint for the collider when laid the "other" way
-      const w = rot ? D : W;
-      const d = rot ? W : D;
-      const m = box(w, H, d, tint, x, baseY + H / 2, z);
-      group.add(m);
-      colliders.push({
-        min: { x: x - w / 2, y: baseY,     z: z - d / 2 },
-        max: { x: x + w / 2, y: baseY + H, z: z + d / 2 },
-      });
-      // corrugation ridges (decorative, no collider) along the top edge
-      const ridge = box(w * 0.98, 0.18, d * 0.98, PALETTE.metalDk(), x, baseY + H - 0.09, z);
-      group.add(ridge);
+      const hex = (tint && tint.color) ? tint.color.getHex() : null;
+      if (!placeContainer(x, baseY, z, H, rot ? Math.PI / 2 : 0, hex)) {
+        const w = rot ? D : W, d = rot ? W : D;
+        const m = box(w, H, d, tint, x, baseY + H / 2, z);
+        group.add(m);
+        colliders.push({ min: { x: x - w / 2, y: baseY, z: z - d / 2 }, max: { x: x + w / 2, y: baseY + H, z: z + d / 2 } });
+        group.add(box(w * 0.98, 0.18, d * 0.98, PALETTE.metalDk(), x, baseY + H - 0.09, z));
+      }
       baseY += H;
     }
   }
@@ -181,6 +230,16 @@ export function buildArena(scene) {
   deco(14, 0.2, 1.2, PALETTE.blue(), -12, 1.2, -18);
   deco(12, 0.2, 1.2, PALETTE.orange(), 16, 1.2, 18);
 
+  // --- concrete jersey barriers (real CC0/CC-BY props) as low cover at the lanes ---
+  const barrierSpots = [
+    [-6, -6, 0], [7, 9, 0], [-20, 5, Math.PI / 2], [21, -7, Math.PI / 2],
+    [5, -23, 0], [-16, 23, 0], [35, 13, Math.PI / 2], [-33, -16, Math.PI / 2],
+    [13, 6, 0], [-9, -28, Math.PI / 2],
+  ];
+  for (const [bx, bz, br] of barrierSpots) {
+    if (!placeProp('barrier', bx, GROUND_Y, bz, 1.1, br)) solid(3.2, 1.1, 0.7, PALETTE.concrete(), bx, GROUND_Y, bz);
+  }
+
   // --- wooden crates (small cover, deterministic scatter) -----------------
   // Fixed positions + a few small stacks. wood / woodDk alternating.
   const crateSpots = [
@@ -191,14 +250,16 @@ export function buildArena(scene) {
     [-46, 28, 2.2, 0], [6, -52, 2.2, 1], [-2, 52, 2.0, 0],
     [56, -28, 2.2, 0], [-56, 40, 2.2, 1],
   ];
+  let ci = 0;
   for (const [cx, cz, s, kind] of crateSpots) {
-    const mat = kind === 1 ? PALETTE.wood() : PALETTE.wood();
+    const rot = (ci * 0.7) % (Math.PI * 2);             // vary facing so the field isn't gridded
+    const name = kind === 1 ? 'crateStrong' : 'crate';  // mix plain + metal-banded crates
     if (kind === 'stack') {
-      // a crate sitting on top of the previous one at the same x/z
-      solid(s, s, s, PALETTE.woodDk ? PALETTE.woodDk() : PALETTE.wood(), cx, 2.4, cz);
+      if (!placeProp('crate', cx, 2.4, cz, s, rot)) solid(s, s, s, PALETTE.wood(), cx, 2.4, cz);
     } else {
-      solid(s, s, s, mat, cx, GROUND_Y, cz);
+      if (!placeProp(name, cx, GROUND_Y, cz, s, rot)) solid(s, s, s, PALETTE.wood(), cx, GROUND_Y, cz);
     }
+    ci++;
   }
 
   // --- pillars (thin vertical cover / landmarks) --------------------------
@@ -234,6 +295,25 @@ export function buildArena(scene) {
     { x: -40, y: GROUND_Y, z: 40 },
   ];
 
+  // --- destructible cover walls (the hybrid layer: blow holes / tunnels through them) ---
+  const destructible = new Destructible(group, 0.6);
+  const dmat = new THREE.MeshStandardMaterial({ color: 0xb6a283, roughness: 0.88, metalness: 0.0 });
+  // [x, z, w, h, d]
+  const wallSpots = [
+    [0, -15, 7, 3.2, 0.9], [0, 17, 7, 3.2, 0.9],
+    [-19, 1, 0.9, 3.2, 7], [21, 3, 0.9, 3.2, 7],
+    [13, -11, 5.5, 2.6, 0.9], [-15, 13, 5.5, 2.6, 0.9],
+    [31, 25, 0.9, 3.0, 6], [-31, -23, 6, 3.0, 0.9],
+  ];
+  for (const [wx, wz, w, h, d] of wallSpots) destructible.addWall(dmat, wx, GROUND_Y, wz, w, h, d);
+  destructible.finalize();
+
+  const staticColliders = colliders.slice();
+  const api = {
+    group, spawns, groundY: GROUND_Y, half: HALF, destructible,
+    colliders: staticColliders.concat(destructible.colliderList),
+    carve(center, radius) { if (destructible.carve(center, radius)) this.colliders = staticColliders.concat(destructible.colliderList); },
+  };
   scene.add(group);
-  return { group, colliders, spawns, groundY: GROUND_Y, half: HALF };
+  return api;
 }

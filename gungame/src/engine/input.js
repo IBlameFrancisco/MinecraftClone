@@ -7,7 +7,7 @@ export class Input {
     this.rightDown = false;
     this.dx = 0; this.dy = 0;            // accumulated look delta since last consume
     this.locked = false;
-    this.sens = 0.0022;
+    this.sens = 0.0022; this.sensMul = 1;
     this._wheel = 0;
     this.onLockChange = null;
 
@@ -30,7 +30,7 @@ export class Input {
   lock() { this.canvas.requestPointerLock(); }
   unlock() { document.exitPointerLock(); }
   // Consume the accumulated look delta (call once per frame).
-  look() { const o = { dx: this.dx * this.sens, dy: this.dy * this.sens }; this.dx = 0; this.dy = 0; return o; }
+  look() { const s = this.sens * this.sensMul; const o = { dx: this.dx * s, dy: this.dy * s }; this.dx = 0; this.dy = 0; return o; }
   wheel() { const w = this._wheel; this._wheel = 0; return w; }
   down(code) { return this.keys.has(code); }
   pressed(code) { return this.keys.has(code); }   // (edge handled by callers tracking prev)

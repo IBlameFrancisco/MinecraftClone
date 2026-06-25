@@ -1,0 +1,50 @@
+# Builds GunGame (Vite) and publishes it to GitHub Pages.
+#
+# This file is authored inside the MinecraftClone repo at gungame/.github/workflows/,
+# so the usual "copy gungame/. into the Gun-Game repo root" sync places it at the
+# Gun-Game repo root as .github/workflows/deploy.yml — exactly where Actions expects it.
+#
+# One-time setup in the Gun-Game repo: Settings → Pages → Build and deployment →
+# Source: "GitHub Actions". After that, every push to main rebuilds and redeploys.
+name: Deploy GunGame to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; newer pushes cancel in-flight ones.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
