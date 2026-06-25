@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>GunGame</title>
+  <style>
+    :root { --accent: #ff7a2f; --accent2: #36d1ff; --bg: #0b0e13; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: #e7ecf3;
+      font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif; -webkit-font-smoothing: antialiased; cursor: default; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    /* ---- HUD ---- */
+    #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+    #crosshair { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); }
+    #crosshair .l { position: absolute; background: rgba(255,255,255,0.85); box-shadow: 0 0 3px rgba(0,0,0,0.8); }
+    #crosshair .l.t, #crosshair .l.b { left: 50%; width: 2px; height: 7px; transform: translateX(-50%); }
+    #crosshair .l.l, #crosshair .l.r { top: 50%; height: 2px; width: 7px; transform: translateY(-50%); }
+    #crosshair .l.t { top: 0; } #crosshair .l.b { bottom: 0; } #crosshair .l.l { left: 0; } #crosshair .l.r { right: 0; }
+    #crosshair .dot { position: absolute; left: 50%; top: 50%; width: 2px; height: 2px; background: rgba(255,255,255,0.9);
+      transform: translate(-50%, -50%); border-radius: 50%; }
+    #hitmarker { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(45deg); opacity: 0;
+      width: 22px; height: 22px; }
+    #hitmarker .l { position: absolute; background: #ff5252; }
+    #hitmarker .l.t, #hitmarker .l.b { left: 50%; width: 2px; height: 6px; transform: translateX(-50%); }
+    #hitmarker .l.l, #hitmarker .l.r { top: 50%; height: 2px; width: 6px; transform: translateY(-50%); }
+    #hitmarker .l.t { top: 0; } #hitmarker .l.b { bottom: 0; } #hitmarker .l.l { left: 0; } #hitmarker .l.r { right: 0; }
+
+    .panel { position: absolute; bottom: 26px; backdrop-filter: blur(6px); background: rgba(14,18,25,0.55);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px 18px; }
+    #health { left: 28px; min-width: 200px; }
+    #health .row { display: flex; align-items: baseline; gap: 8px; }
+    #health .hp { font-size: 40px; font-weight: 700; line-height: 1; letter-spacing: 1px; }
+    #health .lbl { font-size: 13px; opacity: 0.6; letter-spacing: 3px; text-transform: uppercase; }
+    #health .bar { margin-top: 8px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
+    #health .bar > i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #2bd47a, #6effa8);
+      transition: width 0.15s ease; }
+    #ammo { right: 28px; text-align: right; }
+    #ammo .mag { font-size: 44px; font-weight: 700; line-height: 1; }
+    #ammo .reserve { font-size: 20px; opacity: 0.55; }
+    #ammo .name { font-size: 13px; opacity: 0.6; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 4px; }
+
+    #killfeed { position: absolute; top: 18px; right: 22px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+    #killfeed .k { background: rgba(14,18,25,0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+      padding: 5px 12px; font-size: 15px; font-weight: 600; animation: kf 0.2s ease; }
+    @keyframes kf { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+    #toast { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 30px; font-weight: 700;
+      letter-spacing: 1px; text-shadow: 0 2px 14px rgba(0,0,0,0.7); opacity: 0; }
+    #score { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; align-items: center;
+      background: rgba(14,18,25,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 18px; font-weight: 700; }
+    #score .you { color: var(--accent2); } #score .vs { opacity: 0.4; } #score .foe { color: var(--accent); }
+    #dmg { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 160px rgba(255,30,30,0); transition: box-shadow 0.1s; }
+
+    /* ---- Menu ---- */
+    #menu { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(120% 90% at 50% 10%, #16202c 0%, #0b0e13 60%); text-align: center; }
+    #menu.hidden { display: none; }
+    #menu h1 { font-size: 86px; font-weight: 800; letter-spacing: 4px;
+      background: linear-gradient(90deg, var(--accent), #ffd24a 60%, var(--accent2)); -webkit-background-clip: text;
+      background-clip: text; color: transparent; text-shadow: 0 8px 40px rgba(255,122,47,0.25); }
+    #menu .sub { opacity: 0.6; letter-spacing: 6px; text-transform: uppercase; font-size: 14px; margin-top: -6px; }
+    #menu .play { margin-top: 34px; pointer-events: auto; cursor: pointer; font-size: 22px; font-weight: 700; letter-spacing: 2px;
+      padding: 14px 54px; border-radius: 12px; border: none; color: #0b0e13;
+      background: linear-gradient(90deg, var(--accent), #ffb14a); box-shadow: 0 10px 34px rgba(255,122,47,0.35); transition: transform 0.1s; }
+    #menu .play:hover { transform: translateY(-2px) scale(1.02); }
+    #menu .hint { margin-top: 26px; opacity: 0.45; font-size: 14px; line-height: 1.9; }
+    #menu .hint b { color: #cfe0ff; font-weight: 700; }
+    #loading { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+      background: var(--bg); font-size: 20px; letter-spacing: 4px; opacity: 0.8; }
+    #loading.hidden { display: none; }
+    #pause { position: fixed; inset: 0; z-index: 25; display: none; align-items: center; justify-content: center;
+      background: rgba(8,11,16,0.6); backdrop-filter: blur(4px); font-size: 26px; letter-spacing: 3px; }
+    #pause.show { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud">
+    <div id="dmg"></div>
+    <div id="score"><span class="you" id="scoreYou">0</span><span class="vs">/</span><span class="foe" id="scoreFoe">0</span></div>
+    <div id="killfeed"></div>
+    <div id="crosshair"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span><span class="dot"></span></div>
+    <div id="hitmarker"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span></div>
+    <div id="toast"></div>
+    <div class="panel" id="health">
+      <div class="row"><span class="hp" id="hpNum">100</span><span class="lbl">Health</span></div>
+      <div class="bar"><i id="hpBar"></i></div>
+    </div>
+    <div class="panel" id="ammo">
+      <div class="name" id="wepName">Rifle</div>
+      <div><span class="mag" id="magNum">30</span><span class="reserve" id="resNum">/ 90</span></div>
+    </div>
+  </div>
+
+  <div id="pause">PAUSED — click to resume</div>
+
+  <div id="menu">
+    <h1>GUNGAME</h1>
+    <div class="sub">Stylized Arena FPS</div>
+    <button class="play" id="playBtn">PLAY</button>
+    <div class="hint">
+      <b>WASD</b> move &nbsp; <b>Shift</b> sprint &nbsp; <b>Ctrl</b> crouch &nbsp; <b>Space</b> jump<br />
+      <b>Mouse</b> aim &nbsp; <b>Left-click</b> fire &nbsp; <b>R</b> reload &nbsp; <b>1/2</b> switch weapon
+    </div>
+  </div>
+
+  <div id="loading">LOADING…</div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

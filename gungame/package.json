@@ -1,0 +1,18 @@
+{
+  "name": "gungame",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "GunGame — a modern stylized 3D arena FPS built with three.js.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
