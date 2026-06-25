@@ -1,11 +1,14 @@
-// Loads the real CC0 assets (HDRI environment + PBR texture sets) at boot. Everything
-// the renderer/materials need is exposed here once `loadAssets()` resolves.
+// Loads the real assets (HDRI environment + PBR texture sets + a rigged, animated
+// character model) at boot. Everything the renderer/materials/characters need is exposed
+// here once `loadAssets()` resolves.
 import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const BASE = import.meta.env.BASE_URL || '/';
 export const TEX = {};      // TEX.ground = { map, normalMap, roughnessMap }, etc.
 export const ENV = { map: null, background: null };
+export const MODELS = { soldier: null };   // { scene, animations } once loaded
 
 const SETS = ['ground', 'concrete', 'wood', 'metal', 'rust'];
 
@@ -35,4 +38,8 @@ export async function loadAssets(renderer) {
   pmrem.compileEquirectangularShader();
   ENV.map = pmrem.fromEquirectangular(hdr).texture;   // image-based lighting + reflections
   ENV.background = hdr;                                // the visible sky
+
+  // rigged + animated character (Idle / Walk / Run / TPose clips)
+  const gltf = await new GLTFLoader().loadAsync(`${BASE}models/soldier.glb`);
+  MODELS.soldier = { scene: gltf.scene, animations: gltf.animations };
 }

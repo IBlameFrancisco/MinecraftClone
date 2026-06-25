@@ -13,8 +13,13 @@ class Bot {
     this.group = makeCharacter({ team: 'red' });
     scene.add(this.group);
     this.parts = this.group.userData.parts;
-    // weapon in hands (chest height, pointing forward -Z)
-    this.gun = makeWorldWeapon('rifle'); this.gun.position.set(0.22, 1.32, -0.28); this.group.add(this.gun);
+    // weapon held at the ready: parented to the group (feet origin) at right-hand/chest
+    // height, pointing forward (-Z). Group-level placement keeps it at a predictable size
+    // and orientation regardless of the rig's internal scale.
+    this.gun = makeWorldWeapon('rifle');
+    this.gun.position.set(0.2, 1.18, -0.22);
+    this.gun.rotation.set(0, 0, 0);
+    this.group.add(this.gun);
     // invisible hitbox for the player's bullets
     this.hit = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.7, 0.55), new THREE.MeshBasicMaterial({ visible: false }));
     this.hit.position.y = 0.9; this.hit.userData.bot = this; this.group.add(this.hit);
