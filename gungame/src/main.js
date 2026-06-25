@@ -16,6 +16,7 @@ import { Match, MODES, DIFFICULTY } from './game/match.js';
 import { Projectiles } from './world/projectiles.js';
 import { WEAPONS, GUN_LADDER } from './models/guns.js';
 import { Abilities, ABILITIES } from './player/abilities.js';
+import { Net } from './net/net.js';
 
 const container = document.getElementById('app');
 const renderer = createRenderer(container);
@@ -46,6 +47,7 @@ bots.targetMeshes = [arena.group];
 const game = { playing: false, started: false, health: 100, respawnT: 0, fov: 78, baseFov: 78 };
 let pickedPrimary = 'rifle';
 let pickedAbilities = ['hollow', 'cleave'];
+let net = null;
 
 // --- match framework ---
 const match = new Match({
@@ -114,7 +116,10 @@ bots.onBotShoot = (muzzle, b) => audio.shootAt(muzzle, 'rifle');
 
 weapons.onHit = (bot, dmg, head, point) => { hud.hit(head); audio.hit(head); damageBotFromPlayer(bot, dmg, head); };
 weapons.onAmmo = (name, mag, reserve) => hud.setAmmo(name, mag, reserve);
-weapons.onShoot = (kind) => audio.shoot(kind);
+weapons.onShoot = (kind) => {
+  audio.shoot(kind);
+  if (net && net.connected) { const o = new THREE.Vector3(); camera.getWorldPosition(o); const d = new THREE.Vector3(); camera.getWorldDirection(d); net.shoot([+o.x.toFixed(2), +o.y.toFixed(2), +o.z.toFixed(2)], [+d.x.toFixed(3), +d.y.toFixed(3), +d.z.toFixed(3)], kind); }
+};
 weapons.onReload = () => audio.reload();
 weapons.onImpact = (point, w) => { if (w.kind === 'rail') arena.carve(point, 0.85); else if (w.kind === 'beam') arena.carve(point, 0.5); };
 projectiles.onDirectHit = (bot, dmg, team) => { if (team === match.playerTeam) damageBotFromPlayer(bot, dmg, false); };
@@ -162,6 +167,11 @@ for (const id of Object.keys(ABILITIES)) {
 }
 
 document.getElementById('playBtn').addEventListener('click', () => { audio.ensure(); startMatch(); });
+document.getElementById('mpBtn').addEventListener('click', async (e) => {
+  audio.ensure(); const btn = e.currentTarget; const url = document.getElementById('mpUrl').value.trim();
+  btn.textContent = 'CONNECTING…';
+  try { await connectMP(url); } catch (err) { btn.textContent = 'CONNECT FAILED — RETRY'; console.warn('MP connect failed', err); }
+});
 document.getElementById('rematchBtn').addEventListener('click', () => { endscreen.classList.remove('show'); startMatch(); });
 document.getElementById('menuBtn').addEventListener('click', () => { endscreen.classList.remove('show'); menu.classList.remove('hidden'); game.playing = false; });
 renderer.domElement.addEventListener('click', () => { if (game.playing && !input.locked) input.lock(); });
@@ -174,6 +184,26 @@ function startMatch() {
   match.begin();
   game.started = true; game.playing = true;
   input.lock();
+}
+
+// --- multiplayer: connect to a room server; remote players replace bots ---
+async function connectMP(url) {
+  net = new Net(url);
+  net.onShoot = (o, d, w) => {
+    const from = new THREE.Vector3(o[0], o[1], o[2]); const dir = new THREE.Vector3(d[0], d[1], d[2]);
+    fx.muzzle(from, dir, 0xff8a4a); fx.tracer(from, from.clone().addScaledVector(dir, 80), 0xff8a4a); audio.shootAt(from, w);
+  };
+  net.onHit = (dmg) => hurtPlayer(dmg, net.team === 'blue' ? 'red' : 'blue');
+  net.onScore = (scores) => { match.scores.set('blue', scores.blue); match.scores.set('red', scores.red); hud.matchScore(match); };
+  await net.connect(scene);
+  match.configure('tdm', pickedDiff); match.mode = MODES.tdm;
+  match.playerTeam = net.team; match.registerTeam('blue', 'BLUE'); match.registerTeam('red', 'RED'); match.state = 'live';
+  bots.clear();
+  weapons.setLoadout(pickedPrimary); abilities.setLoadout(pickedAbilities[0], pickedAbilities[1]); hud.setAbilities(abilities);
+  hud.matchStart(match); audio.matchStart(match.mode);
+  menu.classList.add('hidden'); game.started = true; game.playing = true;
+  spawnPlayer(true); input.lock();
+  return net;
 }
 
 function showEndScreen(m, winner) {
@@ -200,6 +230,10 @@ let prev = performance.now();
 loading.classList.add('hidden');
 function frame(now) {
   const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
+  if (net && net.connected) {
+    net.sendState({ x: controller.pos.x, y: controller.pos.y, z: controller.pos.z, yaw: controller.yaw, pitch: controller.pitch, hp: game.health, w: weapons.cur, alive: controller.alive }, dt);
+    net.update(dt);
+  }
   const live = game.playing && match.state === 'live';
   if (game.playing && input.locked) {
     match.update(dt);
@@ -237,6 +271,7 @@ requestAnimationFrame(frame);
 // test harness
 window.__gg = {
   scene, camera, controller, weapons, bots, arena, game, input, post, match, projectiles, abilities, abilityCtx, ABILITIES, THREE,
+  connectMP, getNet: () => net,
   __start: (mode = 'tdm', diff = 'normal') => { audio.ensure(); pickedMode = mode; pickedDiff = diff; startMatch(); },
   __aim: (yaw, pitch) => { controller.yaw = yaw; controller.pitch = pitch; },
   __shoot: () => { weapons.setTargets([arena.group, ...bots.hitMeshesHostileTo(match.playerTeam)]); controller.applyCamera(camera); scene.updateMatrixWorld(true); weapons.testFire(controller); },

@@ -1,0 +1,10 @@
+{
+  "name": "gungame-server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "GunGame multiplayer room server (WebSocket state sync).",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "dependencies": { "ws": "^8.18.0" }
+}
