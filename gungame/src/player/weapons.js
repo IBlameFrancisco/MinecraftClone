@@ -20,6 +20,7 @@ export class Weapons {
     this.onAmmo = null;     // (name, mag, reserve) => {}
     this.onShoot = null;    // (kind) => {}
     this.onReload = null;   // () => {}
+    this.onImpact = null;   // (point, weapon) => {}  wall hit (for carving)
     this._ensure('rifle'); this._ensure('pistol'); this._select('rifle');
   }
 
@@ -168,7 +169,7 @@ export class Weapons {
           this.fx.blood(h.point); this.onHit && this.onHit(bot, dmg, head, h.point);
           if (!pierce) { end = h.point.clone(); break; }
         } else {
-          end = h.point.clone(); this.fx.impact(h.point, h.face ? h.face.normal : null); hitWall = true; break;
+          end = h.point.clone(); this.fx.impact(h.point, h.face ? h.face.normal : null); this.onImpact && this.onImpact(h.point.clone(), w); hitWall = true; break;
         }
       }
       if (pierce && !hitWall) end = origin.clone().addScaledVector(dir, w.range);
@@ -192,7 +193,7 @@ export class Weapons {
       const h = hits[0]; end = h.point.clone();
       let o = h.object, bot = null; while (o) { if (o.userData && o.userData.bot !== undefined) { bot = o.userData.bot; break; } o = o.parent; }
       if (bot) { const head = h.point.y > bot.headY(); this.onHit && this.onHit(bot, w.dps * dt, head, h.point); if (Math.random() < 0.3) this.fx.blood(h.point); }
-      else if (Math.random() < 0.4) this.fx.impact(h.point, h.face ? h.face.normal : null, w.color);
+      else { if (this.onImpact && Math.random() < 0.25) this.onImpact(h.point.clone(), w); if (Math.random() < 0.4) this.fx.impact(h.point, h.face ? h.face.normal : null, w.color); }
     }
     const muzzle = this._muzzle(dir, origin);
     this.fx.beam(muzzle, end, w.color || 0xff2e54, 0.06);

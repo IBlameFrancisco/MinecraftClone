@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { PALETTE, box, cyl } from '../engine/materials.js';
 import { MODELS } from '../engine/assets.js';
+import { Destructible } from './destructible.js';
 
 const HALF = 70;          // arena half-extent -> 140x140 playfield
 const GROUND_Y = 0;       // top surface of the ground sits at y = 0
@@ -294,6 +295,25 @@ export function buildArena(scene) {
     { x: -40, y: GROUND_Y, z: 40 },
   ];
 
+  // --- destructible cover walls (the hybrid layer: blow holes / tunnels through them) ---
+  const destructible = new Destructible(group, 0.6);
+  const dmat = new THREE.MeshStandardMaterial({ color: 0xb6a283, roughness: 0.88, metalness: 0.0 });
+  // [x, z, w, h, d]
+  const wallSpots = [
+    [0, -15, 7, 3.2, 0.9], [0, 17, 7, 3.2, 0.9],
+    [-19, 1, 0.9, 3.2, 7], [21, 3, 0.9, 3.2, 7],
+    [13, -11, 5.5, 2.6, 0.9], [-15, 13, 5.5, 2.6, 0.9],
+    [31, 25, 0.9, 3.0, 6], [-31, -23, 6, 3.0, 0.9],
+  ];
+  for (const [wx, wz, w, h, d] of wallSpots) destructible.addWall(dmat, wx, GROUND_Y, wz, w, h, d);
+  destructible.finalize();
+
+  const staticColliders = colliders.slice();
+  const api = {
+    group, spawns, groundY: GROUND_Y, half: HALF, destructible,
+    colliders: staticColliders.concat(destructible.colliderList),
+    carve(center, radius) { if (destructible.carve(center, radius)) this.colliders = staticColliders.concat(destructible.colliderList); },
+  };
   scene.add(group);
-  return { group, colliders, spawns, groundY: GROUND_Y, half: HALF };
+  return api;
 }

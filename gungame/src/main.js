@@ -111,9 +111,11 @@ weapons.onHit = (bot, dmg, head, point) => { hud.hit(head); audio.hit(head); dam
 weapons.onAmmo = (name, mag, reserve) => hud.setAmmo(name, mag, reserve);
 weapons.onShoot = (kind) => audio.shoot(kind);
 weapons.onReload = () => audio.reload();
+weapons.onImpact = (point, w) => { if (w.kind === 'rail') arena.carve(point, 0.85); else if (w.kind === 'beam') arena.carve(point, 0.5); };
 projectiles.onDirectHit = (bot, dmg, team) => { if (team === match.playerTeam) damageBotFromPlayer(bot, dmg, false); };
-projectiles.onSplash = (pos, radius, dmg, team) => splashDamage(pos, radius, dmg, team);
+projectiles.onSplash = (pos, radius, dmg, team) => { splashDamage(pos, radius, dmg, team); arena.carve(pos, radius * 0.7); };
 projectiles.getEnemies = (team) => bots.list.filter((b) => b.alive && b.team !== team).map((b) => new THREE.Vector3(b.pos.x, b.pos.y + 1.2, b.pos.z));
+arena.destructible.onDebris = (pos, color) => fx.impact(pos, null, color);
 
 // --- menu: mode + difficulty selection ---
 const menu = document.getElementById('menu');
