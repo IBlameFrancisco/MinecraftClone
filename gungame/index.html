@@ -49,9 +49,10 @@
     @keyframes kf { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
     #toast { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 30px; font-weight: 700;
       letter-spacing: 1px; text-shadow: 0 2px 14px rgba(0,0,0,0.7); opacity: 0; }
-    #score { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; align-items: center;
-      background: rgba(14,18,25,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 18px; font-weight: 700; }
-    #score .you { color: var(--accent2); } #score .vs { opacity: 0.4; } #score .foe { color: var(--accent); }
+    #score { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center;
+      background: rgba(14,18,25,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 18px; font-weight: 800; font-size: 20px; }
+    #score .you { color: var(--accent2); } #score .vs { opacity: 0.4; font-size: 13px; font-weight: 600; } #score .foe { color: #ff5b5b; }
+    #score .lbl { font-size: 11px; letter-spacing: 1px; opacity: 0.85; margin: 0 4px; }
     #dmg { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 160px rgba(255,30,30,0); transition: box-shadow 0.1s; }
 
     /* ---- Menu ---- */
@@ -81,7 +82,7 @@
 
   <div id="hud">
     <div id="dmg"></div>
-    <div id="score"><span class="you" id="scoreYou">0</span><span class="vs">/</span><span class="foe" id="scoreFoe">0</span></div>
+    <div id="score"><span class="you lbl">BLUE</span><span class="you" id="scoreYou">0</span><span class="vs">vs</span><span class="foe" id="scoreFoe">0</span><span class="foe lbl">RED</span></div>
     <div id="killfeed"></div>
     <div id="crosshair"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span><span class="dot"></span></div>
     <div id="hitmarker"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span></div>

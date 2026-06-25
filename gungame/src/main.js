@@ -34,35 +34,52 @@ const fx = new Fx(scene);
 const hud = new Hud();
 const controller = new Controller();
 const weapons = new Weapons(camera, scene, fx);
-const bots = new Bots(scene, fx, arena, 6);
+// You're on BLUE: 3 blue squadmates fight alongside you against 4 red enemies.
+const bots = new Bots(scene, fx, arena, { red: 4, blue: 3 });
 bots.targetMeshes = [arena.group];
 
-// --- game state ---
-const game = { playing: false, health: 100, score: 0, foeScore: 0, respawnT: 0, fov: 78, baseFov: 78 };
+// --- game state (team deathmatch: first to WIN_SCORE) ---
+const WIN_SCORE = 25;
+const game = { playing: false, health: 100, blue: 0, red: 0, respawnT: 0, fov: 78, baseFov: 78 };
+
+function awardKill(team) {
+  game[team]++;
+  hud.setScore(game.blue, game.red);
+  if (game[team] >= WIN_SCORE) {
+    hud.toast((team === 'blue' ? 'BLUE' : 'RED') + ' TEAM WINS', team === 'blue' ? '#36d1ff' : '#ff5b5b');
+    game.blue = 0; game.red = 0; hud.setScore(0, 0);
+  }
+}
 
 function spawnPlayer() {
-  // farthest spawn from any bot
+  // farthest spawn from any RED enemy
   let best = arena.spawns[0], bd = -1;
   for (const s of arena.spawns) {
-    let m = 1e9; for (const b of bots.list) if (b.alive) m = Math.min(m, (b.pos.x - s.x) ** 2 + (b.pos.z - s.z) ** 2);
+    let m = 1e9; for (const b of bots.list) if (b.alive && b.team === 'red') m = Math.min(m, (b.pos.x - s.x) ** 2 + (b.pos.z - s.z) ** 2);
     if (m > bd) { bd = m; best = s; }
   }
   controller.spawn({ x: best.x, y: 0, z: best.z }, Math.atan2(-(0 - best.x), -(0 - best.z)));
   controller.alive = true; game.health = 100; hud.setHealth(100);
 }
 
-// player takes damage from bots
+// the player (BLUE) takes damage from red bots
 bots.onHitPlayer = (dmg) => {
   if (!controller.alive) return;
   game.health -= dmg; hud.hurt(); audio.hurt();
-  if (game.health <= 0) { game.health = 0; controller.alive = false; game.respawnT = 2.2; hud.setHealth(0); hud.toast('YOU DIED', '#ff5b5b'); game.foeScore++; hud.setScore(game.score, game.foeScore); }
+  if (game.health <= 0) { game.health = 0; controller.alive = false; game.respawnT = 2.2; hud.setHealth(0); hud.toast('YOU DIED', '#ff5b5b'); awardKill('red'); }
   else hud.setHealth(game.health);
 };
-// player bullets hit a bot
+// a bot killed another bot (ally or enemy) — credit the killer's team
+bots.onUnitKilled = (killerTeam, victim) => {
+  awardKill(killerTeam);
+  const dead = killerTeam === 'red' ? 'blue' : 'red';
+  if (dead === 'blue') hud.kill(victim.name + ' was eliminated', '#9fb6c8');   // an ally fell
+};
+// player bullets hit an enemy (red only — friendly fire off via target filtering)
 weapons.onHit = (bot, dmg, head, point) => {
   hud.hit(head); audio.hit(head);
   const killed = bot.hurt(dmg, head, fx);
-  if (killed) { game.score++; hud.setScore(game.score, game.foeScore); hud.kill('You eliminated ' + bot.name, '#36d1ff'); audio.kill(); }
+  if (killed) { awardKill('blue'); hud.kill('You eliminated ' + bot.name, '#36d1ff'); audio.kill(); }
 };
 weapons.onAmmo = (name, mag, reserve) => hud.setAmmo(name, mag, reserve);
 weapons.onShoot = (kind) => audio.shoot(kind);
