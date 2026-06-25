@@ -243,34 +243,103 @@ function addHands(g, id) {
 }
 
 // ---------------------------------------------------------------------------
+// weapon variants — decorate the rifle/pistol bases, or build fresh tubes/sci bodies
+// ---------------------------------------------------------------------------
+function emi(hex, i = 1.1) { return new THREE.MeshStandardMaterial({ color: hex, emissive: hex, emissiveIntensity: i, metalness: 0.3, roughness: 0.4 }); }
+function metalTint(hex, rough = 0.45) { return new THREE.MeshStandardMaterial({ color: hex, metalness: 0.75, roughness: rough }); }
+function ring(z, r, hex, i = 1.0) { const m = cyl(r, r, 0.02, emi(hex, i), 18); m.rotation.x = Math.PI / 2; m.position.set(0, 0.005, z); return m; }
+
+function buildSMG() { const g = buildRifle(true); g.scale.setScalar(0.82); if (g.userData.muzzleLocal) g.userData.muzzleLocal.multiplyScalar(0.82); return g; }
+function buildMG() {
+  const g = buildRifle(true);
+  const drum = cyl(0.072, 0.072, 0.05, PALETTE.metalDk(), 18); drum.rotation.z = Math.PI / 2; drum.position.set(0, -0.11, 0.02); g.add(drum);
+  g.add(barrel(0.014, 0.014, 0.2, PALETTE.metal(), 0, 0.005, -0.46)); g.userData.muzzleLocal = new THREE.Vector3(0, 0.005, -0.64); return g;
+}
+function buildShotgunM() {
+  const g = buildRifle(true);
+  g.add(barrel(0.03, 0.03, 0.24, PALETTE.metalDk(), 0, 0.0, -0.42, 16));
+  g.add(box(0.052, 0.04, 0.12, PALETTE.gunPoly(), 0, -0.05, -0.28)); g.userData.muzzleLocal = new THREE.Vector3(0, 0.0, -0.56); return g;
+}
+function buildSniper() {
+  const g = buildRifle(true);
+  g.add(barrel(0.012, 0.012, 0.26, PALETTE.metal(), 0, 0.005, -0.52, 14));
+  const scope = cyl(0.022, 0.022, 0.17, PALETTE.metalDk(), 18); scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.088, -0.04); g.add(scope);
+  const lens = cyl(0.024, 0.024, 0.015, emi(0x36d1ff, 0.8), 18); lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.088, -0.13); g.add(lens);
+  g.userData.muzzleLocal = new THREE.Vector3(0, 0.005, -0.68); return g;
+}
+function buildLauncher(hex) {
+  const g = new THREE.Group();
+  const tube = cyl(0.052, 0.056, 0.5, metalTint(0x4a5040), 20); tube.rotation.x = Math.PI / 2; tube.position.set(0, 0.01, -0.12); g.add(tube);
+  g.add(ring(-0.34, 0.06, hex)); g.add(ring(-0.2, 0.06, hex));
+  const grip = new THREE.Group(); grip.add(box(0.04, 0.12, 0.05, PALETTE.gunPoly(), 0, -0.06, 0)); grip.rotation.x = -0.3; grip.position.set(0, -0.04, 0.05); g.add(grip);
+  g.add(box(0.05, 0.05, 0.16, PALETTE.gunBody(), 0, -0.02, 0.1));
+  const mouth = cyl(0.05, 0.05, 0.015, emi(hex, 0.7), 20); mouth.rotation.x = Math.PI / 2; mouth.position.set(0, 0.01, -0.37); g.add(mouth);
+  g.userData.muzzleLocal = new THREE.Vector3(0, 0.01, -0.39); return g;
+}
+function buildSci(hex) {
+  const g = new THREE.Group();
+  g.add(box(0.06, 0.06, 0.36, metalTint(0x2a2e3a), 0, 0, -0.04));
+  g.add(box(0.05, 0.03, 0.3, metalTint(0x363b4a), 0, 0.05, -0.02));
+  g.add(box(0.04, 0.02, 0.26, emi(hex, 1.2), 0, 0.0, -0.04));
+  const bar = cyl(0.02, 0.025, 0.2, metalTint(0x20242e), 16); bar.rotation.x = Math.PI / 2; bar.position.set(0, 0.005, -0.34); g.add(bar);
+  g.add(ring(-0.3, 0.032, hex, 1.4)); g.add(ring(-0.22, 0.032, hex, 1.4));
+  const lens = cyl(0.026, 0.026, 0.018, emi(hex, 1.7), 18); lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.005, -0.45); g.add(lens);
+  const grip = new THREE.Group(); grip.add(box(0.035, 0.11, 0.05, PALETTE.gunPoly(), 0, -0.06, 0)); grip.rotation.x = -0.32; grip.position.set(0, -0.02, 0.1); g.add(grip);
+  g.add(box(0.05, 0.07, 0.04, PALETTE.gunPoly(), 0, -0.005, 0.22));
+  g.userData.muzzleLocal = new THREE.Vector3(0, 0.005, -0.46); return g;
+}
+
+function buildByModel(model) {
+  switch (model) {
+    case 'pistol': return buildPistol(true);
+    case 'smg': return buildSMG();
+    case 'mg': return buildMG();
+    case 'shotgun': return buildShotgunM();
+    case 'sniper': return buildSniper();
+    case 'launcher-rocket': return buildLauncher(0xff7a2f);
+    case 'launcher-homing': return buildLauncher(0x3aa0c0);
+    case 'sci-rail': return buildSci(0x9a3cff);
+    case 'sci-plasma': return buildSci(0x2bd6c0);
+    case 'sci-laser': return buildSci(0xff2e54);
+    default: return buildRifle(true);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // public API
 // ---------------------------------------------------------------------------
-
-// First-person viewmodel: full detail + gripping hands, no shadows, drawn over
-// the world.
 export function makeViewModel(id) {
-  const g = id === 'pistol' ? buildPistol(true) : buildRifle(true);
-  addHands(g, id);
+  const w = WEAPONS[id] || WEAPONS.rifle;
+  const g = buildByModel(w.model);
+  addHands(g, w.model === 'pistol' ? 'pistol' : 'rifle');
   g.name = `viewmodel_${id}`;
   return asViewModel(g);
 }
 
-// Third-person / bot-hands weapon: same silhouette, simpler, casts shadows,
-// scaled to ~0.6 long.
 export function makeWorldWeapon(id) {
-  const g = id === 'pistol' ? buildPistol(false) : buildRifle(false);
+  const w = WEAPONS[id] || WEAPONS.rifle;
+  const g = buildByModel(w.model);
   g.name = `worldweapon_${id}`;
   asWorldModel(g);
-  if (id !== 'pistol') {
-    // Rifle is ~0.78 long; gently scale toward ~0.6 for the world version.
-    g.scale.setScalar(0.78);
-    if (g.userData.muzzleLocal) g.userData.muzzleLocal.multiplyScalar(0.78);
-  }
+  if (w.model !== 'pistol') { g.scale.setScalar(0.78); if (g.userData.muzzleLocal) g.userData.muzzleLocal.multiplyScalar(0.78); }
   return g;
 }
 
-// Tunable gameplay stats per weapon.
+// Tunable gameplay stats per weapon. `kind` selects the firing logic in weapons.js:
+//   hitscan | shotgun | rail (piercing hitscan) | projectile (proj: plasma|rocket|homing) | beam
 export const WEAPONS = {
-  rifle:  { name: 'Rifle',  mag: 30, reserve: 90, rpm: 600, damage: 24, spread: 0.012, reloadTime: 2.0, auto: true,  range: 200 },
-  pistol: { name: 'Pistol', mag: 12, reserve: 48, rpm: 360, damage: 34, spread: 0.018, reloadTime: 1.3, auto: false, range: 120 },
+  pistol:  { name: 'Pistol',          model: 'pistol',         kind: 'hitscan', mag: 12, reserve: 60,  rpm: 360,  damage: 30, spread: 0.016, reloadTime: 1.2, auto: false, range: 120 },
+  smg:     { name: 'SMG',             model: 'smg',            kind: 'hitscan', mag: 30, reserve: 150, rpm: 900,  damage: 14, spread: 0.030, reloadTime: 1.4, auto: true,  range: 90 },
+  rifle:   { name: 'Assault Rifle',   model: 'ar',             kind: 'hitscan', mag: 30, reserve: 120, rpm: 600,  damage: 22, spread: 0.013, reloadTime: 1.8, auto: true,  range: 170 },
+  shotgun: { name: 'Shotgun',         model: 'shotgun',        kind: 'shotgun', mag: 6,  reserve: 42,  rpm: 80,   damage: 11, pellets: 9, spread: 0.10, reloadTime: 0.95, auto: false, range: 42 },
+  sniper:  { name: 'Sniper',          model: 'sniper',         kind: 'hitscan', mag: 5,  reserve: 30,  rpm: 50,   damage: 88, spread: 0.0,   reloadTime: 2.4, auto: false, range: 320, zoom: true },
+  mg42:    { name: 'MG42',            model: 'mg',             kind: 'hitscan', mag: 75, reserve: 225, rpm: 1100, damage: 16, spread: 0.048, reloadTime: 3.3, auto: true,  range: 130 },
+  railgun: { name: 'Railgun',         model: 'sci-rail',       kind: 'rail',    mag: 4,  reserve: 20,  rpm: 45,   damage: 75, spread: 0.0,   reloadTime: 2.2, auto: false, range: 320, pierce: true, color: 0x9a3cff },
+  plasma:  { name: 'Plasma Gun',      model: 'sci-plasma',     kind: 'projectile', proj: 'plasma', mag: 20, reserve: 80, rpm: 220, damage: 26, speed: 62, splash: 16, radius: 2.6, reloadTime: 1.5, auto: true, range: 130, color: 0x2bd6c0 },
+  laser:   { name: 'Laser Cannon',    model: 'sci-laser',      kind: 'beam',    mag: 100, reserve: 0,  dps: 120, drain: 18, reloadTime: 2.6, range: 140, range2: 140, auto: true, color: 0xff2e54 },
+  rocket:  { name: 'Rocket Launcher', model: 'launcher-rocket', kind: 'projectile', proj: 'rocket', mag: 3, reserve: 12, rpm: 60, damage: 55, speed: 44, splash: 58, radius: 5.2, reloadTime: 2.4, auto: false, range: 170, color: 0xff7a2f },
+  homing:  { name: 'Homing Missile',  model: 'launcher-homing', kind: 'projectile', proj: 'homing', mag: 4, reserve: 12, rpm: 55, damage: 42, speed: 32, turn: 4.4, splash: 40, radius: 4.4, reloadTime: 2.6, auto: false, range: 220, color: 0x3aa0c0 },
 };
+
+// Gun Game weapon ladder (easy → spectacle); finishing it wins the round.
+export const GUN_LADDER = ['pistol', 'smg', 'rifle', 'shotgun', 'mg42', 'sniper', 'plasma', 'railgun', 'laser', 'rocket'];

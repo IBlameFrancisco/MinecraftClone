@@ -69,6 +69,13 @@
     .chip .n { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
     .chip .d { font-size: 12px; opacity: 0.6; margin-top: 2px; }
     .chip.diff { min-width: 120px; }
+    #loadoutRow { margin-top: 22px; max-width: 640px; }
+    #loadoutRow > .h { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.5; margin-bottom: 10px; }
+    .lchips { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; }
+    .lchip { pointer-events: auto; cursor: pointer; padding: 7px 13px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      border: 1px solid rgba(255,255,255,0.1); background: rgba(20,26,35,0.6); transition: all 0.12s; }
+    .lchip:hover { border-color: rgba(255,255,255,0.28); }
+    .lchip.sel { border-color: var(--accent2); background: rgba(54,209,255,0.16); color: #aee9ff; }
 
     /* ---- end-of-match screen ---- */
     #endscreen { position: fixed; inset: 0; z-index: 35; display: none; flex-direction: column; align-items: center; justify-content: center;
@@ -153,6 +160,7 @@
         </div>
       </div>
     </div>
+    <div id="loadoutRow"><div class="h">Loadout · Primary Weapon</div><div class="lchips" id="loadoutChips"></div></div>
     <button class="play" id="playBtn">PLAY</button>
     <div class="hint">
       <b>WASD</b> move &nbsp; <b>Shift</b> sprint &nbsp; <b>Ctrl</b> crouch &nbsp; <b>Space</b> jump<br />

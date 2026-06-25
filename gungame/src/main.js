@@ -13,6 +13,8 @@ import { Bots } from './ai/bots.js';
 import { Fx } from './fx/fx.js';
 import { Hud } from './ui/hud.js';
 import { Match, MODES, DIFFICULTY } from './game/match.js';
+import { Projectiles } from './world/projectiles.js';
+import { WEAPONS, GUN_LADDER } from './models/guns.js';
 
 const container = document.getElementById('app');
 const renderer = createRenderer(container);
@@ -33,20 +35,23 @@ const audio = new Audio();
 const fx = new Fx(scene);
 const hud = new Hud();
 const controller = new Controller();
-const weapons = new Weapons(camera, scene, fx);
+const projectiles = new Projectiles(scene, fx);
+const weapons = new Weapons(camera, scene, fx, projectiles);
 const bots = new Bots(scene, fx, arena);
 bots.targetMeshes = [arena.group];
 
 // --- player/game state ---
 const game = { playing: false, started: false, health: 100, respawnT: 0, fov: 78, baseFov: 78 };
+let pickedPrimary = 'rifle';
 
 // --- match framework ---
 const match = new Match({
   hud,
   onStart: (mode, diff) => {
     bots.setup(mode, diff, match);
-    weapons.reset();
-    game.health = diff.id === 'hard' ? 100 : 100;
+    projectiles.clear();
+    if (mode.ladder) { weapons.setGunGame(GUN_LADDER[0]); }
+    else weapons.setLoadout(pickedPrimary);
     spawnPlayer(true);
   },
   onEnd: (m, winner) => showEndScreen(m, winner),
@@ -66,34 +71,49 @@ function spawnPlayer(fresh) {
   controller.alive = true; game.health = 100; hud.setHealth(100);
 }
 
-// --- damage / scoring callbacks ---
-bots.onHitPlayer = (dmg, dir, killer) => {
+// --- scoring helpers (centralised so Gun-Game progression hooks every kill) ---
+function award(team) { match.award(team); afterKill(team); }
+function afterKill(team) {
+  if (!match.mode.ladder) return;
+  const rung = match.score(team);
+  if (rung >= GUN_LADDER.length) { match.ladderWin(team); return; }
+  if (team === match.playerTeam) { weapons.setGunGame(GUN_LADDER[rung]); hud.toast('LEVEL ' + (rung + 1) + ' · ' + WEAPONS[GUN_LADDER[rung]].name, '#ffd24a'); }
+}
+function hurtPlayer(dmg, killerTeam) {
   if (!controller.alive || match.state !== 'live') return;
   game.health -= dmg; hud.hurt(); audio.hurt();
   if (game.health <= 0) {
     game.health = 0; controller.alive = false; game.respawnT = 2.2; hud.setHealth(0);
-    hud.toast('YOU DIED', '#ff5b5b'); audio.announce('death');
-    match.award(killer ? killer.team : 'red');
+    hud.toast('YOU DIED', '#ff5b5b'); audio.announce('death'); award(killerTeam || 'red');
   } else hud.setHealth(game.health);
-};
-bots.onUnitKilled = (killerTeam, victim) => {
-  match.award(killerTeam);
-  const label = match.names.get(killerTeam) || killerTeam;
-  hud.kill(`${victim.name} fell`, '#9fb6c8');
-};
+}
+function damageBotFromPlayer(bot, dmg, head) {
+  const killed = bot.hurt(dmg);
+  if (killed) { hud.kill('You eliminated ' + bot.name, '#36d1ff'); audio.kill(); if (head) audio.announce('headshot'); award(match.playerTeam); }
+  return killed;
+}
+function splashDamage(pos, radius, maxDmg, team) {
+  for (const b of bots.list) {
+    if (!b.alive || b.team === team) continue;
+    const d = Math.hypot(b.pos.x - pos.x, b.pos.y + 1 - pos.y, b.pos.z - pos.z);
+    if (d < radius) { const dmg = Math.round(maxDmg * (1 - d / radius)); if (dmg > 0) damageBotFromPlayer(b, dmg, false); }
+  }
+  const pd = Math.hypot(controller.pos.x - pos.x, controller.pos.y + 1 - pos.y, controller.pos.z - pos.z);
+  if (pd < radius && team === match.playerTeam) hurtPlayer(Math.round(maxDmg * 0.4 * (1 - pd / radius)), 'red');
+}
+
+// --- damage / scoring callbacks ---
+bots.onHitPlayer = (dmg, dir, killer) => hurtPlayer(dmg, killer ? killer.team : 'red');
+bots.onUnitKilled = (killerTeam, victim) => { award(killerTeam); hud.kill(`${victim.name} fell`, '#9fb6c8'); };
 bots.onBotShoot = (muzzle, b) => audio.shootAt(muzzle, 'rifle');
 
-weapons.onHit = (bot, dmg, head, point) => {
-  hud.hit(head); audio.hit(head);
-  const killed = bot.hurt(dmg, head, fx);
-  if (killed) {
-    match.award(match.playerTeam);
-    hud.kill('You eliminated ' + bot.name, '#36d1ff'); audio.kill();
-    if (head) audio.announce('headshot');
-  }
-};
+weapons.onHit = (bot, dmg, head, point) => { hud.hit(head); audio.hit(head); damageBotFromPlayer(bot, dmg, head); };
 weapons.onAmmo = (name, mag, reserve) => hud.setAmmo(name, mag, reserve);
 weapons.onShoot = (kind) => audio.shoot(kind);
+weapons.onReload = () => audio.reload();
+projectiles.onDirectHit = (bot, dmg, team) => { if (team === match.playerTeam) damageBotFromPlayer(bot, dmg, false); };
+projectiles.onSplash = (pos, radius, dmg, team) => splashDamage(pos, radius, dmg, team);
+projectiles.getEnemies = (team) => bots.list.filter((b) => b.alive && b.team !== team).map((b) => new THREE.Vector3(b.pos.x, b.pos.y + 1.2, b.pos.z));
 
 // --- menu: mode + difficulty selection ---
 const menu = document.getElementById('menu');
@@ -109,8 +129,16 @@ function wireChips(containerId, attr, onPick) {
     chip.classList.add('sel'); onPick(chip.getAttribute(attr)); audio.ensure(); audio.ui();
   }));
 }
-wireChips('modeChips', 'data-mode', (m) => { pickedMode = m; });
+wireChips('modeChips', 'data-mode', (m) => { pickedMode = m; document.getElementById('loadoutRow').style.display = m === 'gun' ? 'none' : 'block'; });
 wireChips('diffChips', 'data-diff', (d) => { pickedDiff = d; });
+
+// build the primary-weapon loadout strip (all weapons except the pistol sidearm)
+const loadoutChips = document.getElementById('loadoutChips');
+for (const id of Object.keys(WEAPONS).filter((k) => k !== 'pistol')) {
+  const c = document.createElement('div'); c.className = 'lchip' + (id === pickedPrimary ? ' sel' : ''); c.textContent = WEAPONS[id].name;
+  c.addEventListener('click', () => { loadoutChips.querySelectorAll('.lchip').forEach((x) => x.classList.remove('sel')); c.classList.add('sel'); pickedPrimary = id; audio.ensure(); audio.ui(); });
+  loadoutChips.appendChild(c);
+}
 
 document.getElementById('playBtn').addEventListener('click', () => { audio.ensure(); startMatch(); });
 document.getElementById('rematchBtn').addEventListener('click', () => { endscreen.classList.remove('show'); startMatch(); });
@@ -162,9 +190,13 @@ function frame(now) {
     if (Math.abs(camera.fov - game.fov) > 0.01) { camera.fov = game.fov; camera.updateProjectionMatrix(); }
 
     if (live) {
-      weapons.setTargets([arena.group, ...bots.hitMeshesHostileTo(match.playerTeam)]);
+      const hostile = bots.hitMeshesHostileTo(match.playerTeam);
+      weapons.ownerTeam = match.playerTeam;
+      weapons.setTargets([arena.group, ...hostile]);
+      projectiles.setTargets([arena.group], hostile);
       weapons.update(dt, input, controller);
       bots.update(dt, playerObj());
+      projectiles.update(dt);
     }
     fx.update(dt);
     hud.update(dt);
@@ -180,7 +212,7 @@ requestAnimationFrame(frame);
 
 // test harness
 window.__gg = {
-  scene, camera, controller, weapons, bots, arena, game, input, post, match,
+  scene, camera, controller, weapons, bots, arena, game, input, post, match, projectiles, THREE,
   __start: (mode = 'tdm', diff = 'normal') => { audio.ensure(); pickedMode = mode; pickedDiff = diff; startMatch(); },
   __aim: (yaw, pitch) => { controller.yaw = yaw; controller.pitch = pitch; },
   __shoot: () => { weapons.setTargets([arena.group, ...bots.hitMeshesHostileTo(match.playerTeam)]); controller.applyCamera(camera); scene.updateMatrixWorld(true); weapons.testFire(controller); },
