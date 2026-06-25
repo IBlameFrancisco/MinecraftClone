@@ -53,7 +53,39 @@
       background: rgba(14,18,25,0.55); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 6px 18px; font-weight: 800; font-size: 20px; }
     #score .you { color: var(--accent2); } #score .vs { opacity: 0.4; font-size: 13px; font-weight: 600; } #score .foe { color: #ff5b5b; }
     #score .lbl { font-size: 11px; letter-spacing: 1px; opacity: 0.85; margin: 0 4px; }
+    #timer { position: absolute; top: 54px; left: 50%; transform: translateX(-50%); font-weight: 700; font-size: 17px;
+      letter-spacing: 1px; opacity: 0.9; text-shadow: 0 2px 8px rgba(0,0,0,0.6); display: none; }
     #dmg { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 160px rgba(255,30,30,0); transition: box-shadow 0.1s; }
+
+    /* ---- mode / difficulty pickers ---- */
+    .pickers { display: flex; gap: 36px; margin-top: 30px; }
+    .pickcol { text-align: left; }
+    .pickcol > .h { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; opacity: 0.5; margin-bottom: 10px; }
+    .chips { display: flex; flex-direction: column; gap: 8px; }
+    .chip { pointer-events: auto; cursor: pointer; min-width: 230px; padding: 11px 16px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.1); background: rgba(20,26,35,0.6); color: #e7ecf3; transition: all 0.12s; }
+    .chip:hover { border-color: rgba(255,255,255,0.28); }
+    .chip.sel { border-color: var(--accent); background: rgba(255,122,47,0.16); box-shadow: 0 6px 22px rgba(255,122,47,0.18); }
+    .chip .n { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
+    .chip .d { font-size: 12px; opacity: 0.6; margin-top: 2px; }
+    .chip.diff { min-width: 120px; }
+
+    /* ---- end-of-match screen ---- */
+    #endscreen { position: fixed; inset: 0; z-index: 35; display: none; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(120% 90% at 50% 12%, rgba(22,32,44,0.94), rgba(7,10,14,0.97)); text-align: center; backdrop-filter: blur(3px); }
+    #endscreen.show { display: flex; }
+    #endscreen .res { font-size: 78px; font-weight: 800; letter-spacing: 3px; text-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+    #endscreen .res.win { color: #6effa8; } #endscreen .res.lose { color: #ff6a6a; }
+    #endscreen .sub { opacity: 0.6; letter-spacing: 4px; text-transform: uppercase; font-size: 14px; margin-top: 2px; }
+    #standings { margin: 26px 0 8px; min-width: 340px; }
+    #standings .row { display: flex; justify-content: space-between; padding: 8px 16px; border-radius: 8px; font-size: 18px; font-weight: 600; }
+    #standings .row.me { background: rgba(54,209,255,0.14); color: #aee9ff; }
+    #standings .row .rk { opacity: 0.5; margin-right: 12px; }
+    #endbtns { display: flex; gap: 14px; margin-top: 22px; }
+    #endbtns button { pointer-events: auto; cursor: pointer; font-size: 18px; font-weight: 700; letter-spacing: 1px; padding: 12px 34px; border-radius: 10px; border: none; transition: transform 0.1s; }
+    #endbtns button:hover { transform: translateY(-2px); }
+    #rematchBtn { color: #0b0e13; background: linear-gradient(90deg, var(--accent), #ffb14a); }
+    #menuBtn { color: #e7ecf3; background: rgba(255,255,255,0.1); }
 
     /* ---- Menu ---- */
     #menu { position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -83,6 +115,7 @@
   <div id="hud">
     <div id="dmg"></div>
     <div id="score"><span class="you lbl">BLUE</span><span class="you" id="scoreYou">0</span><span class="vs">vs</span><span class="foe" id="scoreFoe">0</span><span class="foe lbl">RED</span></div>
+    <div id="timer">5:00</div>
     <div id="killfeed"></div>
     <div id="crosshair"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span><span class="dot"></span></div>
     <div id="hitmarker"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span></div>
@@ -101,7 +134,25 @@
 
   <div id="menu">
     <h1>GUNGAME</h1>
-    <div class="sub">Stylized Arena FPS</div>
+    <div class="sub">Power-Fantasy Arena Shooter</div>
+    <div class="pickers">
+      <div class="pickcol">
+        <div class="h">Mode</div>
+        <div class="chips" id="modeChips">
+          <div class="chip sel" data-mode="tdm"><div class="n">Team Deathmatch</div><div class="d">Blue squad vs Red · first to 30</div></div>
+          <div class="chip" data-mode="ffa"><div class="n">Free-for-All</div><div class="d">Everyone for themselves · top frag wins</div></div>
+          <div class="chip" data-mode="gun"><div class="n">Gun Game</div><div class="d">Climb the weapon ladder to win</div></div>
+        </div>
+      </div>
+      <div class="pickcol">
+        <div class="h">Difficulty</div>
+        <div class="chips" id="diffChips">
+          <div class="chip diff" data-diff="easy"><div class="n">Easy</div></div>
+          <div class="chip diff sel" data-diff="normal"><div class="n">Normal</div></div>
+          <div class="chip diff" data-diff="hard"><div class="n">Hard</div></div>
+        </div>
+      </div>
+    </div>
     <button class="play" id="playBtn">PLAY</button>
     <div class="hint">
       <b>WASD</b> move &nbsp; <b>Shift</b> sprint &nbsp; <b>Ctrl</b> crouch &nbsp; <b>Space</b> jump<br />
@@ -110,6 +161,16 @@
     <div class="credits" style="margin-top:18px; font-size:11px; opacity:0.5; max-width:520px;">
       Assets: Poly Haven (CC0 HDRI &amp; textures), Kenney (CC0 props), three.js soldier;
       container by KolosStudios &amp; barrier by J-Toastie (CC-BY, via Poly Pizza). See CREDITS.md.
+    </div>
+  </div>
+
+  <div id="endscreen">
+    <div class="res" id="endRes">VICTORY</div>
+    <div class="sub" id="endSub">Team Deathmatch</div>
+    <div id="standings"></div>
+    <div id="endbtns">
+      <button id="rematchBtn">REMATCH</button>
+      <button id="menuBtn">MENU</button>
     </div>
   </div>
 

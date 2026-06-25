@@ -39,6 +39,11 @@ export class Weapons {
   }
   switch(id) { if (this.models[id] && id !== this.cur) this._select(id); }
   cycle(d) { const i = (ORDER.indexOf(this.cur) + d + ORDER.length) % ORDER.length; this._select(ORDER[i]); }
+  // refill ammo + reset to the default weapon (called at the start of each match)
+  reset() {
+    for (const id of ORDER) { const w = WEAPONS[id]; this.state[id] = { mag: w.mag, reserve: w.reserve }; }
+    this.fireCD = 0; this.reloadT = 0; this._select('rifle');
+  }
 
   setTargets(meshes, bots) { this.targets = meshes; this.bots = bots; }
 
