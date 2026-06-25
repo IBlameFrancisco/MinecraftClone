@@ -12,8 +12,8 @@ const NAMES = ['Razor', 'Vex', 'Cobra', 'Ghost', 'Echo', 'Riot', 'Nova', 'Slate'
 // Per-team uniform tints (multiplied over the soldier texture) — varied within the team
 // hue so allies/enemies are instantly readable but not identical clones.
 const UNIFORMS = {
-  red:  [0xc25b4f, 0xb24a42, 0xd06a55, 0xa84038],
-  blue: [0x4a6fb0, 0x3f5fa0, 0x5a7fc0, 0x4660a0],
+  red:  [0x9a4a42, 0x8a3f39, 0xa85a4a, 0x933b34],   // muted military reds, not neon
+  blue: [0x42588e, 0x39507e, 0x4d6498, 0x3c5288],
 };
 
 class Bot {

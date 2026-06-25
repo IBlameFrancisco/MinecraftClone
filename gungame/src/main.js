@@ -26,7 +26,7 @@ await loadAssets(renderer);
 
 createSky(scene, renderer);
 const arena = buildArena(scene);
-const post = createComposer(renderer, scene, camera, { ssao: false });
+const post = createComposer(renderer, scene, camera, { ao: true });
 
 const input = new Input(renderer.domElement);
 const audio = new Audio();
@@ -135,7 +135,7 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // expose a tiny test harness
-window.__gg = { scene, camera, controller, weapons, bots, arena, game, input,
+window.__gg = { scene, camera, controller, weapons, bots, arena, game, input, post,
   __start: () => { audio.ensure(); start(); },
   __aim: (yaw, pitch) => { controller.yaw = yaw; controller.pitch = pitch; },
   __shoot: () => { weapons.setTargets([arena.group, ...bots.hitMeshes()]); controller.applyCamera(camera); scene.updateMatrixWorld(true); weapons.testFire(controller); },

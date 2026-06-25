@@ -52,8 +52,8 @@ export function makeCharacter(opts = {}) {
         o.material = o.material.clone();
         if (o.material.color) o.material.color.multiply(diffuse);
         o.material.emissive = glow;
-        o.material.emissiveIntensity = 0.14;
-        o.material.envMapIntensity = 1.0;
+        o.material.emissiveIntensity = 0.06;   // faint team rim, not neon
+        o.material.envMapIntensity = 1.15;
       }
     }
   });

@@ -17,7 +17,7 @@ export function createRenderer(container) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.92;
+  renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.appendChild(renderer.domElement);
   return renderer;
@@ -30,10 +30,10 @@ const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
     time: { value: 0 },
-    contrast: { value: 1.12 },
-    saturation: { value: 1.1 },
-    vignette: { value: 0.36 },
-    grain: { value: 0.04 },
+    contrast: { value: 1.16 },
+    saturation: { value: 1.14 },
+    vignette: { value: 0.38 },
+    grain: { value: 0.035 },
   },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
   fragmentShader: `
@@ -44,37 +44,43 @@ const GradeShader = {
       vec3 c = texture2D(tDiffuse, vUv).rgb;
       // contrast S-curve around mid grey
       c = (c - 0.5) * contrast + 0.5;
-      // saturation
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      // cinematic split-tone: cool shadows, warm highlights
+      vec3 shadowTint = vec3(0.96, 0.985, 1.07);
+      vec3 highTint   = vec3(1.07, 1.015, 0.93);
+      c *= mix(shadowTint, highTint, smoothstep(0.0, 0.85, l));
+      // saturation
       c = mix(vec3(l), c, saturation);
       // vignette
       vec2 q = vUv - 0.5;
-      float v = smoothstep(0.85, 0.25, length(q) * (1.0 + vignette));
+      float v = smoothstep(0.9, 0.22, length(q) * (1.0 + vignette));
       c *= mix(1.0 - vignette, 1.0, v);
-      // animated film grain
+      // animated film grain (a touch stronger in shadows)
       float g = hash(vUv * vec2(1920.0, 1080.0) + fract(time)) - 0.5;
-      c += g * grain;
+      c += g * grain * (1.2 - l);
       gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
     }`,
 };
 
-// Build the composer chain. `opts.ssao` toggles ambient occlusion (off on weak GPUs).
+// Build the composer chain. `opts.ao` toggles GTAO ambient occlusion (off on weak GPUs).
 export function createComposer(renderer, scene, camera, opts = {}) {
   const w = window.innerWidth, h = window.innerHeight;
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
-  let ssao = null;
-  if (opts.ssao !== false) {
-    ssao = new SSAOPass(scene, camera, w, h);
-    ssao.kernelRadius = 0.6;
-    ssao.minDistance = 0.0008;
-    ssao.maxDistance = 0.06;
-    ssao.output = SSAOPass.OUTPUT.Default;
-    composer.addPass(ssao);
+  // SSAO — ambient occlusion that grounds every object with soft contact shadows the
+  // HDRI/sun can't produce. (Widely GPU-compatible; GTAO silently no-ops on some drivers.)
+  let gtao = null;   // kept name for the returned handle / A-B toggling
+  if (opts.ao !== false) {
+    gtao = new SSAOPass(scene, camera, w, h);
+    gtao.kernelRadius = 4.0;
+    gtao.minDistance = 0.002;
+    gtao.maxDistance = 0.12;
+    gtao.output = SSAOPass.OUTPUT.Default;
+    composer.addPass(gtao);
   }
 
-  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.5, 0.7, 0.82);   // strength, radius, threshold
+  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.42, 0.75, 0.85);   // strength, radius, threshold
   composer.addPass(bloom);
   composer.addPass(new OutputPass());            // ACES tonemap + sRGB
 
@@ -89,7 +95,7 @@ export function createComposer(renderer, scene, camera, opts = {}) {
   function setSize(width, height) {
     composer.setSize(width, height);
     bloom.setSize(width, height);
-    if (ssao) ssao.setSize(width, height);
+    if (gtao) gtao.setSize(width, height);
   }
-  return { composer, bloom, ssao, grade, render, setSize };
+  return { composer, bloom, gtao, grade, render, setSize };
 }
