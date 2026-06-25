@@ -2,6 +2,7 @@
 // the game loop together.
 import * as THREE from 'three';
 import { createRenderer, createComposer } from './engine/renderer.js';
+import { loadAssets } from './engine/assets.js';
 import { createSky } from './engine/sky.js';
 import { Input } from './engine/input.js';
 import { Audio } from './engine/audio.js';
@@ -17,6 +18,11 @@ const renderer = createRenderer(container);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 1000);
 scene.add(camera);
+
+// Real assets (HDRI + PBR textures) must be ready before we build any materials/scene.
+const loadingEl = document.getElementById('loading');
+if (loadingEl) loadingEl.classList.remove('hidden');
+await loadAssets(renderer);
 
 createSky(scene, renderer);
 const arena = buildArena(scene);

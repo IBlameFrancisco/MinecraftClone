@@ -1,0 +1,38 @@
+// Loads the real CC0 assets (HDRI environment + PBR texture sets) at boot. Everything
+// the renderer/materials need is exposed here once `loadAssets()` resolves.
+import * as THREE from 'three';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+
+const BASE = import.meta.env.BASE_URL || '/';
+export const TEX = {};      // TEX.ground = { map, normalMap, roughnessMap }, etc.
+export const ENV = { map: null, background: null };
+
+const SETS = ['ground', 'concrete', 'wood', 'metal', 'rust'];
+
+function loadTex(loader, url, srgb) {
+  return new Promise((res, rej) => loader.load(url, (t) => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    res(t);
+  }, undefined, rej));
+}
+
+export async function loadAssets(renderer) {
+  const tl = new THREE.TextureLoader();
+  await Promise.all(SETS.map(async (s) => {
+    const [map, normalMap, roughnessMap] = await Promise.all([
+      loadTex(tl, `${BASE}tex/${s}_albedo.jpg`, true),
+      loadTex(tl, `${BASE}tex/${s}_normal.jpg`, false),
+      loadTex(tl, `${BASE}tex/${s}_rough.jpg`, false),
+    ]);
+    TEX[s] = { map, normalMap, roughnessMap };
+  }));
+
+  const hdr = await new RGBELoader().loadAsync(`${BASE}hdri/sky.hdr`);
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  pmrem.compileEquirectangularShader();
+  ENV.map = pmrem.fromEquirectangular(hdr).texture;   // image-based lighting + reflections
+  ENV.background = hdr;                                // the visible sky
+}
