@@ -64,6 +64,11 @@
       background: rgba(255,255,255,0.14); display: flex; align-items: center; justify-content: center; }
     .ab .nm { position: relative; font-size: 13px; font-weight: 600; opacity: 0.85; white-space: nowrap; }
     .ab.ready .key { background: var(--accent); color: #0b0e13; }
+    #timestop { position: fixed; inset: 0; pointer-events: none; z-index: 12; opacity: 0; transition: opacity 0.18s;
+      background: radial-gradient(120% 120% at 50% 50%, rgba(244,197,66,0.06) 35%, rgba(34,24,84,0.5) 100%); }
+    #timestop.show { opacity: 1; }
+    #timestop .za { position: absolute; left: 50%; top: 38%; transform: translateX(-50%); font-size: 46px; font-weight: 800;
+      letter-spacing: 6px; color: #f4c542; text-shadow: 0 4px 30px rgba(0,0,0,0.6); opacity: 0.55; }
 
     /* ---- mode / difficulty pickers ---- */
     .pickers { display: flex; gap: 36px; margin-top: 30px; }
@@ -150,6 +155,7 @@
   </div>
 
   <div id="pause">PAUSED — click to resume</div>
+  <div id="timestop"><div class="za">TOKI WO TOMARE</div></div>
 
   <div id="menu">
     <h1>GUNGAME</h1>

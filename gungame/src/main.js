@@ -62,7 +62,7 @@ const match = new Match({
 });
 
 function playerObj() { return { pos: controller.pos, eye: controller.eye, alive: controller.alive, team: match.playerTeam }; }
-function abilityCtx() { return { camera, bots: bots.list, ownerTeam: match.playerTeam, projectiles, carve: (p, r) => arena.carve(p, r), fx, audio, damageBot: damageBotFromPlayer, hud }; }
+function abilityCtx() { return { camera, scene, controller, arenaGroup: arena.group, bots: bots.list, ownerTeam: match.playerTeam, projectiles, carve: (p, r) => arena.carve(p, r), fx, audio, damageBot: damageBotFromPlayer, hud }; }
 
 function spawnPlayer(fresh) {
   // farthest spawn from the nearest hostile bot
@@ -127,6 +127,7 @@ const menu = document.getElementById('menu');
 const pause = document.getElementById('pause');
 const loading = document.getElementById('loading');
 const endscreen = document.getElementById('endscreen');
+const timestopEl = document.getElementById('timestop');
 let pickedMode = 'tdm', pickedDiff = 'normal';
 
 function wireChips(containerId, attr, onPick) {
@@ -217,7 +218,8 @@ function frame(now) {
       weapons.update(dt, input, controller);
       if (controller.alive) abilities.update(dt, input, abilityCtx());
       hud.abilityTick(abilities);
-      bots.update(dt, playerObj());
+      if (abilities.timeStopT <= 0) bots.update(dt, playerObj());   // ZA WARUDO freezes the bots
+      timestopEl.classList.toggle('show', abilities.timeStopT > 0);
       projectiles.update(dt);
     }
     fx.update(dt);

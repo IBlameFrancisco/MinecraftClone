@@ -52,6 +52,12 @@ export class Fx {
       this._spark(pos.clone(), v, 0xc8203a, 0.22 + Math.random() * 0.15);
     }
   }
+  // an enemy marker that draws THROUGH walls (Sharingan wallhack); refreshed each frame
+  marker(pos, color = 0xe01020) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false }));
+    s.position.copy(pos); s.scale.setScalar(0.7); s.renderOrder = 31;
+    this.group.add(s); this.flashes.push({ s, life: 0.16, max: 0.16 });
+  }
   // a continuous energy beam segment (laser); short-lived, refreshed each frame while firing
   beam(from, to, color = 0xff2e54, width = 0.07) {
     const dir = to.clone().sub(from); const len = dir.length(); if (len < 0.1) return;
