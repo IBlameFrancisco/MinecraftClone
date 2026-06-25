@@ -36,11 +36,14 @@ export function makeCharacter(opts = {}) {
   model.position.y -= box.min.y;
   model.updateMatrixWorld(true);
 
-  // team tint: read as a coloured uniform, not a glow. Multiply the diffuse toward a
-  // light team colour (keeps the soldier texture visible) + a faint emissive for pop.
+  // Uniform tint: read as a coloured uniform, not a glow. `opts.uniform` (a hex) lets the
+  // caller vary each soldier so a squad doesn't look like identical clones; otherwise fall
+  // back to a team colour. A faint emissive keeps the team legible in the heat of a fight.
   // Clone materials first so per-bot tinting doesn't bleed across clones.
-  const diffuse = team === 'red' ? new THREE.Color(1.0, 0.62, 0.6) : new THREE.Color(0.62, 0.72, 1.0);
-  const glow = team === 'red' ? new THREE.Color(0x3a0a0a) : new THREE.Color(0x0a1638);
+  const diffuse = opts.uniform != null
+    ? new THREE.Color(opts.uniform)
+    : (team === 'red' ? new THREE.Color(1.0, 0.62, 0.6) : new THREE.Color(0.62, 0.72, 1.0));
+  const glow = team === 'red' ? new THREE.Color(0x2a0808) : new THREE.Color(0x081026);
   model.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = true; o.receiveShadow = true;
@@ -49,7 +52,7 @@ export function makeCharacter(opts = {}) {
         o.material = o.material.clone();
         if (o.material.color) o.material.color.multiply(diffuse);
         o.material.emissive = glow;
-        o.material.emissiveIntensity = 0.25;
+        o.material.emissiveIntensity = 0.14;
         o.material.envMapIntensity = 1.0;
       }
     }

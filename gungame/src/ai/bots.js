@@ -6,11 +6,14 @@ import { makeCharacter } from '../models/character.js';
 import { makeWorldWeapon } from '../models/guns.js';
 
 const NAMES = ['Razor', 'Vex', 'Cobra', 'Ghost', 'Echo', 'Riot', 'Nova', 'Slate', 'Drift', 'Pike'];
+// Varied warm/military uniform tints so the enemy squad reads as distinct soldiers
+// rather than identical clones (all still on the hostile "red" team).
+const UNIFORMS = [0xc98f7a, 0xb5806a, 0xd0a07c, 0xa87d68, 0xc27d6e, 0xb59078, 0xcf9a86, 0xa9745f];
 
 class Bot {
-  constructor(scene, fx, name) {
+  constructor(scene, fx, name, uniform) {
     this.scene = scene; this.fx = fx; this.name = name;
-    this.group = makeCharacter({ team: 'red' });
+    this.group = makeCharacter({ team: 'red', uniform });
     scene.add(this.group);
     this.parts = this.group.userData.parts;
     // weapon held at the ready: parented to the group (feet origin) at right-hand/chest
@@ -62,7 +65,7 @@ export class Bots {
     this.onKilled = null;      // (bot) => {}
     this.targetMeshes = [];    // arena meshes (for LoS)
     for (let i = 0; i < count; i++) {
-      const b = new Bot(scene, fx, NAMES[i % NAMES.length]);
+      const b = new Bot(scene, fx, NAMES[i % NAMES.length], UNIFORMS[i % UNIFORMS.length]);
       const sp = world.spawns[i % world.spawns.length];
       b.spawn(new THREE.Vector3(sp.x, 0, sp.z));
       this.list.push(b);

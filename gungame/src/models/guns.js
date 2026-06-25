@@ -171,12 +171,66 @@ function buildPistol(detailed) {
 }
 
 // ---------------------------------------------------------------------------
+// FIRST-PERSON HANDS
+// ---------------------------------------------------------------------------
+// A gloved hand + forearm. Built in a local frame where the palm wraps the grip
+// at the origin and the forearm tapers back toward the shooter (+Z). Positioned
+// + rotated per weapon so the player reads as actually holding the gun.
+function buildArm() {
+  const glove = PALETTE.glove();
+  const sleeve = PALETTE.sleeve();
+  const arm = new THREE.Group();
+  // back of the hand over the grip
+  arm.add(box(0.052, 0.055, 0.078, glove, 0, 0, 0));
+  // knuckle ridge
+  arm.add(box(0.058, 0.022, 0.05, glove, 0, 0.033, -0.012));
+  // curled fingers wrapping under/forward
+  arm.add(box(0.06, 0.032, 0.045, glove, 0, -0.03, -0.016));
+  // thumb on the inner side
+  arm.add(box(0.022, 0.036, 0.032, glove, -0.033, 0.004, 0.006));
+  // wrist cuff
+  arm.add(box(0.064, 0.064, 0.045, sleeve, 0, -0.004, 0.052));
+  // forearm tapering back toward the camera
+  const fore = cyl(0.034, 0.052, 0.3, sleeve, 12);
+  fore.rotation.x = Math.PI / 2; // +Y -> +Z
+  fore.position.set(0, -0.014, 0.205);
+  arm.add(fore);
+  return arm;
+}
+
+// Attach the gripping hands to a gun group (viewmodel only).
+function addHands(g, id) {
+  if (id === 'pistol') {
+    const r = buildArm();
+    r.position.set(0.005, -0.085, 0.075);
+    r.rotation.set(0.52, 0.12, 0.0);
+    g.add(r);
+    const l = buildArm();                 // support hand cupping under the grip
+    l.position.set(-0.03, -0.105, 0.045);
+    l.rotation.set(0.72, -0.32, 0.22);
+    l.scale.setScalar(0.95);
+    g.add(l);
+  } else {
+    const r = buildArm();                 // firing hand on the pistol grip
+    r.position.set(0.004, -0.085, 0.125);
+    r.rotation.set(0.6, 0.12, 0.0);
+    g.add(r);
+    const l = buildArm();                 // support hand on the handguard up front
+    l.position.set(0.0, -0.04, -0.235);
+    l.rotation.set(0.78, 0.05, 0.0);
+    g.add(l);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // public API
 // ---------------------------------------------------------------------------
 
-// First-person viewmodel: full detail, no shadows, drawn over the world.
+// First-person viewmodel: full detail + gripping hands, no shadows, drawn over
+// the world.
 export function makeViewModel(id) {
   const g = id === 'pistol' ? buildPistol(true) : buildRifle(true);
+  addHands(g, id);
   g.name = `viewmodel_${id}`;
   return asViewModel(g);
 }

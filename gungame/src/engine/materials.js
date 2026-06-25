@@ -73,6 +73,9 @@ export const PALETTE = {
   clothBlue:  () => mat({ color: 0x2b4f8e, rough: 0.85 }),
   clothRed:   () => mat({ color: 0x8e2b3a, rough: 0.85 }),
   gear:       () => mat({ color: 0x2a2e36, rough: 0.7, metal: 0.2 }),
+  // --- first-person hands ---
+  glove:      () => mat({ color: 0x32373f, rough: 0.5, metal: 0.15 }),
+  sleeve:     () => mat({ color: 0x5b6675, rough: 0.85 }),
   // --- guns (flat PBR) ---
   gunBody:    () => mat({ color: 0x23262c, rough: 0.5, metal: 0.6 }),
   gunPoly:    () => mat({ color: 0x3a3038, rough: 0.7, metal: 0.1 }),
