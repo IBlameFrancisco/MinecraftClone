@@ -15,7 +15,34 @@ export class Hud {
     this.scoreEl = document.getElementById('score');
     this.timerEl = document.getElementById('timer');
     this.abEl = [document.getElementById('ab0'), document.getElementById('ab1')];
+    this.radar = document.getElementById('radar'); this.rctx = this.radar ? this.radar.getContext('2d') : null;
     this._hmT = 0; this._toastT = 0; this._dmgT = 0;
+  }
+  // top-down radar; units: [{x,z,enemy}], rotated so the player always faces up
+  drawRadar(px, pz, yaw, units, half) {
+    const c = this.rctx; if (!c) return;
+    const S = 140, C = S / 2, R = C - 4, scale = R / half;
+    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+    c.clearRect(0, 0, S, S);
+    c.fillStyle = 'rgba(10,14,20,0.5)'; c.beginPath(); c.arc(C, C, R, 0, 6.2832); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.14)'; c.lineWidth = 1; c.stroke();
+    c.save(); c.beginPath(); c.arc(C, C, R, 0, 6.2832); c.clip();
+    for (const u of units) {
+      const dx = (u.x - px) * scale, dz = (u.z - pz) * scale;
+      const lf = -dx * sin - dz * cos, lr = dx * cos - dz * sin;
+      c.fillStyle = u.enemy ? '#ff5b5b' : '#36d1ff';
+      c.beginPath(); c.arc(C + lr, C - lf, 3, 0, 6.2832); c.fill();
+    }
+    c.restore();
+    c.fillStyle = '#ffd24a'; c.beginPath(); c.moveTo(C, C - 6); c.lineTo(C - 4, C + 5); c.lineTo(C + 4, C + 5); c.closePath(); c.fill();
+  }
+  scoreboard(show, match) {
+    const el = document.getElementById('scoreboard'); if (!el) return;
+    el.classList.toggle('show', show);
+    if (!show || !match) return;
+    document.getElementById('sbTitle').textContent = match.mode.name;
+    document.getElementById('sbRows').innerHTML = match.standings().map((r, i) =>
+      `<div class="row${r.you ? ' me' : ''}"><span><span class="rk">${i + 1}</span>${r.label}</span><span>${r.score}</span></div>`).join('');
   }
   setAbilities(abilities) {
     for (let i = 0; i < 2; i++) {

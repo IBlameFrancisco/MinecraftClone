@@ -172,6 +172,15 @@ document.getElementById('mpBtn').addEventListener('click', async (e) => {
   btn.textContent = 'CONNECTING…';
   try { await connectMP(url); } catch (err) { btn.textContent = 'CONNECT FAILED — RETRY'; console.warn('MP connect failed', err); }
 });
+
+// settings: mouse sensitivity + master volume
+const setSens = document.getElementById('setSens'), setVol = document.getElementById('setVol');
+setSens.addEventListener('input', () => { input.sensMul = parseFloat(setSens.value); });
+setVol.addEventListener('input', () => { audio.ensure(); if (audio.master) audio.master.gain.value = parseFloat(setVol.value); });
+
+// scoreboard: hold TAB
+addEventListener('keydown', (e) => { if (e.code === 'Tab' && game.playing) { e.preventDefault(); hud.scoreboard(true, match); } });
+addEventListener('keyup', (e) => { if (e.code === 'Tab') hud.scoreboard(false); });
 document.getElementById('rematchBtn').addEventListener('click', () => { endscreen.classList.remove('show'); startMatch(); });
 document.getElementById('menuBtn').addEventListener('click', () => { endscreen.classList.remove('show'); menu.classList.remove('hidden'); game.playing = false; });
 renderer.domElement.addEventListener('click', () => { if (game.playing && !input.locked) input.lock(); });
@@ -255,6 +264,9 @@ function frame(now) {
       if (abilities.timeStopT <= 0) bots.update(dt, playerObj());   // ZA WARUDO freezes the bots
       timestopEl.classList.toggle('show', abilities.timeStopT > 0);
       projectiles.update(dt);
+      const radarUnits = bots.list.filter((b) => b.alive).map((b) => ({ x: b.pos.x, z: b.pos.z, enemy: b.team !== match.playerTeam }));
+      if (net && net.connected) for (const r of net.remotes.values()) radarUnits.push({ x: r.target.x, z: r.target.z, enemy: r.state.team !== match.playerTeam });
+      hud.drawRadar(controller.pos.x, controller.pos.z, controller.yaw, radarUnits, arena.half);
     }
     fx.update(dt);
     hud.update(dt);

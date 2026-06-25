@@ -69,6 +69,17 @@
     #timestop.show { opacity: 1; }
     #timestop .za { position: absolute; left: 50%; top: 38%; transform: translateX(-50%); font-size: 46px; font-weight: 800;
       letter-spacing: 6px; color: #f4c542; text-shadow: 0 4px 30px rgba(0,0,0,0.6); opacity: 0.55; }
+    #radar { position: absolute; top: 14px; left: 16px; opacity: 0.92; }
+    #scoreboard { position: fixed; inset: 0; z-index: 22; display: none; align-items: center; justify-content: center; pointer-events: none; }
+    #scoreboard.show { display: flex; }
+    #scoreboard .sb { background: rgba(10,14,20,0.86); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 22px 30px; min-width: 380px; }
+    #scoreboard .sbT { text-align: center; font-size: 13px; letter-spacing: 4px; text-transform: uppercase; opacity: 0.55; margin-bottom: 14px; }
+    #scoreboard .row { display: flex; justify-content: space-between; padding: 7px 14px; border-radius: 8px; font-size: 18px; font-weight: 600; }
+    #scoreboard .row.me { background: rgba(54,209,255,0.14); color: #aee9ff; }
+    #scoreboard .row .rk { opacity: 0.5; margin-right: 12px; }
+    #settingsRow { margin-top: 18px; display: flex; gap: 30px; justify-content: center; font-size: 13px; opacity: 0.85; }
+    #settingsRow label { display: flex; flex-direction: column; gap: 6px; letter-spacing: 1px; text-transform: uppercase; font-size: 11px; opacity: 0.7; }
+    #settingsRow input[type=range] { pointer-events: auto; width: 150px; accent-color: var(--accent); }
 
     /* ---- mode / difficulty pickers ---- */
     .pickers { display: flex; gap: 36px; margin-top: 30px; }
@@ -136,6 +147,7 @@
     <div id="dmg"></div>
     <div id="score"><span class="you lbl">BLUE</span><span class="you" id="scoreYou">0</span><span class="vs">vs</span><span class="foe" id="scoreFoe">0</span><span class="foe lbl">RED</span></div>
     <div id="timer">5:00</div>
+    <canvas id="radar" width="140" height="140"></canvas>
     <div id="killfeed"></div>
     <div id="crosshair"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span><span class="dot"></span></div>
     <div id="hitmarker"><span class="l t"></span><span class="l b"></span><span class="l l"></span><span class="l r"></span></div>
@@ -156,6 +168,7 @@
 
   <div id="pause">PAUSED — click to resume</div>
   <div id="timestop"><div class="za">TOKI WO TOMARE</div></div>
+  <div id="scoreboard"><div class="sb"><div class="sbT" id="sbTitle">Standings</div><div id="sbRows"></div></div></div>
 
   <div id="menu">
     <h1>GUNGAME</h1>
@@ -180,6 +193,10 @@
     </div>
     <div id="loadoutRow"><div class="h">Loadout · Primary Weapon</div><div class="lchips" id="loadoutChips"></div></div>
     <div id="abilityRow"><div class="h">Abilities · pick two (Q / E)</div><div class="lchips" id="abilityChips"></div></div>
+    <div id="settingsRow">
+      <label>Sensitivity<input id="setSens" type="range" min="0.3" max="2.5" step="0.1" value="1" /></label>
+      <label>Volume<input id="setVol" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
+    </div>
     <button class="play" id="playBtn">PLAY</button>
     <div id="mpRow" style="margin-top: 14px; display: flex; gap: 8px; align-items: center; justify-content: center;">
       <input id="mpUrl" value="ws://localhost:8787" spellcheck="false"
