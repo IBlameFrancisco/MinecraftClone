@@ -10,7 +10,7 @@ export const TEX = {};      // TEX.ground = { map, normalMap, roughnessMap }, et
 export const ENV = { map: null, background: null };
 export const MODELS = { soldier: null };   // { scene, animations } once loaded
 
-const SETS = ['ground', 'concrete', 'wood', 'metal', 'rust'];
+const SETS = ['ground', 'wood', 'metal', 'rust'];
 
 function loadTex(loader, url, srgb) {
   return new Promise((res, rej) => loader.load(url, (t) => {
