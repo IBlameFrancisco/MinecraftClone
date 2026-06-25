@@ -4,6 +4,31 @@
 > over-the-top anime/sci-fi **ults** as the spectacle, **hero loadouts**, multiple modes,
 > **multiplayer**, and a **destructible-structure** world you can blow apart.
 
+## Build status — all milestones M1–M6 implemented ✅
+- **M1** match flow + TDM/FFA + smart bots (reaction/strafe/cover, Easy/Normal/Hard) + audio pass — done.
+- **M2** 11 primaries (hitscan/shotgun/rail/projectile/beam) + projectiles + loadout + Gun Game + voxel
+  destructible cover walls (sphere-carve) — done.
+- **M4** carving ults (Hollow Purple, Rasengan, Rasenshuriken, Cleave, Fūga) — done.
+- **M5** reality-benders (Black Hole, Portal, Sharingan, The World/time-stop) — done.
+- **M3** multiplayer **foundation** — a Node `ws` room server (`server/`) + browser net client with
+  remote-avatar interpolation; two clients sync live. NOTE: shipped as a dependency-light relay rather
+  than Colyseus so it runs + tests here; the protocol is shaped to migrate to a server-authoritative sim
+  with client prediction + lag compensation (the remaining "production netcode" work).
+- **M6** polish — minimap radar, TAB scoreboard, settings (sensitivity/volume) — done.
+
+Built in milestone order M1→M2→M4→M5→M3→M6 (abilities before multiplayer to front-load the
+highest-value, most-visible "cool" content; multiplayer is the riskiest and needs hosting).
+
+## How to run
+```bash
+cd gungame && npm install && npm run dev      # single-player: open the printed URL
+# multiplayer (optional, needs a Node host):
+cd gungame/server && npm install && npm start # ws://localhost:8787
+# then click CONNECT · MULTIPLAYER on the menu (default points at localhost:8787)
+```
+Controls: WASD move · Shift sprint · Ctrl crouch · Space jump · LMB fire · RMB ADS · R reload ·
+1/2 weapons · **Q/E abilities** · **TAB scoreboard**.
+
 ## Pillars
 - **Grounded base, absurd powers** — the contrast *is* the identity (milsim realism meets ZA WARUDO).
 - **Loud, destructive, readable** fights.
