@@ -15,6 +15,7 @@ import { Hud } from './ui/hud.js';
 import { Match, MODES, DIFFICULTY } from './game/match.js';
 import { Projectiles } from './world/projectiles.js';
 import { WEAPONS, GUN_LADDER } from './models/guns.js';
+import { Abilities, ABILITIES } from './player/abilities.js';
 
 const container = document.getElementById('app');
 const renderer = createRenderer(container);
@@ -37,12 +38,14 @@ const hud = new Hud();
 const controller = new Controller();
 const projectiles = new Projectiles(scene, fx);
 const weapons = new Weapons(camera, scene, fx, projectiles);
+const abilities = new Abilities();
 const bots = new Bots(scene, fx, arena);
 bots.targetMeshes = [arena.group];
 
 // --- player/game state ---
 const game = { playing: false, started: false, health: 100, respawnT: 0, fov: 78, baseFov: 78 };
 let pickedPrimary = 'rifle';
+let pickedAbilities = ['hollow', 'cleave'];
 
 // --- match framework ---
 const match = new Match({
@@ -50,14 +53,16 @@ const match = new Match({
   onStart: (mode, diff) => {
     bots.setup(mode, diff, match);
     projectiles.clear();
-    if (mode.ladder) { weapons.setGunGame(GUN_LADDER[0]); }
-    else weapons.setLoadout(pickedPrimary);
+    if (mode.ladder) { weapons.setGunGame(GUN_LADDER[0]); abilities.setLoadout(null, null); }
+    else { weapons.setLoadout(pickedPrimary); abilities.setLoadout(pickedAbilities[0], pickedAbilities[1]); }
+    hud.setAbilities(abilities);
     spawnPlayer(true);
   },
   onEnd: (m, winner) => showEndScreen(m, winner),
 });
 
 function playerObj() { return { pos: controller.pos, eye: controller.eye, alive: controller.alive, team: match.playerTeam }; }
+function abilityCtx() { return { camera, bots: bots.list, ownerTeam: match.playerTeam, projectiles, carve: (p, r) => arena.carve(p, r), fx, audio, damageBot: damageBotFromPlayer, hud }; }
 
 function spawnPlayer(fresh) {
   // farthest spawn from the nearest hostile bot
@@ -142,6 +147,19 @@ for (const id of Object.keys(WEAPONS).filter((k) => k !== 'pistol')) {
   loadoutChips.appendChild(c);
 }
 
+// build the abilities strip (pick exactly two — keeps the two most-recently chosen)
+const abilityChips = document.getElementById('abilityChips');
+for (const id of Object.keys(ABILITIES)) {
+  const c = document.createElement('div'); c.className = 'lchip' + (pickedAbilities.includes(id) ? ' sel' : ''); c.dataset.id = id; c.textContent = ABILITIES[id].name;
+  c.addEventListener('click', () => {
+    if (pickedAbilities.includes(id)) pickedAbilities = pickedAbilities.filter((x) => x !== id);
+    else { pickedAbilities.push(id); if (pickedAbilities.length > 2) pickedAbilities.shift(); }
+    abilityChips.querySelectorAll('.lchip').forEach((x) => x.classList.toggle('sel', pickedAbilities.includes(x.dataset.id)));
+    audio.ensure(); audio.ui();
+  });
+  abilityChips.appendChild(c);
+}
+
 document.getElementById('playBtn').addEventListener('click', () => { audio.ensure(); startMatch(); });
 document.getElementById('rematchBtn').addEventListener('click', () => { endscreen.classList.remove('show'); startMatch(); });
 document.getElementById('menuBtn').addEventListener('click', () => { endscreen.classList.remove('show'); menu.classList.remove('hidden'); game.playing = false; });
@@ -197,6 +215,8 @@ function frame(now) {
       weapons.setTargets([arena.group, ...hostile]);
       projectiles.setTargets([arena.group], hostile);
       weapons.update(dt, input, controller);
+      if (controller.alive) abilities.update(dt, input, abilityCtx());
+      hud.abilityTick(abilities);
       bots.update(dt, playerObj());
       projectiles.update(dt);
     }
@@ -214,7 +234,7 @@ requestAnimationFrame(frame);
 
 // test harness
 window.__gg = {
-  scene, camera, controller, weapons, bots, arena, game, input, post, match, projectiles, THREE,
+  scene, camera, controller, weapons, bots, arena, game, input, post, match, projectiles, abilities, abilityCtx, ABILITIES, THREE,
   __start: (mode = 'tdm', diff = 'normal') => { audio.ensure(); pickedMode = mode; pickedDiff = diff; startMatch(); },
   __aim: (yaw, pitch) => { controller.yaw = yaw; controller.pitch = pitch; },
   __shoot: () => { weapons.setTargets([arena.group, ...bots.hitMeshesHostileTo(match.playerTeam)]); controller.applyCamera(camera); scene.updateMatrixWorld(true); weapons.testFire(controller); },

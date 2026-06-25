@@ -16,7 +16,7 @@ export class Projectiles {
 
   spawn(pos, dir, spec, ownerTeam) {
     const col = spec.color || 0xffaa44;
-    const r = spec.proj === 'rocket' ? 0.16 : spec.proj === 'homing' ? 0.14 : 0.1;
+    const r = spec.size || (spec.proj === 'rocket' ? 0.16 : spec.proj === 'homing' ? 0.14 : 0.1);
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10),
       new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.7, metalness: 0.2, roughness: 0.4, fog: false }));
     mesh.add(new THREE.PointLight(col, 1.3, 7));

@@ -77,6 +77,24 @@ export class Audio {
   reload() { this._tone(300, 300, 0.03, 0.12, 'square'); setTimeout(() => this._tone(420, 420, 0.03, 0.12, 'square'), 180); }
   kill() { this._tone(700, 1100, 0.08, 0.2, 'square'); setTimeout(() => this._tone(1100, 1500, 0.1, 0.18, 'square'), 70); }
   ui() { this._tone(520, 660, 0.05, 0.12, 'triangle'); }
+  // distinctive synthesized stingers for each ability ult
+  ability(kind) {
+    if (!this.ctx) return;
+    switch (kind) {
+      case 'hollow': this._tone(120, 38, 0.8, 0.5, 'sawtooth'); this._noise(0.7, 280, 0.6, 0.45, 'lowpass'); this._tone(900, 180, 0.6, 0.22, 'sine'); break;
+      case 'rasengan': this._noise(0.55, 1900, 3.5, 0.32, 'bandpass'); this._tone(380, 950, 0.32, 0.2, 'sine'); break;
+      case 'rasenshuriken': this._noise(0.5, 2700, 4, 0.38, 'bandpass'); this._tone(950, 280, 0.45, 0.22, 'triangle'); break;
+      case 'cleave': this._noise(0.16, 5200, 1, 0.42, 'highpass'); this._tone(1300, 200, 0.18, 0.26, 'sawtooth'); break;
+      case 'fuga': this._noise(0.55, 480, 0.6, 0.48, 'lowpass'); this._tone(170, 920, 0.45, 0.26, 'sawtooth'); break;
+      case 'blackhole': this._tone(58, 28, 1.3, 0.42, 'sine'); this._noise(1.1, 190, 0.6, 0.3, 'lowpass'); break;
+      case 'timestop': this._tone(950, 55, 0.7, 0.38, 'sine'); this._noise(0.3, 1200, 2, 0.2, 'bandpass'); break;
+      case 'stand': this._tone(280, 280, 0.1, 0.32, 'square'); setTimeout(() => this._tone(360, 360, 0.1, 0.28, 'square'), 90); break;
+      case 'portal': this._tone(700, 1500, 0.28, 0.22, 'sine'); break;
+      case 'sharingan': this._tone(520, 520, 0.35, 0.22, 'triangle'); this._noise(0.3, 900, 2, 0.15, 'bandpass'); break;
+      default: this._tone(420, 820, 0.22, 0.2, 'sine');
+    }
+    this._duckMusic();
+  }
 
   // --- announcer: short synthesized stingers ---
   announce(kind) {

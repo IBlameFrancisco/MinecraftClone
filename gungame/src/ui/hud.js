@@ -14,7 +14,24 @@ export class Hud {
     this.dmg = document.getElementById('dmg');
     this.scoreEl = document.getElementById('score');
     this.timerEl = document.getElementById('timer');
+    this.abEl = [document.getElementById('ab0'), document.getElementById('ab1')];
     this._hmT = 0; this._toastT = 0; this._dmgT = 0;
+  }
+  setAbilities(abilities) {
+    for (let i = 0; i < 2; i++) {
+      const el = this.abEl[i]; if (!el) continue;
+      const name = abilities.slotName(i);
+      el.style.display = name ? 'flex' : 'none';
+      el.querySelector('.nm').textContent = name;
+    }
+  }
+  abilityTick(abilities) {
+    for (let i = 0; i < 2; i++) {
+      const el = this.abEl[i]; if (!el || el.style.display === 'none') continue;
+      const f = abilities.cdFrac(i);
+      el.querySelector('.cool').style.height = (f * 100) + '%';
+      el.classList.toggle('ready', f <= 0);
+    }
   }
   setHealth(hp) {
     hp = Math.max(0, Math.round(hp));
